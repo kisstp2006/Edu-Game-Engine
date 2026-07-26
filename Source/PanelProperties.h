@@ -10,7 +10,6 @@
 
 #include "ShowTextureDlg.h"
 #include "SelectResourceDlg.h"
-#include "CreateNewMeshDlg.h"
 
 class GameObject;
 class Component;
@@ -42,6 +41,7 @@ class SkyboxRollout;
 
 class Texture2D;
 class Framebuffer;
+namespace EGE { struct EditorAssetSelection; }
 
 class PanelProperties : public Panel
 {
@@ -59,6 +59,7 @@ public:
 
 	void Draw() override;
 	void ResetProjectState();
+	void OnEditorSelectionChanged();
 
 	UID PickResource(UID resource, int type = -1);
 	UID PickResourceModal(int type);
@@ -92,10 +93,14 @@ private:
     UID TextureButton(ResourceTexture* texture, ResourceMesh* mesh, const char* name, int uniqueId, bool& modified);
 	void DrawAnimationComponent(ComponentAnimation * component);
 	void DrawRootMotionComponent(ComponentRootMotion * component);
+	void DrawAssetSelection(const EGE::EditorAssetSelection& asset);
+	void DrawAssetResourceDetails(Resource& resource);
+	Resource* AcquireInspectedAssetResource(
+		const EGE::EditorAssetSelection& asset);
+	void ReleaseInspectedAssetResource();
     void DrawMaterialResource(ResourceMaterial* material, ResourceMesh* mesh);
     UID DrawResourceType(Resource::Type type, bool opened);
     void DrawMesh(const ResourceMesh* mesh);
-    UID CreateNewMesh();
 
 private:
     typedef std::unique_ptr<PerlinProperties> PerlinPtr;
@@ -114,7 +119,8 @@ private:
 
     ShowTextureDlg      show_texture;
     SelectResourceDlg   selectTexture;
-    CreateNewMeshDlg    newMeshDlg;
+	UID                  inspectedAssetUid = 0;
+	bool                 ownsInspectedAssetReference = false;
 
 };
 

@@ -1,5 +1,6 @@
 #include "PanelProperties.h"
 #include "Application.h"
+#include "EditorAssetSelection.h"
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include "GameObject.h"
@@ -37,7 +38,7 @@
 #include "ResourceStateMachine.h"
 #include "ResourceAudio.h"
 #include "ResourceAnimation.h"
-#include "PanelResources.h"
+#include "ResourceModel.h"
 #include "PanelGOTree.h"
 #include "PerlinProperties.h"
 #include "Viewport.h"
@@ -60,6 +61,8 @@
 
 #include <list>
 #include <algorithm>
+#include <cstdio>
+#include <filesystem>
 #include <variant>
 
 
@@ -69,6 +72,87 @@ using namespace std;
 
 #undef min
 #undef max
+
+namespace
+{
+	std::string FormatAssetBytes(std::uintmax_t bytes)
+	{
+		constexpr double kilobyte = 1024.0;
+		constexpr double megabyte = kilobyte * 1024.0;
+		char buffer[32] = {};
+		if (bytes >= static_cast<std::uintmax_t>(megabyte))
+		{
+			std::snprintf(
+				buffer,
+				sizeof(buffer),
+				"%.1f MB",
+				bytes / megabyte);
+		}
+		else if (bytes >= static_cast<std::uintmax_t>(kilobyte))
+		{
+			std::snprintf(
+				buffer,
+				sizeof(buffer),
+				"%.1f KB",
+				bytes / kilobyte);
+		}
+		else
+		{
+			std::snprintf(
+				buffer,
+				sizeof(buffer),
+				"%llu B",
+				static_cast<unsigned long long>(bytes));
+		}
+		return buffer;
+	}
+
+	const char* TextureTypeName(TextureType type)
+	{
+		switch (type)
+		{
+		case TextureType_1D: return "1D";
+		case TextureType_2D: return "2D";
+		case TextureType_3D: return "3D";
+		case TextureType_Cube: return "Cubemap";
+		}
+		return "Unknown";
+	}
+
+	const char* AssetRoleDescription(EGE::AssetKind kind)
+	{
+		switch (kind)
+		{
+		case EGE::AssetKind::Folder:
+			return "Project asset directory";
+		case EGE::AssetKind::Scene:
+			return "Serialized scene source";
+		case EGE::AssetKind::Model:
+			return "3D model source";
+		case EGE::AssetKind::Mesh:
+			return "Engine mesh asset";
+		case EGE::AssetKind::Texture:
+			return "Image or texture source";
+		case EGE::AssetKind::Material:
+			return "Engine material asset";
+		case EGE::AssetKind::Audio:
+			return "Audio source";
+		case EGE::AssetKind::Animation:
+			return "Animation source or clip";
+		case EGE::AssetKind::StateMachine:
+			return "Animation state machine";
+		case EGE::AssetKind::Shader:
+			return "GPU shader source";
+		case EGE::AssetKind::Font:
+			return "Font source";
+		case EGE::AssetKind::Data:
+			return "Project data file";
+		case EGE::AssetKind::Unknown:
+			return "Unrecognized project file";
+		}
+		return "Project asset";
+	}
+}
 
 // ---------------------------------------------------------
 PanelProperties::PanelProperties() : Panel("Properties")
@@ -83,17 +167,30 @@ PanelProperties::PanelProperties() : Panel("Properties")
 
 // ---------------------------------------------------------
 PanelProperties::~PanelProperties()
-{}
+{
+	ReleaseInspectedAssetResource();
+}
 
 void PanelProperties::ResetProjectState()
 {
+	ReleaseInspectedAssetResource();
 	show_texture.Clear();
 	selectTexture.ClearSelection();
+}
+
+void PanelProperties::OnEditorSelectionChanged()
+{
+	ReleaseInspectedAssetResource();
 }
 
 // ---------------------------------------------------------
 void PanelProperties::Draw()
 {
+	const ModuleEditor::SelectionVariant& selection =
+		App->editor->GetSelection();
+	if (!std::holds_alternative<EGE::EditorAssetSelection>(selection))
+		ReleaseInspectedAssetResource();
+
     std::visit(overload {
         [this](GameObject* go)      { DrawGameObject(go, nullptr);      },
         [this](DirLight* light)     { DrawDirLight(light);     },
@@ -105,11 +202,404 @@ void PanelProperties::Draw()
         [this](LocalIBLLight* light)   { DrawLocalIBLLight(light); },
         [this](IBLData* sky)         { skybox->DrawProperties(sky);},
         [this](ComponentMeshRenderer* renderer) { DrawGameObject(renderer->GetGameObject(), renderer); },
-        }, App->editor->GetSelection());
+		[this](const EGE::EditorAssetSelection& asset)
+			{ DrawAssetSelection(asset); },
+        }, selection);
 
     show_texture.Display();
     selectTexture.Display();
-    newMeshDlg.Display();
+}
+
+void PanelProperties::DrawAssetSelection(
+	const EGE::EditorAssetSelection& asset)
+{
+	const std::filesystem::path relativePath(asset.sourcePath);
+	const std::filesystem::path absolutePath =
+		App->fs->GetProjectRoot() / relativePath;
+	const std::string displayName =
+		relativePath.filename().string();
+
+	ImGui::PushStyleColor(
+		ImGuiCol_ChildBg,
+		ImVec4(0.055f, 0.067f, 0.088f, 0.92f));
+	if (ImGui::BeginChild(
+			"##AssetInspectorHeader",
+			ImVec2(0.0f, 112.0f),
+			true))
+	{
+		ImGui::TextColored(
+			ImVec4(0.42f, 0.76f, 0.98f, 1.0f),
+			"%s",
+			EGE::AssetBrowserModel::GetKindName(asset.kind));
+		ImGui::TextWrapped("%s", displayName.c_str());
+		ImGui::Spacing();
+		ImGui::TextDisabled("%s", AssetRoleDescription(asset.kind));
+	}
+	ImGui::EndChild();
+	ImGui::PopStyleColor();
+
+	ImGui::Spacing();
+	if (ImGui::CollapsingHeader(
+			"Source",
+			ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		ImGui::TextDisabled("Project path");
+		ImGui::TextWrapped("%s", asset.sourcePath.c_str());
+		if (ImGui::SmallButton("Copy path"))
+			ImGui::SetClipboardText(asset.sourcePath.c_str());
+
+		std::error_code fileError;
+		if (asset.directory)
+		{
+			std::size_t folderCount = 0;
+			std::size_t fileCount = 0;
+			std::filesystem::directory_iterator iterator(
+				absolutePath,
+				std::filesystem::directory_options::skip_permission_denied,
+				fileError);
+			if (!fileError)
+			{
+				for (const std::filesystem::directory_entry& entry : iterator)
+				{
+					std::error_code entryError;
+					if (entry.is_directory(entryError))
+						++folderCount;
+					else if (entry.is_regular_file(entryError))
+						++fileCount;
+				}
+			}
+			ImGui::Text("Folders: %zu", folderCount);
+			ImGui::Text("Assets: %zu", fileCount);
+		}
+		else if (std::filesystem::is_regular_file(
+					absolutePath, fileError))
+		{
+			const std::uintmax_t size =
+				std::filesystem::file_size(absolutePath, fileError);
+			if (!fileError)
+				ImGui::Text(
+					"File size: %s",
+					FormatAssetBytes(size).c_str());
+			ImGui::Text(
+				"Extension: %s",
+				relativePath.extension().string().c_str());
+		}
+		else
+		{
+			ImGui::TextColored(
+				ImVec4(0.96f, 0.43f, 0.43f, 1.0f),
+				"The source file is no longer available.");
+		}
+	}
+
+	if (asset.directory)
+	{
+		ReleaseInspectedAssetResource();
+		return;
+	}
+
+	const bool hasDedicatedEditor =
+		asset.kind == EGE::AssetKind::Material ||
+		asset.kind == EGE::AssetKind::StateMachine ||
+		asset.kind == EGE::AssetKind::Mesh;
+	if (const Resource* primary =
+			App->resources->Get(asset.primaryResource);
+		hasDedicatedEditor && primary &&
+		(primary->GetType() == Resource::material ||
+		 primary->GetType() == Resource::state_machine ||
+		 primary->GetType() == Resource::mesh))
+	{
+		if (ImGui::Button(
+				"Open Asset Editor", ImVec2(-1.0f, 32.0f)))
+		{
+			App->editor->OpenAssetEditor(asset);
+		}
+		ImGui::Spacing();
+	}
+
+	if (ImGui::CollapsingHeader(
+			"Engine Resources",
+			ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		if (asset.linkedResources.empty())
+		{
+			ImGui::TextDisabled(
+				"No engine resource is linked to this source.");
+			switch (asset.kind)
+			{
+			case EGE::AssetKind::Model:
+			case EGE::AssetKind::Texture:
+			case EGE::AssetKind::Audio:
+			case EGE::AssetKind::Animation:
+				ImGui::TextWrapped(
+					"Use Import in the Asset panel to create its "
+					"runtime resource.");
+				break;
+			default:
+				break;
+			}
+		}
+		else
+		{
+			ImGui::Text(
+				"%zu linked resource(s)",
+				asset.linkedResources.size());
+			for (UID uid : asset.linkedResources)
+			{
+				const Resource* resource = App->resources->Get(uid);
+				if (!resource)
+					continue;
+				ImGui::PushID(static_cast<int>(uid));
+				ImGui::BulletText(
+					"%s  |  %s  |  UID %llu",
+					resource->GetUserResName(),
+					resource->GetTypeStr(),
+					resource->GetUID());
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::BeginTooltip();
+					ImGui::Text(
+						"Library: %s",
+						resource->GetExportedFile());
+					ImGui::EndTooltip();
+				}
+				ImGui::PopID();
+			}
+		}
+	}
+
+	if (Resource* resource = AcquireInspectedAssetResource(asset))
+		DrawAssetResourceDetails(*resource);
+}
+
+Resource* PanelProperties::AcquireInspectedAssetResource(
+	const EGE::EditorAssetSelection& asset)
+{
+	if (asset.primaryResource == 0)
+	{
+		ReleaseInspectedAssetResource();
+		return nullptr;
+	}
+
+	if (inspectedAssetUid != asset.primaryResource)
+	{
+		ReleaseInspectedAssetResource();
+		inspectedAssetUid = asset.primaryResource;
+		Resource* resource =
+			App->resources->Get(inspectedAssetUid);
+		if (resource && resource->GetType() != Resource::audio)
+		{
+			ownsInspectedAssetReference =
+				resource->LoadToMemory();
+		}
+	}
+
+	Resource* resource = App->resources->Get(inspectedAssetUid);
+	if (!resource)
+		ReleaseInspectedAssetResource();
+	return resource;
+}
+
+void PanelProperties::ReleaseInspectedAssetResource()
+{
+	if (ownsInspectedAssetReference &&
+		inspectedAssetUid != 0 &&
+		App &&
+		App->resources)
+	{
+		if (Resource* resource =
+				App->resources->Get(inspectedAssetUid))
+		{
+			resource->Release();
+		}
+	}
+	inspectedAssetUid = 0;
+	ownsInspectedAssetReference = false;
+}
+
+void PanelProperties::DrawAssetResourceDetails(Resource& resource)
+{
+	if (!ImGui::CollapsingHeader(
+			"Runtime Details",
+			ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		return;
+	}
+
+	ImGui::Text("UID: %llu", resource.GetUID());
+	ImGui::Text("Type: %s", resource.GetTypeStr());
+	ImGui::TextWrapped(
+		"Library: %s",
+		resource.GetExportedFile());
+	ImGui::Text(
+		"Memory: %s",
+		resource.IsLoadedToMemory() ? "Loaded" : "Not loaded");
+	ImGui::Separator();
+
+	switch (resource.GetType())
+	{
+	case Resource::texture:
+	{
+		ResourceTexture& texture =
+			static_cast<ResourceTexture&>(resource);
+		const TextureMetadata& metadata = texture.GetMetadata();
+		ImGui::Text(
+			"Dimensions: %u x %u x %u",
+			metadata.width,
+			metadata.height,
+			std::max(1u, metadata.depth));
+		ImGui::Text("Texture type: %s", TextureTypeName(metadata.texType));
+		ImGui::Text("Format: %s", texture.GetFormatStr());
+		ImGui::Text("Mip levels: %u", metadata.mipCount);
+		ImGui::Text(
+			"GPU size: %s",
+			FormatAssetBytes(metadata.memSize).c_str());
+		ImGui::Text(
+			"Color space: %s",
+			texture.GetColorSpace() == ColorSpace_gamma
+				? "sRGB"
+				: "Linear");
+
+		if (texture.GetID() != 0 &&
+			metadata.width > 0 &&
+			metadata.height > 0)
+		{
+			ImGui::Spacing();
+			const float available =
+				std::min(260.0f, ImGui::GetContentRegionAvail().x);
+			const float aspect =
+				static_cast<float>(metadata.height) /
+				static_cast<float>(metadata.width);
+			ImGui::Image(
+				ImTextureID(static_cast<size_t>(texture.GetID())),
+				ImVec2(
+					available,
+					std::clamp(
+						available * aspect,
+						48.0f,
+						220.0f)),
+				ImVec2(0.0f, 1.0f),
+				ImVec2(1.0f, 0.0f));
+		}
+		break;
+	}
+	case Resource::mesh:
+	{
+		const ResourceMesh& mesh =
+			static_cast<const ResourceMesh&>(resource);
+		ImGui::Text("Vertices: %u", mesh.GetNumVertices());
+		ImGui::Text("Indices: %u", mesh.GetNumIndices());
+		ImGui::Text("Triangles: %u", mesh.GetNumIndices() / 3);
+		ImGui::Text(
+			"Morph targets: %u",
+			mesh.GetNumMorphTargets());
+		ImGui::Text(
+			"Static mesh: %s",
+			mesh.static_mesh ? "Yes" : "No");
+		ImGui::Text(
+			"Bounds min: %.2f, %.2f, %.2f",
+			mesh.bbox.minPoint.x,
+			mesh.bbox.minPoint.y,
+			mesh.bbox.minPoint.z);
+		ImGui::Text(
+			"Bounds max: %.2f, %.2f, %.2f",
+			mesh.bbox.maxPoint.x,
+			mesh.bbox.maxPoint.y,
+			mesh.bbox.maxPoint.z);
+		break;
+	}
+	case Resource::model:
+	{
+		const ResourceModel& model =
+			static_cast<const ResourceModel&>(resource);
+		unsigned int rendererCount = 0;
+		for (unsigned int index = 0;
+			index < model.GetNumNodes();
+			++index)
+		{
+			rendererCount += static_cast<unsigned int>(
+				model.GetNode(index).renderers.size());
+		}
+		ImGui::Text("Nodes: %u", model.GetNumNodes());
+		ImGui::Text("Mesh renderers: %u", rendererCount);
+		ImGui::Text("Skins: %u", model.GetNumSkins());
+		break;
+	}
+	case Resource::material:
+	{
+		const ResourceMaterial& material =
+			static_cast<const ResourceMaterial&>(resource);
+		ImGui::Text(
+			"Workflow: %s",
+			material.GetWorkFlow() == MetallicRoughness
+				? "Metallic / Roughness"
+				: "Specular / Glossiness");
+		ImGui::Text(
+			"Double sided: %s",
+			material.GetDoubleSided() ? "Yes" : "No");
+		ImGui::Text(
+			"Alpha test: %.3f",
+			material.GetAlphaTest());
+		ImGui::Text(
+			"Planar reflections: %s",
+			material.GetPlanarReflections() ? "Enabled" : "Disabled");
+		ImGui::Text("Feature mask: 0x%X", material.GetMask());
+		if (material.GetWorkFlow() == MetallicRoughness)
+		{
+			const MetallicRoughData& data =
+				material.GetMetallicRoughData();
+			ImGui::Text("Metalness: %.3f", data.metalness);
+			ImGui::Text("Roughness: %.3f", data.roughness);
+		}
+		else
+		{
+			const SpecularGlossData& data =
+				material.GetSpecularGlossData();
+			ImGui::Text("Smoothness: %.3f", data.smoothness);
+			ImGui::Text(
+				"Specular intensity: %.3f",
+				data.specular_intensity);
+		}
+		break;
+	}
+	case Resource::audio:
+	{
+		const ResourceAudio& audio =
+			static_cast<const ResourceAudio&>(resource);
+		ImGui::Text("Playback format: %s", audio.GetFormatStr());
+		ImGui::TextDisabled(
+			"Audio is not loaded just for Inspector preview.");
+		break;
+	}
+	case Resource::animation:
+	{
+		const ResourceAnimation& animation =
+			static_cast<const ResourceAnimation&>(resource);
+		ImGui::Text("Duration: %.3f", animation.GetDuration());
+		ImGui::Text("Channels: %u", animation.GetNumChannels());
+		ImGui::Text(
+			"Morph channels: %u",
+			animation.GetNumMorphChannels());
+		break;
+	}
+	case Resource::state_machine:
+	{
+		const ResourceStateMachine& stateMachine =
+			static_cast<const ResourceStateMachine&>(resource);
+		ImGui::Text("Clips: %u", stateMachine.GetNumClips());
+		ImGui::Text("Nodes: %u", stateMachine.GetNumNodes());
+		ImGui::Text(
+			"Transitions: %u",
+			stateMachine.GetNumTransitions());
+		ImGui::Text(
+			"Default node: %u",
+			stateMachine.GetDefaultNode());
+		break;
+	}
+	case Resource::unknown:
+		ImGui::TextDisabled("No runtime details are available.");
+		break;
+	}
 }
 
 // ---------------------------------------------------------
@@ -677,16 +1167,6 @@ UID PanelProperties::PickResourceModal(int type)
     return OpenResourceModal(type, tmp);
 }
 
-UID PanelProperties::CreateNewMesh()
-{
-    if (ImGui::Button("Create New Mesh"))
-    {
-        newMeshDlg.Open();
-    }
-
-    return newMeshDlg.getMesh();
-}
-
 UID PanelProperties::OpenResourceModal(int type, const char* popup_name)
 {
 	UID new_res = 0;
@@ -918,14 +1398,6 @@ void PanelProperties::DrawMeshRendererComponent(ComponentMeshRenderer* component
         component->SetMeshRes(new_res);
     }
 
-    new_res = CreateNewMesh();
-
-    if (new_res > 0)
-    {
-        component->SetMeshRes(new_res);
-    }
-
-
     ImGui::Separator();
 
     const char* names[RENDER_COUNT] = { "Opaque", "Transparent" };
@@ -957,19 +1429,6 @@ void PanelProperties::DrawMeshRendererComponent(ComponentMeshRenderer* component
     ResourceMaterial* mat_res = component->GetMaterialRes();
 
     new_res = PickResourceModal(Resource::material);
-
-    ImGui::SameLine();
-    if (ImGui::Button("New material"))
-    {
-        ResourceMaterial* material = static_cast<ResourceMaterial*>(App->resources->CreateNewResource(Resource::material, 0));
-
-        bool save_ok = material->Save();
-
-        if (save_ok)
-        {
-            new_res = material->GetUID();
-        }
-    }
 
     if(new_res > 0)
     {
@@ -1455,21 +1914,6 @@ void PanelProperties::DrawAnimationComponent(ComponentAnimation* component)
 
     UID new_res = PickResourceModal(Resource::state_machine);
 
-    ImGui::SameLine();
-    if(ImGui::Button("New State machine"))
-    {
-        ResourceStateMachine* state_machine = static_cast<ResourceStateMachine*>(App->resources->CreateNewResource(Resource::state_machine, 0));
-        App->resources->SaveResources();
-
-        bool save_ok = state_machine->Save();
-
-        if(save_ok)
-        {
-            new_res = state_machine->GetUID();
-        }
-    }
-
-
     bool debug_draw = component->GetDebugDraw();
     if(ImGui::Checkbox("Debug draw", &debug_draw))
     {
@@ -1796,19 +2240,6 @@ void PanelProperties::DrawGrassComponent(ComponentGrass* component)
     ResourceMaterial* mat_res = component->GetMaterial();
 
     new_res = PickResourceModal(Resource::material);
-
-    ImGui::SameLine();
-    if(ImGui::Button("New material"))
-    {
-        ResourceMaterial* material = static_cast<ResourceMaterial*>(App->resources->CreateNewResource(Resource::material, 0));
-
-        bool save_ok = material->Save();
-
-        if(save_ok)
-        {
-            new_res = material->GetUID();
-        }
-    }
 
     ImGui::Separator();
 

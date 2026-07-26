@@ -89,6 +89,11 @@ bool ResourceStateMachine::LoadInMemory()
                 read_stream >> transition.blend;
             }
 
+			if (!read_stream.eof())
+				read_stream >> default_node;
+			else
+				default_node = 0;
+
             for (uint i = 0; i < clips.size(); ++i)
             {
                 if (clips[i].resource != 0)
@@ -210,6 +215,8 @@ void ResourceStateMachine::SaveToStream(simple::mem_ostream<std::true_type>& wri
         }
         write_stream << transition.blend;
     }
+
+	write_stream << default_node;
 }
 
 // ---------------------------------------------------------

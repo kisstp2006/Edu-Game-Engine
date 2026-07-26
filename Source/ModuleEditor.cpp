@@ -17,14 +17,16 @@
 #include "PanelProperties.h"
 #include "PanelConfiguration.h"
 #include "PanelAbout.h"
-#include "PanelResources.h"
+#include "PanelAssets.h"
 #include "Event.h"
 #include "Project/Project.h"
 #include "Settings/SettingsService.h"
 #include "Settings/SettingsStore.h"
 #include "EditorTheme.h"
+#include "AssetEditorManager.h"
 
 #include "imgui_node_editor.h"
+#include "imgui_internal.h"
 
 #include <filesystem>
 #include <string.h>
@@ -74,7 +76,6 @@ bool ModuleEditor::Init(Config* config)
 
 	// create all panels
 	
-    tab_panels[TabPanelBottom].name = "Output";
     tab_panels[TabPanelLeft].name = "Hierarchy";
     tab_panels[TabPanelRight].name = "Inspector";
 
@@ -83,7 +84,8 @@ bool ModuleEditor::Init(Config* config)
 	tab_panels[TabPanelRight].panels.push_back(props = new PanelProperties());
 	tab_panels[TabPanelRight].panels.push_back(conf = new PanelConfiguration());
 	tab_panels[TabPanelRight].panels.push_back(about = new PanelAbout());
-	tab_panels[TabPanelLeft].panels.push_back(res = new PanelResources());
+	tab_panels[TabPanelBottom].panels.push_back(assets = new PanelAssets());
+	assetEditorManager = std::make_unique<EGE::AssetEditorManager>();
 
 	return true;
 }
@@ -143,7 +145,13 @@ update_status ModuleEditor::Update(float dt)
 		ImGuiIO& io = ImGui::GetIO();
 		if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
 		{
-			ImGuiID dockspace_id = ImGui::GetID("DockSpace");
+			ImGuiID dockspace_id = ImGui::GetID("EditorDockSpaceV2");
+			if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr)
+			{
+				BuildDefaultDockLayout(
+					dockspace_id,
+					ImGui::GetContentRegionAvail());
+			}
 			ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), 0);
 		}
 	}
@@ -229,36 +237,11 @@ update_status ModuleEditor::Update(float dt)
 	DrawSettingsWindow(show_project_settings, false);
 	DrawSettingsWindow(show_editor_settings, true);
 
-    for(uint i=0; i< TabPanelCount; ++i)
-    {
-        const TabPanel& tab = tab_panels[i];
-        ImGui::SetNextWindowPos(ImVec2((float)tab.posx, (float)tab.posy), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2((float)tab.width, (float)tab.height), ImGuiCond_FirstUseEver);
-        if(ImGui::Begin(tab.name, nullptr, ImGuiWindowFlags_NoFocusOnAppearing))
-        {
-            if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_None))
-            {
-                // Draw all active panels
-                for (vector<Panel*>::const_iterator it = tab.panels.begin(); it != tab.panels.end(); ++it)
-                {
-                    Panel* panel = (*it);
-
-                    if (ImGui::BeginTabItem(panel->GetName()))
-                    {
-                        if (panel->IsActive())
-                        {
-                            panel->Draw();
-                        }
-
-                        ImGui::EndTabItem();
-                    }
-                }
-
-                ImGui::EndTabBar();
-            }           
-        }
-		ImGui::End();
-	}
+	DrawPanelGroup(TabPanelLeft);
+	DrawPanelGroup(TabPanelRight);
+	DrawStandalonePanels(TabPanelBottom);
+	if (assetEditorManager)
+		assetEditorManager->Draw();
 
     if (file_dialog == opened)
         LoadFile((file_dialog_filter.length() > 0) ? file_dialog_filter.c_str() : nullptr);
@@ -273,6 +256,112 @@ update_status ModuleEditor::Update(float dt)
     }
 
 	return ret;
+}
+
+void ModuleEditor::DrawPanelGroup(TabPanelEnum group)
+{
+	const TabPanel& panelGroup = tab_panels[group];
+	ImGui::SetNextWindowPos(
+		ImVec2(
+			static_cast<float>(panelGroup.posx),
+			static_cast<float>(panelGroup.posy)),
+		ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(
+		ImVec2(
+			static_cast<float>(panelGroup.width),
+			static_cast<float>(panelGroup.height)),
+		ImGuiCond_FirstUseEver);
+
+	if (ImGui::Begin(
+			panelGroup.name,
+			nullptr,
+			ImGuiWindowFlags_NoFocusOnAppearing))
+	{
+		if (ImGui::BeginTabBar("##PanelTabs"))
+		{
+			for (Panel* panel : panelGroup.panels)
+			{
+				if (ImGui::BeginTabItem(panel->GetName()))
+				{
+					if (panel->IsActive())
+						panel->Draw();
+					ImGui::EndTabItem();
+				}
+			}
+			ImGui::EndTabBar();
+		}
+	}
+	ImGui::End();
+}
+
+void ModuleEditor::DrawStandalonePanels(TabPanelEnum group)
+{
+	const TabPanel& panelGroup = tab_panels[group];
+	for (Panel* panel : panelGroup.panels)
+	{
+		ImGui::SetNextWindowPos(
+			ImVec2(
+				static_cast<float>(panelGroup.posx),
+				static_cast<float>(panelGroup.posy)),
+			ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize(
+			ImVec2(
+				static_cast<float>(panelGroup.width),
+				static_cast<float>(panelGroup.height)),
+			ImGuiCond_FirstUseEver);
+
+		if (ImGui::Begin(
+				panel->GetName(),
+				nullptr,
+				ImGuiWindowFlags_NoFocusOnAppearing))
+		{
+			if (panel->IsActive())
+				panel->Draw();
+		}
+		ImGui::End();
+	}
+}
+
+void ModuleEditor::BuildDefaultDockLayout(
+	ImGuiID dockspaceId,
+	const ImVec2& dockspaceSize)
+{
+	ImGui::DockBuilderRemoveNode(dockspaceId);
+	ImGui::DockBuilderAddNode(
+		dockspaceId,
+		ImGuiDockNodeFlags_DockSpace);
+	ImGui::DockBuilderSetNodeSize(dockspaceId, dockspaceSize);
+
+	ImGuiID centerDock = dockspaceId;
+	ImGuiID hierarchyDock = 0;
+	ImGuiID inspectorDock = 0;
+	ImGuiID outputDock = 0;
+
+	ImGui::DockBuilderSplitNode(
+		centerDock,
+		ImGuiDir_Left,
+		0.18f,
+		&hierarchyDock,
+		&centerDock);
+	ImGui::DockBuilderSplitNode(
+		centerDock,
+		ImGuiDir_Right,
+		0.22f,
+		&inspectorDock,
+		&centerDock);
+	ImGui::DockBuilderSplitNode(
+		centerDock,
+		ImGuiDir_Down,
+		0.26f,
+		&outputDock,
+		&centerDock);
+
+	ImGui::DockBuilderDockWindow("Hierarchy", hierarchyDock);
+	ImGui::DockBuilderDockWindow("Inspector", inspectorDock);
+	ImGui::DockBuilderDockWindow("Console", outputDock);
+	ImGui::DockBuilderDockWindow("Assets", outputDock);
+	ImGui::DockBuilderDockWindow("Viewport", centerDock);
+	ImGui::DockBuilderFinish(dockspaceId);
 }
 
 void ModuleEditor::DrawProjectDialogs()
@@ -623,6 +712,11 @@ void ModuleEditor::ApplyAppearance(
 bool ModuleEditor::CleanUp()
 {
 	LOG("Freeing editor gui");
+	if (assetEditorManager)
+	{
+		assetEditorManager->CloseAll();
+		assetEditorManager.reset();
+	}
 					  
     for(uint i=0; i< TabPanelCount; ++i)
     {
@@ -646,13 +740,15 @@ bool ModuleEditor::CleanUp()
 
 void ModuleEditor::PrepareForProjectChange()
 {
+	if (assetEditorManager)
+		assetEditorManager->CloseAll();
 	ClearSelected();
 	if (tree)
 		tree->drag = nullptr;
 	if (props)
 		props->ResetProjectState();
-	if (res)
-		res->ResetProjectState();
+	if (assets)
+		assets->ResetProjectState();
 
 	file_dialog = closed;
 	selected_file[0] = '\0';
@@ -660,6 +756,26 @@ void ModuleEditor::PrepareForProjectChange()
 	open_project_dialog.ClearSelected();
 	project_location_dialog.Close();
 	project_location_dialog.ClearSelected();
+}
+
+bool ModuleEditor::OpenAssetEditor(
+	const EGE::EditorAssetSelection& asset)
+{
+	if (!assetEditorManager)
+		return false;
+
+	std::string error;
+	if (assetEditorManager->Open(asset, error))
+		return true;
+
+	SetProjectStatus(false, error);
+	return false;
+}
+
+void ModuleEditor::NotifySelectionChanged()
+{
+	if (props)
+		props->OnEditorSelectionChanged();
 }
 
 void ModuleEditor::SetProjectStatus(
@@ -682,7 +798,7 @@ void ModuleEditor::ReceiveEvent(const Event& event)
 			tree->active = false;
             props->active = false;
             conf->active = false;
-            res->active = false;
+            assets->active = false;
 		break;
 		case Event::stop:
 		case Event::pause:
@@ -691,7 +807,7 @@ void ModuleEditor::ReceiveEvent(const Event& event)
 			tree->active = true;
             props->active = true;
             conf->active = true;
-            res->active = true;
+            assets->active = true;
 		break;
 #endif
 		case Event::gameobject_destroyed:

@@ -1,6 +1,7 @@
 #ifndef __MODULEEDITOR_H__
 #define __MODULEEDITOR_H__
 
+#include "EditorAssetSelection.h"
 #include "Module.h"
 #include <imgui.h>
 #include "imgui-filebrowser/imfilebrowser.h"
@@ -19,7 +20,7 @@ class PanelGOTree;
 class PanelProperties;
 class PanelConfiguration;
 class PanelAbout;
-class PanelResources;
+class PanelAssets;
 class PanelQuickBar;
 class GameObject;
 class DirLight;
@@ -32,6 +33,7 @@ class TubeLight;
 class IBLData;
 class LocalIBLLight;
 class ComponentMeshRenderer;
+namespace EGE { class AssetEditorManager; }
 
 class ModuleEditor : public Module
 {
@@ -42,7 +44,7 @@ public:
 	PanelProperties* props = nullptr;
 	PanelAbout* about = nullptr;
 	PanelConfiguration* conf = nullptr;
-	PanelResources* res= nullptr;
+	PanelAssets* assets = nullptr;
 
     enum SelectionType
     {
@@ -54,7 +56,7 @@ public:
         SelSkybox
     };
 
-    typedef std::variant<GameObject*, ComponentMeshRenderer*, DirLight*, PointLight*, SpotLight*, QuadLight*, SphereLight*, TubeLight*, LocalIBLLight*, IBLData*> SelectionVariant;
+    typedef std::variant<GameObject*, ComponentMeshRenderer*, DirLight*, PointLight*, SpotLight*, QuadLight*, SphereLight*, TubeLight*, LocalIBLLight*, IBLData*, EGE::EditorAssetSelection> SelectionVariant;
 
 
     enum TabPanelEnum
@@ -96,6 +98,7 @@ public:
 	void PrepareForProjectChange();
 	void SetProjectStatus(bool success, const std::string& message);
 	void ApplyAppearance(const std::string& theme, bool compact);
+	bool OpenAssetEditor(const EGE::EditorAssetSelection& asset);
 
     int GetWidth(TabPanelEnum panel) const { return tab_panels[panel].width; }
     int GetHeight(TabPanelEnum panel) const { return tab_panels[panel].height; }
@@ -105,8 +108,16 @@ public:
     const SelectionVariant& GetSelection() const { return selected; }
 
     template<typename Arg>
-    void SetSelected(Arg && arg) { selected = std::forward<Arg>(arg); }
-    void ClearSelected() { selected = {}; }
+    void SetSelected(Arg && arg)
+	{
+		selected = std::forward<Arg>(arg);
+		NotifySelectionChanged();
+	}
+    void ClearSelected()
+	{
+		selected = {};
+		NotifySelectionChanged();
+	}
 
 private:
 
@@ -114,6 +125,12 @@ private:
 	void DrawDirectoryRecursive(const char* directory, const char* filter_extension) ;
 	void DrawProjectDialogs();
 	void DrawSettingsWindow(bool& open, bool editorSettings);
+	void DrawPanelGroup(TabPanelEnum group);
+	void DrawStandalonePanels(TabPanelEnum group);
+	void BuildDefaultDockLayout(
+		ImGuiID dockspaceId,
+		const ImVec2& dockspaceSize);
+	void NotifySelectionChanged();
 
 private:
 
@@ -158,6 +175,7 @@ private:
 		ImGuiFileBrowserFlags_CreateNewDir};
 
     SelectionVariant selected;
+	std::unique_ptr<EGE::AssetEditorManager> assetEditorManager;
 
 };
 

@@ -1165,34 +1165,11 @@ UID ResourceMesh::LoadCone(const char* name, float height, float radius, unsigne
 
 void ResourceMesh::ReloadCone(float height, float radius, unsigned slices, unsigned stacks)
 {
-    ReleaseFromMemory();
-
-    par_shapes_mesh* mesh = par_shapes_create_cone(int(slices), int(stacks));
-    par_shapes_rotate(mesh, -float(PAR_PI * 0.5), (float*)&float3::unitX);
-    par_shapes_translate(mesh, 0.0f, -0.5f, 0.0f);
-
-    if (mesh)
-    {
-        par_shapes_scale(mesh, radius, height, radius);
-
-        for(uint i=0; i< uint(mesh->npoints); ++i)
-        {
-            std::swap(mesh->tcoords[i*2], mesh->tcoords[i*2+1]);
-            mesh->tcoords[i*2]*=2.0f;
-        }
-
-        GenerateCPUBuffers(mesh);
-        GenerateAttribInfo();
-        Save();
-        ReleaseFromMemory();
-        LoadInMemory();
-
-        par_shapes_free_mesh(mesh);
-    }
+    RegenerateCone(height, radius, slices, stacks);
 }
 
 
-UID ResourceMesh::LoadTorus(const char* torus_name, float inner_r, float outer_r, unsigned slices, unsigned stacks)
+UID ResourceMesh::LoadTorus(const char* torus_name, float inner_r, float outer_r, unsigned slices, unsigned stacks, UID uid)
 {
     par_shapes_mesh* mesh = par_shapes_create_torus(int(slices), int(stacks), inner_r);
 
@@ -1200,7 +1177,7 @@ UID ResourceMesh::LoadTorus(const char* torus_name, float inner_r, float outer_r
 	{
         par_shapes_scale(mesh, outer_r, outer_r, outer_r);
 
-        UID uid = Generate(torus_name, mesh);
+        uid = Generate(torus_name, mesh, uid);
 
 		par_shapes_free_mesh(mesh);
 
@@ -1210,7 +1187,7 @@ UID ResourceMesh::LoadTorus(const char* torus_name, float inner_r, float outer_r
 	return 0;
 }
 
-UID ResourceMesh::LoadCube(const char* cube_name, float size)
+UID ResourceMesh::LoadCube(const char* cube_name, float size, UID uid)
 {
     par_shapes_mesh* mesh   = par_shapes_create_plane(1, 1);
     par_shapes_mesh* top    = par_shapes_create_plane(1, 1);
@@ -1246,7 +1223,7 @@ UID ResourceMesh::LoadCube(const char* cube_name, float size)
 	{
         par_shapes_scale(mesh, size, size, size);
 
-        UID uid = Generate(cube_name, mesh);
+        uid = Generate(cube_name, mesh, uid);
 
 		par_shapes_free_mesh(mesh);
 
@@ -1301,7 +1278,177 @@ UID ResourceMesh::Generate(const char* shape_name, par_shapes_mesh* shape, UID u
     }
 
 
-    return ok ? m->GetUID() : 0;
+	if (!ok)
+	{
+		App->resources->RemoveResource(m->GetUID());
+		return 0;
+	}
+
+    return m->GetUID();
+}
+
+bool ResourceMesh::Regenerate(par_shapes_mesh* shape)
+{
+    if (!shape)
+        return false;
+
+    const bool wasLoaded = loaded > 0;
+    ReleaseFromMemory();
+    GenerateCPUBuffers(shape);
+    GenerateAttribInfo();
+
+    // Save() expects a loaded resource. Keep a temporary reference when an
+    // unloaded procedural asset is regenerated directly.
+    if (!wasLoaded)
+        ++loaded;
+
+    const bool saved = Save();
+    if (saved && wasLoaded)
+    {
+        GenerateVBO();
+        GenerateVAO();
+    }
+
+    if (!wasLoaded)
+        Release();
+
+    return saved;
+}
+
+bool ResourceMesh::RegenerateSphere(
+    float size, unsigned slices, unsigned stacks)
+{
+    par_shapes_mesh* mesh =
+        par_shapes_create_parametric_sphere(int(slices), int(stacks));
+    if (!mesh)
+        return false;
+
+    par_shapes_scale(mesh, size, size, size);
+    const bool regenerated = Regenerate(mesh);
+    par_shapes_free_mesh(mesh);
+    return regenerated;
+}
+
+bool ResourceMesh::RegenerateTorus(
+    float innerRadius, float outerRadius,
+    unsigned slices, unsigned stacks)
+{
+    par_shapes_mesh* mesh =
+        par_shapes_create_torus(int(slices), int(stacks), innerRadius);
+    if (!mesh)
+        return false;
+
+    par_shapes_scale(mesh, outerRadius, outerRadius, outerRadius);
+    const bool regenerated = Regenerate(mesh);
+    par_shapes_free_mesh(mesh);
+    return regenerated;
+}
+
+bool ResourceMesh::RegenerateCube(float size)
+{
+    par_shapes_mesh* mesh = par_shapes_create_plane(1, 1);
+    par_shapes_mesh* top = par_shapes_create_plane(1, 1);
+    par_shapes_mesh* bottom = par_shapes_create_plane(1, 1);
+    par_shapes_mesh* back = par_shapes_create_plane(1, 1);
+    par_shapes_mesh* left = par_shapes_create_plane(1, 1);
+    par_shapes_mesh* right = par_shapes_create_plane(1, 1);
+    if (!mesh || !top || !bottom || !back || !left || !right)
+    {
+        if (mesh) par_shapes_free_mesh(mesh);
+        if (top) par_shapes_free_mesh(top);
+        if (bottom) par_shapes_free_mesh(bottom);
+        if (back) par_shapes_free_mesh(back);
+        if (left) par_shapes_free_mesh(left);
+        if (right) par_shapes_free_mesh(right);
+        return false;
+    }
+
+    par_shapes_translate(mesh, -0.5f, -0.5f, 0.5f);
+    par_shapes_rotate(top, -float(PAR_PI * 0.5), (float*)&float3::unitX);
+    par_shapes_translate(top, -0.5f, 0.5f, 0.5f);
+    par_shapes_rotate(bottom, float(PAR_PI * 0.5), (float*)&float3::unitX);
+    par_shapes_translate(bottom, -0.5f, -0.5f, -0.5f);
+    par_shapes_rotate(back, float(PAR_PI), (float*)&float3::unitX);
+    par_shapes_translate(back, -0.5f, 0.5f, -0.5f);
+    par_shapes_rotate(left, float(-PAR_PI * 0.5), (float*)&float3::unitY);
+    par_shapes_translate(left, -0.5f, -0.5f, -0.5f);
+    par_shapes_rotate(right, float(PAR_PI * 0.5), (float*)&float3::unitY);
+    par_shapes_translate(right, 0.5f, -0.5f, 0.5f);
+    par_shapes_merge_and_free(mesh, top);
+    par_shapes_merge_and_free(mesh, bottom);
+    par_shapes_merge_and_free(mesh, back);
+    par_shapes_merge_and_free(mesh, left);
+    par_shapes_merge_and_free(mesh, right);
+    par_shapes_scale(mesh, size, size, size);
+
+    const bool regenerated = Regenerate(mesh);
+    par_shapes_free_mesh(mesh);
+    return regenerated;
+}
+
+bool ResourceMesh::RegenerateCylinder(
+    float height, float radius, unsigned slices, unsigned stacks)
+{
+    par_shapes_mesh* mesh = par_shapes_create_cylinder(int(slices), int(stacks));
+    if (!mesh)
+        return false;
+
+    par_shapes_rotate(mesh, -float(PAR_PI * 0.5), (float*)&float3::unitX);
+    par_shapes_translate(mesh, 0.0f, -0.5f, 0.0f);
+    par_shapes_scale(mesh, radius, height, radius);
+    for (uint i = 0; i < uint(mesh->npoints); ++i)
+    {
+        std::swap(mesh->tcoords[i * 2], mesh->tcoords[i * 2 + 1]);
+        mesh->tcoords[i * 2] *= 2.0f;
+    }
+
+    const bool regenerated = Regenerate(mesh);
+    par_shapes_free_mesh(mesh);
+    return regenerated;
+}
+
+bool ResourceMesh::RegenerateCone(
+    float height, float radius, unsigned slices, unsigned stacks)
+{
+    par_shapes_mesh* mesh = par_shapes_create_cone(int(slices), int(stacks));
+    par_shapes_mesh* disk = par_shapes_create_parametric_disk(slices, stacks);
+    if (!mesh || !disk)
+    {
+        if (mesh) par_shapes_free_mesh(mesh);
+        if (disk) par_shapes_free_mesh(disk);
+        return false;
+    }
+
+    par_shapes_rotate(mesh, -float(PAR_PI * 0.5), (float*)&float3::unitX);
+    par_shapes_translate(mesh, 0.0f, -1.0f, 0.0f);
+    par_shapes_rotate(disk, float(PAR_PI * 0.5), (float*)&float3::unitX);
+    par_shapes_translate(disk, 0.0f, -1.0f, 0.0f);
+    par_shapes_merge(mesh, disk);
+    par_shapes_scale(mesh, radius, height, radius);
+    for (uint i = 0; i < uint(mesh->npoints); ++i)
+    {
+        std::swap(mesh->tcoords[i * 2], mesh->tcoords[i * 2 + 1]);
+        mesh->tcoords[i * 2] *= 2.0f;
+    }
+
+    const bool regenerated = Regenerate(mesh);
+    par_shapes_free_mesh(mesh);
+    par_shapes_free_mesh(disk);
+    return regenerated;
+}
+
+bool ResourceMesh::RegeneratePlane(
+    float width, float height, unsigned slices, unsigned stacks)
+{
+    par_shapes_mesh* mesh = par_shapes_create_plane(slices, stacks);
+    if (!mesh)
+        return false;
+
+    par_shapes_translate(mesh, -0.5f, -0.5f, 0.0f);
+    par_shapes_scale(mesh, width, height, 1.0f);
+    const bool regenerated = Regenerate(mesh);
+    par_shapes_free_mesh(mesh);
+    return regenerated;
 }
 
 void ResourceMesh::GenerateCPUBuffers(par_shapes_mesh* shape)
@@ -1329,6 +1476,8 @@ void ResourceMesh::GenerateCPUBuffers(par_shapes_mesh* shape)
 
 	num_vertices = shape->npoints;
     num_indices  = shape->ntriangles*3;
+    bbox.SetNegativeInfinity();
+    bbox.Enclose(src_vertices.get(), num_vertices);
 
     if(shape->normals)
     {

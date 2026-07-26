@@ -22,7 +22,7 @@ public:
 
     bool               HasSelection () const { return selection; }
     const std::string& GetFile      () const { return file; }
-    const std::string& GetUserName  () const { return user_name; }
+    const std::string& GetAssetName () const { return user_name; }
     float              GetScale     () const { return scale; }
 
 };

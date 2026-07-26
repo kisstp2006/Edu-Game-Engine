@@ -63,12 +63,19 @@ public:
     static UID            Import              (const tinygltf::Model& model, const tinygltf::Mesh& mesh, const tinygltf::Primitive& primitive, 
                                                uint32_t& weightsCount, const char* source_file, float scale);
 
-    static UID            LoadSphere          (const char* sphere_name, float size, unsigned slices, unsigned stacks, UID uid);
-    static UID            LoadTorus           (const char* torus_name, float inner_r, float outer_r, unsigned slices, unsigned stacks);
-    static UID            LoadCube            (const char* cube_name, float size);
+    static UID            LoadSphere          (const char* sphere_name, float size, unsigned slices, unsigned stacks, UID uid = 0);
+    static UID            LoadTorus           (const char* torus_name, float inner_r, float outer_r, unsigned slices, unsigned stacks, UID uid = 0);
+    static UID            LoadCube            (const char* cube_name, float size, UID uid = 0);
     static UID            LoadCylinder        (const char* cylinder_name, float height, float radius, unsigned slices, unsigned stacks, UID uid = 0);
     static UID            LoadCone            (const char* name, float height, float radius, unsigned slices, unsigned stacks, UID uid = 0);
     static UID            LoadPlane           (const char* plane_name, float width, float height, unsigned slices, unsigned stacks, UID uid = 0);
+
+    bool                  RegenerateSphere    (float size, unsigned slices, unsigned stacks);
+    bool                  RegenerateTorus     (float innerRadius, float outerRadius, unsigned slices, unsigned stacks);
+    bool                  RegenerateCube      (float size);
+    bool                  RegenerateCylinder  (float height, float radius, unsigned slices, unsigned stacks);
+    bool                  RegenerateCone      (float height, float radius, unsigned slices, unsigned stacks);
+    bool                  RegeneratePlane     (float width, float height, unsigned slices, unsigned stacks);
 
     void                  ReloadCone          (float height, float radius, unsigned slices, unsigned stacks);
 
@@ -107,6 +114,7 @@ public:
 private:
 
     static UID          Generate            (const char* shape_name, par_shapes_mesh_s* shape, UID uid = 0);
+    bool                Regenerate          (par_shapes_mesh_s* shape);
     void                GenerateAttribInfo  ();
     void                GenerateCPUBuffers  (const Thekla::Atlas_Output_Mesh* atlas);
     void                GenerateCPUBuffers  (const aiMesh* mesh, float scale);

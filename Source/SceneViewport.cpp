@@ -738,6 +738,12 @@ void SceneViewport::DrawGuizmo(ComponentCamera* camera)
     std::visit([this, camera](auto ptr) {DrawGuizmo(camera, ptr); }, App->editor->GetSelection());
 }
 
+void SceneViewport::DrawGuizmo(
+    ComponentCamera* camera,
+    const EGE::EditorAssetSelection& asset)
+{
+}
+
 void SceneViewport::DrawGuizmo(ComponentCamera* camera, ComponentMeshRenderer* renderer)
 {
     // Intentionally blank

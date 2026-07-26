@@ -21,6 +21,120 @@
 
 using namespace std;
 
+namespace
+{
+	bool PrepareSourceAssetPath(
+		const char* sourceFile,
+		std::string& normalizedPath,
+		std::string& error)
+	{
+		if (!sourceFile || sourceFile[0] == '\0')
+		{
+			error = "The source asset path is empty.";
+			return false;
+		}
+
+		const std::filesystem::path path =
+			std::filesystem::path(sourceFile).lexically_normal();
+		const std::string genericPath = path.generic_string();
+		if (path.is_absolute() ||
+			genericPath == "Assets" ||
+			!genericPath.starts_with("Assets/") ||
+			genericPath.find("..") != std::string::npos)
+		{
+			error =
+				"Assets can only be created inside the project's Assets folder.";
+			return false;
+		}
+
+		normalizedPath = genericPath;
+		if (App->fs->Exists(normalizedPath.c_str()))
+		{
+			error = "An asset with this name already exists.";
+			return false;
+		}
+		return true;
+	}
+
+	const char* GetMeshShapeName(
+		ModuleResources::ProceduralMeshShape shape)
+	{
+		switch (shape)
+		{
+		case ModuleResources::ProceduralMeshShape::Plane: return "Plane";
+		case ModuleResources::ProceduralMeshShape::Cube: return "Cube";
+		case ModuleResources::ProceduralMeshShape::Sphere: return "Sphere";
+		case ModuleResources::ProceduralMeshShape::Cylinder: return "Cylinder";
+		case ModuleResources::ProceduralMeshShape::Cone: return "Cone";
+		case ModuleResources::ProceduralMeshShape::Torus: return "Torus";
+		}
+		return "Unknown";
+	}
+
+	bool TryGetMeshShape(
+		const char* name,
+		ModuleResources::ProceduralMeshShape& shape)
+	{
+		if (!name)
+			return false;
+		if (_stricmp(name, "Plane") == 0)
+			shape = ModuleResources::ProceduralMeshShape::Plane;
+		else if (_stricmp(name, "Cube") == 0)
+			shape = ModuleResources::ProceduralMeshShape::Cube;
+		else if (_stricmp(name, "Sphere") == 0)
+			shape = ModuleResources::ProceduralMeshShape::Sphere;
+		else if (_stricmp(name, "Cylinder") == 0)
+			shape = ModuleResources::ProceduralMeshShape::Cylinder;
+		else if (_stricmp(name, "Cone") == 0)
+			shape = ModuleResources::ProceduralMeshShape::Cone;
+		else if (_stricmp(name, "Torus") == 0)
+			shape = ModuleResources::ProceduralMeshShape::Torus;
+		else
+			return false;
+		return true;
+	}
+
+	bool ValidateMeshSettings(
+		const ModuleResources::ProceduralMeshSettings& settings,
+		std::string& error)
+	{
+		if (settings.width <= 0.0f ||
+			settings.height <= 0.0f ||
+			settings.radius <= 0.0f ||
+			settings.innerRadius <= 0.0f ||
+			settings.outerRadius <= 0.0f ||
+			settings.slices < 3 ||
+			settings.stacks < 1)
+		{
+			error =
+				"Mesh dimensions must be positive and use at least 3 slices.";
+			return false;
+		}
+		return true;
+	}
+
+	void BuildProceduralMeshDocument(
+		Config& document,
+		UID uid,
+		const char* name,
+		const ModuleResources::ProceduralMeshSettings& settings)
+	{
+		Config asset = document.AddSection("Asset");
+		asset.AddUInt("Version", 1);
+		asset.AddString("Type", "ProceduralMesh");
+		asset.AddUID("UID", uid);
+		asset.AddString("Name", name);
+		asset.AddString("Shape", GetMeshShapeName(settings.shape));
+		asset.AddFloat("Width", settings.width);
+		asset.AddFloat("Height", settings.height);
+		asset.AddFloat("Radius", settings.radius);
+		asset.AddFloat("InnerRadius", settings.innerRadius);
+		asset.AddFloat("OuterRadius", settings.outerRadius);
+		asset.AddUInt("Slices", settings.slices);
+		asset.AddUInt("Stacks", settings.stacks);
+	}
+}
+
 ModuleResources::ModuleResources(bool start_enabled) : Module("Resource Manager", start_enabled), asset_folder(ASSETS_FOLDER)
 {
 }
@@ -59,6 +173,7 @@ bool ModuleResources::Start(Config * config)
     LoadDefaultBlueNoise();
 	LoadDefaultSkybox();
     LoadDefaultSphere();
+	LoadDefaultBox();
 	LoadDefaultPlane();
     LoadDefaultCylinder();
     LoadDefaultCone();
@@ -505,6 +620,327 @@ UID ModuleResources::ImportModel(const char* file_name, float scale, const char*
 	return ret;
 }
 
+ModuleResources::AssetCreationResult ModuleResources::CreateMaterialAsset(
+	const char* sourceFile,
+	const char* name,
+	MaterialAssetWorkflow workflow)
+{
+	AssetCreationResult result;
+	std::string sourcePath;
+	if (!name || name[0] == '\0')
+	{
+		result.error = "Enter a material name.";
+		return result;
+	}
+	if (!PrepareSourceAssetPath(sourceFile, sourcePath, result.error))
+		return result;
+
+	ResourceMaterial* material = static_cast<ResourceMaterial*>(
+		CreateNewResource(Resource::material));
+	material->file = sourcePath;
+	material->user_name = name;
+	if (workflow == MaterialAssetWorkflow::SpecularGlossiness)
+		material->SetSpecularGlossData(SpecularGlossData{});
+	else
+		material->SetMetallicRoughData(MetallicRoughData{});
+
+	if (!material->Save())
+	{
+		result.error = "The material library file could not be written.";
+		RemoveResource(material->GetUID());
+		return result;
+	}
+
+	Config document;
+	Config asset = document.AddSection("Asset");
+	asset.AddUInt("Version", 1);
+	asset.AddString("Type", "Material");
+	asset.AddUID("UID", material->GetUID());
+	asset.AddString("Name", name);
+	asset.AddString(
+		"Workflow",
+		workflow == MaterialAssetWorkflow::SpecularGlossiness
+			? "SpecularGlossiness"
+			: "MetallicRoughness");
+	if (!SaveSourceAsset(sourcePath.c_str(), document))
+	{
+		result.error = "The material source file could not be written.";
+		RemoveResource(material->GetUID());
+		return result;
+	}
+
+	SaveResources();
+	result.uid = material->GetUID();
+	result.sourcePath = sourcePath;
+	return result;
+}
+
+ModuleResources::AssetCreationResult
+ModuleResources::CreateStateMachineAsset(
+	const char* sourceFile,
+	const char* name)
+{
+	AssetCreationResult result;
+	std::string sourcePath;
+	if (!name || name[0] == '\0')
+	{
+		result.error = "Enter a state machine name.";
+		return result;
+	}
+	if (!PrepareSourceAssetPath(sourceFile, sourcePath, result.error))
+		return result;
+
+	ResourceStateMachine* stateMachine =
+		static_cast<ResourceStateMachine*>(
+			CreateNewResource(Resource::state_machine));
+	stateMachine->file = sourcePath;
+	stateMachine->user_name = name;
+	if (!stateMachine->Save())
+	{
+		result.error = "The state machine library file could not be written.";
+		RemoveResource(stateMachine->GetUID());
+		return result;
+	}
+
+	Config document;
+	Config asset = document.AddSection("Asset");
+	asset.AddUInt("Version", 1);
+	asset.AddString("Type", "AnimationStateMachine");
+	asset.AddUID("UID", stateMachine->GetUID());
+	asset.AddString("Name", name);
+	asset.AddUInt("DefaultNode", 0);
+	if (!SaveSourceAsset(sourcePath.c_str(), document))
+	{
+		result.error = "The state machine source file could not be written.";
+		RemoveResource(stateMachine->GetUID());
+		return result;
+	}
+
+	SaveResources();
+	result.uid = stateMachine->GetUID();
+	result.sourcePath = sourcePath;
+	return result;
+}
+
+ModuleResources::AssetCreationResult
+ModuleResources::CreateProceduralMeshAsset(
+	const char* sourceFile,
+	const char* name,
+	const ProceduralMeshSettings& settings)
+{
+	AssetCreationResult result;
+	std::string sourcePath;
+	if (!name || name[0] == '\0')
+	{
+		result.error = "Enter a mesh name.";
+		return result;
+	}
+	if (!PrepareSourceAssetPath(sourceFile, sourcePath, result.error))
+		return result;
+	if (!ValidateMeshSettings(settings, result.error))
+		return result;
+
+	const UID requestedUid = GenerateNewUID();
+	UID uid = 0;
+	switch (settings.shape)
+	{
+	case ProceduralMeshShape::Plane:
+		uid = ResourceMesh::LoadPlane(
+			name,
+			settings.width,
+			settings.height,
+			settings.slices,
+			settings.stacks,
+			requestedUid);
+		break;
+	case ProceduralMeshShape::Cube:
+		uid = ResourceMesh::LoadCube(
+			name,
+			settings.width,
+			requestedUid);
+		break;
+	case ProceduralMeshShape::Sphere:
+		uid = ResourceMesh::LoadSphere(
+			name,
+			settings.radius,
+			settings.slices,
+			settings.stacks,
+			requestedUid);
+		break;
+	case ProceduralMeshShape::Cylinder:
+		uid = ResourceMesh::LoadCylinder(
+			name,
+			settings.height,
+			settings.radius,
+			settings.slices,
+			settings.stacks,
+			requestedUid);
+		break;
+	case ProceduralMeshShape::Cone:
+		uid = ResourceMesh::LoadCone(
+			name,
+			settings.height,
+			settings.radius,
+			settings.slices,
+			settings.stacks,
+			requestedUid);
+		break;
+	case ProceduralMeshShape::Torus:
+		uid = ResourceMesh::LoadTorus(
+			name,
+			settings.innerRadius,
+			settings.outerRadius,
+			settings.slices,
+			settings.stacks,
+			requestedUid);
+		break;
+	}
+
+	ResourceMesh* mesh = static_cast<ResourceMesh*>(Get(uid));
+	if (!mesh)
+	{
+		result.error = "The procedural mesh could not be generated.";
+		return result;
+	}
+	mesh->file = sourcePath;
+	mesh->user_name = name;
+
+	Config document;
+	BuildProceduralMeshDocument(
+		document, mesh->GetUID(), name, settings);
+	if (!SaveSourceAsset(sourcePath.c_str(), document))
+	{
+		result.error = "The procedural mesh source file could not be written.";
+		RemoveResource(mesh->GetUID());
+		return result;
+	}
+
+	SaveResources();
+	result.uid = mesh->GetUID();
+	result.sourcePath = sourcePath;
+	return result;
+}
+
+bool ModuleResources::LoadProceduralMeshSettings(
+	const char* sourceFile,
+	ProceduralMeshSettings& settings,
+	std::string& name,
+	std::string& error) const
+{
+	char* buffer = nullptr;
+	if (!sourceFile || App->fs->Load(sourceFile, &buffer) == 0 || !buffer)
+	{
+		error = "The procedural mesh source file could not be read.";
+		RELEASE_ARRAY(buffer);
+		return false;
+	}
+
+	Config document(buffer);
+	RELEASE_ARRAY(buffer);
+	if (!document.IsValid())
+	{
+		error = "The procedural mesh source file contains invalid JSON.";
+		return false;
+	}
+
+	Config asset = document.GetSection("Asset");
+	if (!asset.IsValid() ||
+		_stricmp(asset.GetString("Type", ""), "ProceduralMesh") != 0 ||
+		!TryGetMeshShape(asset.GetString("Shape", ""), settings.shape))
+	{
+		error = "This source file is not a supported procedural mesh asset.";
+		return false;
+	}
+
+	name = asset.GetString("Name", "Procedural Mesh");
+	settings.width = asset.GetFloat("Width", 1.0f);
+	settings.height = asset.GetFloat("Height", 1.0f);
+	settings.radius = asset.GetFloat("Radius", 0.5f);
+	settings.innerRadius = asset.GetFloat("InnerRadius", 0.35f);
+	settings.outerRadius = asset.GetFloat("OuterRadius", 1.0f);
+	settings.slices = asset.GetUInt("Slices", 24);
+	settings.stacks = asset.GetUInt("Stacks", 12);
+	return ValidateMeshSettings(settings, error);
+}
+
+bool ModuleResources::UpdateProceduralMeshAsset(
+	UID uid,
+	const char* sourceFile,
+	const char* name,
+	const ProceduralMeshSettings& settings,
+	std::string& error)
+{
+	Resource* resource = Get(uid);
+	if (!resource || resource->GetType() != Resource::mesh)
+	{
+		error = "The procedural mesh resource is no longer available.";
+		return false;
+	}
+	if (!sourceFile || !name || name[0] == '\0')
+	{
+		error = "The procedural mesh needs a name and a source file.";
+		return false;
+	}
+	if (!ValidateMeshSettings(settings, error))
+		return false;
+
+	ResourceMesh* mesh = static_cast<ResourceMesh*>(resource);
+	const std::string previousName = mesh->name;
+	const std::string previousUserName = mesh->user_name;
+	mesh->name = name;
+	mesh->user_name = name;
+	bool regenerated = false;
+	switch (settings.shape)
+	{
+	case ProceduralMeshShape::Plane:
+		regenerated = mesh->RegeneratePlane(
+			settings.width, settings.height,
+			settings.slices, settings.stacks);
+		break;
+	case ProceduralMeshShape::Cube:
+		regenerated = mesh->RegenerateCube(settings.width);
+		break;
+	case ProceduralMeshShape::Sphere:
+		regenerated = mesh->RegenerateSphere(
+			settings.radius, settings.slices, settings.stacks);
+		break;
+	case ProceduralMeshShape::Cylinder:
+		regenerated = mesh->RegenerateCylinder(
+			settings.height, settings.radius,
+			settings.slices, settings.stacks);
+		break;
+	case ProceduralMeshShape::Cone:
+		regenerated = mesh->RegenerateCone(
+			settings.height, settings.radius,
+			settings.slices, settings.stacks);
+		break;
+	case ProceduralMeshShape::Torus:
+		regenerated = mesh->RegenerateTorus(
+			settings.innerRadius, settings.outerRadius,
+			settings.slices, settings.stacks);
+		break;
+	}
+	if (!regenerated)
+	{
+		mesh->name = previousName;
+		mesh->user_name = previousUserName;
+		error = "The procedural mesh could not be regenerated.";
+		return false;
+	}
+
+	mesh->file = sourceFile;
+	Config document;
+	BuildProceduralMeshDocument(document, uid, name, settings);
+	if (!SaveSourceAsset(sourceFile, document))
+	{
+		error = "The procedural mesh source file could not be written.";
+		return false;
+	}
+
+	SaveResources();
+	return true;
+}
+
 UID ModuleResources::ImportSuccess(Resource::Type type, const char* file_name, const char* user_name, const std::string& output)
 {
     Resource* res = CreateNewResource(type);
@@ -706,16 +1142,38 @@ void ModuleResources::RemoveResource(UID uid)
     map<UID, Resource*>::iterator it = resources.find(uid);
     if(it != resources.end())
     {
-        App->fs->Remove(it->second->GetExportedFile());
-
-        char tmp[256];
-        sprintf_s(tmp, 255, "%s%s", GetDirByType(it->second->GetType()), it->second->GetExportedFile());
-        App->fs->Remove(tmp);
+		const char* exportedFile = it->second->GetExportedFile();
+		if (exportedFile && exportedFile[0] != '\0')
+		{
+			char tmp[256];
+			sprintf_s(
+				tmp,
+				255,
+				"%s%s",
+				GetDirByType(it->second->GetType()),
+				exportedFile);
+			App->fs->Remove(tmp);
+		}
 
         removed.push_back(it->second);
 
         resources.erase(it);
     }
+}
+
+bool ModuleResources::SaveSourceAsset(
+	const char* sourceFile,
+	const Config& document) const
+{
+	char* buffer = nullptr;
+	const uint size = static_cast<uint>(
+		document.Save(&buffer, "Edu Game Engine source asset"));
+	const bool saved =
+		buffer &&
+		size > 0 &&
+		App->fs->Save(sourceFile, buffer, size) == size;
+	RELEASE_ARRAY(buffer);
+	return saved;
 }
 
 bool ModuleResources::LoadDefaultSkybox()
@@ -816,8 +1274,8 @@ bool ModuleResources::LoadDefaultRedImage()
 
 bool ModuleResources::LoadDefaultBox()
 {
-	cube = static_cast<ResourceMesh*>(Get(ResourceMesh::LoadCube("DefaultBox", 1)));
-	cube->LoadToMemory();
+	cube = static_cast<ResourceMesh*>(
+		Get(ResourceMesh::LoadCube("DefaultBox", 1.0f, UID(8))));
 
 	return cube != nullptr;
 }

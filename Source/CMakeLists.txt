@@ -73,6 +73,7 @@ target_link_libraries(Engine
         EGE::ImGui
         EGE::TinyGLTF
         EGE::miniaudio
+        EGE::AngelScript
         EGE::MathGeoLib
         EGE::TheklaAtlas
         EGE::TinySpline

@@ -135,6 +135,35 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniaudio)
 
+# AngelScript 2.38.0. Use the official CMake project below the SDK root and
+# keep the engine-facing target name stable for the future scripting module.
+FetchContent_Declare(
+    angelscript
+    GIT_REPOSITORY https://github.com/anjo76/angelscript.git
+    GIT_TAG v2.38.0
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR sdk/angelscript/projects/cmake
+)
+FetchContent_MakeAvailable(angelscript)
+
+if(TARGET angelscript)
+    set(EGE_ANGELSCRIPT_UPSTREAM_TARGET angelscript)
+elseif(TARGET AngelScript)
+    set(EGE_ANGELSCRIPT_UPSTREAM_TARGET AngelScript)
+else()
+    message(FATAL_ERROR "Could not find the AngelScript library target")
+endif()
+
+add_library(ege_angelscript INTERFACE)
+add_library(EGE::AngelScript ALIAS ege_angelscript)
+target_include_directories(ege_angelscript
+    INTERFACE "${angelscript_SOURCE_DIR}/sdk/angelscript/include")
+target_link_libraries(ege_angelscript
+    INTERFACE "${EGE_ANGELSCRIPT_UPSTREAM_TARGET}")
+set_target_properties(
+    "${EGE_ANGELSCRIPT_UPSTREAM_TARGET}"
+    PROPERTIES FOLDER "Third-party dependencies")
+
 # This project uses a customized Dear ImGui 1.80 WIP docking snapshot. The
 # stable v1.80 tag does not contain the required docking/viewport API, so this
 # dependency remains source-integrated and isolated behind one target.

@@ -20,7 +20,7 @@
 
 #include <filesystem>
 
-#define MATERIAL_VERSION 0.6f
+#define MATERIAL_VERSION 0.7f
 //#define FORCE_COMPRESS_ON_LOAD
 
 template<class... Ts>
@@ -105,7 +105,11 @@ bool ResourceMaterial::LoadInMemory()
                 read_stream >> mrData.baseColor.x >> mrData.baseColor.y >> mrData.baseColor.z >> mrData.baseColor.w;
                 read_stream >> mrData.metalness;
                 read_stream >> mrData.roughness;
-                read_stream >> mrData.emissive_color.x >> mrData.emissive_color.y, mrData.emissive_color.z ;
+                read_stream >> mrData.emissive_color.x >> mrData.emissive_color.y;
+				if (version >= 0.7f)
+					read_stream >> mrData.emissive_color.z;
+				else
+					mrData.emissive_color.z = 0.0f;
                 read_stream >> mrData.emissive_intensity;
 
                 for (uint i = 0; i < MR_TextureCount; ++i)
@@ -354,7 +358,9 @@ void ResourceMaterial::SaveToStream(simple::mem_ostream<std::true_type>& write_s
         write_stream << mrData.baseColor.x << mrData.baseColor.y << mrData.baseColor.z << mrData.baseColor.w;
         write_stream << mrData.metalness;
         write_stream << mrData.roughness;
-        write_stream << mrData.emissive_color.x << mrData.emissive_color.y, mrData.emissive_color.z;
+        write_stream << mrData.emissive_color.x
+			<< mrData.emissive_color.y
+			<< mrData.emissive_color.z;
         write_stream << mrData.emissive_intensity;
 
         for (uint i = 0; i < MR_TextureCount; ++i) write_stream << mrData.textures[i];
@@ -757,6 +763,8 @@ void ResourceMaterial::SetSpecularGlossData(const SpecularGlossData& sgData)
         }, data);
 
     data = sgData;
+	workFlow = SpecularGlossiness;
+	uboDirty = true;
 }
 void ResourceMaterial::SetMetallicRoughData(const MetallicRoughData& mrData)
 {
@@ -767,6 +775,8 @@ void ResourceMaterial::SetMetallicRoughData(const MetallicRoughData& mrData)
         }, data);
 
     data = mrData;
+	workFlow = MetallicRoughness;
+	uboDirty = true;
 }
 
 const ResourceTexture* ResourceMaterial::GetTextureRes(SpecularGlossTextures texture) const

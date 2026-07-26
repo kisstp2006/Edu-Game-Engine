@@ -5,8 +5,9 @@
 #include "Module.h"
 #include "Resource.h"
 #include <map>
-#include <vector>
 #include <memory>
+#include <string>
+#include <vector>
 
 #define RESERVED_RESOURCES 9 // Engine-owned meshes and fallback textures.
 
@@ -19,6 +20,42 @@ class Texture3D;
 class ModuleResources : public Module
 {
 public:
+	enum class MaterialAssetWorkflow
+	{
+		MetallicRoughness,
+		SpecularGlossiness
+	};
+
+	enum class ProceduralMeshShape
+	{
+		Plane,
+		Cube,
+		Sphere,
+		Cylinder,
+		Cone,
+		Torus
+	};
+
+	struct ProceduralMeshSettings
+	{
+		ProceduralMeshShape shape = ProceduralMeshShape::Cube;
+		float width = 1.0f;
+		float height = 1.0f;
+		float radius = 0.5f;
+		float innerRadius = 0.35f;
+		float outerRadius = 1.0f;
+		unsigned int slices = 24;
+		unsigned int stacks = 12;
+	};
+
+	struct AssetCreationResult
+	{
+		UID uid = 0;
+		std::string sourcePath;
+		std::string error;
+
+		explicit operator bool() const { return uid != 0; }
+	};
 
 	ModuleResources(bool start_enabled = true);
 
@@ -45,6 +82,28 @@ public:
 	UID ImportTexture(const char* file_name, bool mipmaps, bool srgb, bool toCubemap);
 	UID ImportAnimation(const char* file_name, uint first, uint last, const char* user_name, float scale);
     UID ImportModel(const char* file_name, float scale, const char* user_name);
+	AssetCreationResult CreateMaterialAsset(
+		const char* sourceFile,
+		const char* name,
+		MaterialAssetWorkflow workflow);
+	AssetCreationResult CreateStateMachineAsset(
+		const char* sourceFile,
+		const char* name);
+	AssetCreationResult CreateProceduralMeshAsset(
+		const char* sourceFile,
+		const char* name,
+		const ProceduralMeshSettings& settings);
+	bool LoadProceduralMeshSettings(
+		const char* sourceFile,
+		ProceduralMeshSettings& settings,
+		std::string& name,
+		std::string& error) const;
+	bool UpdateProceduralMeshAsset(
+		UID uid,
+		const char* sourceFile,
+		const char* name,
+		const ProceduralMeshSettings& settings,
+		std::string& error);
 
 	UID GenerateNewUID();
 	const Resource* Get(UID uid) const;
@@ -91,6 +150,7 @@ private:
 	bool LoadDefaultCone();
     bool LoadDefaultLUT();
     bool LoadCubeLUT(const char* file_path, float*& lut_data, uint& size);
+	bool SaveSourceAsset(const char* sourceFile, const Config& document) const;
 
 private:
 	std::string asset_folder;

@@ -18,6 +18,7 @@ class TubeLight;
 class LocalIBLLight;
 class IBLData;
 class Config;
+namespace EGE { struct EditorAssetSelection; }
 
 class SceneViewport
 {
@@ -67,6 +68,9 @@ private:
     void    DrawGuizmo      (ComponentCamera* camera, LocalIBLLight* light);
     void    DrawGuizmo      (ComponentCamera* camera, IBLData* skybox);
     void    DrawGuizmo      (ComponentCamera* camera, ComponentMeshRenderer* renderer);
+    void    DrawGuizmo      (
+        ComponentCamera* camera,
+        const EGE::EditorAssetSelection& asset);
 
 
 
