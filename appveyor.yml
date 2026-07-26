@@ -1,13 +1,13 @@
 version: v0.4-alpha.{build}
+image: Visual Studio 2022
 configuration:
 - Debug
 - Release
-platform: x86
-build:
-  project: EDU Game Engine.sln
-  verbosity: normal
+platform: x64
+build_script:
+- cmd: build.bat %CONFIGURATION% vs2022 build
 before_package:
-- ps: Copy-Item C:\projects\edu-game-engine\$env:CONFIGURATION\Engine.exe C:\projects\edu-game-engine\Game\.
+- ps: Copy-Item "build\vs2022\bin\$env:CONFIGURATION\Engine.exe" "Game\Engine.exe"
 artifacts:
 - path: Game
   name: game_files

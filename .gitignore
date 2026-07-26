@@ -3,7 +3,14 @@
 
 # User-specific files
 *.suo
+*.sln
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxitems
+*.vcxitems.filters
 *.user
+*.nvuser
 *.userosscache
 *.sln.docstates
 

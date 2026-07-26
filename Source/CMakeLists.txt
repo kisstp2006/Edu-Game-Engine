@@ -1,6 +1,11 @@
 file(GLOB EGE_ENGINE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+# This unfinished component was not part of the original Visual Studio build.
+list(REMOVE_ITEM EGE_ENGINE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/ComponentLight.cpp")
+list(APPEND EGE_ENGINE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/gpudetect/DeviceId.cpp")
 
 add_executable(Engine WIN32 ${EGE_ENGINE_SOURCES})
 
@@ -16,10 +21,11 @@ target_compile_definitions(Engine
 
 target_include_directories(Engine
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/utils"
         "${CMAKE_CURRENT_SOURCE_DIR}/gpudetect"
-        "${CMAKE_CURRENT_SOURCE_DIR}/imgui-filebrowser")
+        "${CMAKE_CURRENT_SOURCE_DIR}/imgui-filebrowser"
+        "${bullet_SOURCE_DIR}/src"
+        "${physfs_SOURCE_DIR}/src")
 
 target_link_libraries(Engine
     PRIVATE
@@ -48,7 +54,6 @@ if(MSVC)
     target_compile_options(Engine PRIVATE
         /W3
         /arch:AVX
-        /permissive-
         $<$<BOOL:${EGE_WARNINGS_AS_ERRORS}>:/WX>)
 
     set_property(DIRECTORY "${PROJECT_SOURCE_DIR}"
@@ -64,4 +69,3 @@ set_target_properties(Engine PROPERTIES
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
     PREFIX "Engine"
     FILES ${EGE_ENGINE_SOURCES})
-

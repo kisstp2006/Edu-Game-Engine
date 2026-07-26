@@ -11,6 +11,58 @@ Simple 3D game engine for educational purposes
 
 Download the code and play with it to learn, there is no formal installation process.
 
+## CMake build (Windows x64)
+
+Requirements:
+
+- CMake 3.24 or newer
+- Visual Studio 2022 with the **Desktop development with C++** workload
+- Git
+
+The root build helper automatically detects Visual Studio 2022 or 2026,
+configures CMake, downloads the pinned dependencies, and builds the engine:
+
+```powershell
+build.bat
+```
+
+Common commands:
+
+```powershell
+build.bat Release
+build.bat Debug vs2026 generate
+build.bat Release vs2022 rebuild
+build.bat Debug auto clean
+```
+
+Arguments can be supplied in any order. Run `build.bat help` for the full
+syntax. The `generate` action only creates the Visual Studio solution, while
+`build`, `rebuild`, and `clean` also operate on the `Engine` target.
+
+You can still invoke CMake directly:
+
+```powershell
+cmake --preset vs2022
+cmake --build --preset debug --target Engine
+```
+
+The Debug executable is written to
+`build/<preset>/bin/Debug/Engine.exe`.
+Run it with `Game` as its working directory:
+
+```powershell
+Set-Location Game
+..\build\vs2022\bin\Debug\Engine.exe
+```
+
+Visual Studio 2026 users can use the equivalent `vs2026`,
+`debug-vs2026`, and `release-vs2026` presets when invoking CMake directly.
+
+The build downloads pinned versions of SDL2, GLEW, Assimp, Bullet,
+PhysicsFS, DirectXTex, tinygltf, and miniaudio. The customized Dear ImGui
+docking snapshot, MathGeoLib, Thekla Atlas, TinySpline, and ImGui Node Editor
+remain isolated source targets because the engine relies on their legacy APIs.
+
 ## Credits
 
 Carlos Fuentes<br>

@@ -5,7 +5,7 @@ include(FetchContent)
 # build tree. Delete the build directory (or its _deps folder) for a clean
 # dependency refresh.
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
-set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_QUIET ON)
 
 # Build static dependencies so Engine.exe has no third-party DLL deployment
 # step. The exact revisions intentionally track the APIs used by this project.
@@ -15,6 +15,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(LIBC ON CACHE BOOL "Use the platform C library in SDL" FORCE)
 FetchContent_Declare(
     SDL2
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
@@ -100,15 +101,6 @@ FetchContent_MakeAvailable(directxtex)
 # absent directory so FetchContent populates them without adding upstream
 # examples or tools to our generated solution.
 FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.80
-    GIT_SHALLOW TRUE
-    SOURCE_SUBDIR _ege_no_subdirectory
-)
-FetchContent_MakeAvailable(imgui)
-
-FetchContent_Declare(
     tinygltf
     GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
     GIT_TAG v2.8.10
@@ -126,13 +118,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniaudio)
 
-# Dear ImGui has no upstream CMake target. Keep the project's existing
-# compatible backends and extensions, but compile the core from FetchContent.
+# This project uses a customized Dear ImGui 1.80 WIP docking snapshot. The
+# stable v1.80 tag does not contain the required docking/viewport API, so this
+# dependency remains source-integrated and isolated behind one target.
 add_library(ege_imgui STATIC
-    "${imgui_SOURCE_DIR}/imgui.cpp"
-    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
-    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
-    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui_demo.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui_draw.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui_widgets.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/backends/imgui_impl_opengl3.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/backends/imgui_impl_sdl.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/ImGuizmo.cpp"
@@ -143,12 +136,11 @@ add_library(ege_imgui STATIC
 add_library(EGE::ImGui ALIAS ege_imgui)
 target_include_directories(ege_imgui
     PUBLIC
-        "${imgui_SOURCE_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui"
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/backends"
 )
 target_link_libraries(ege_imgui PUBLIC SDL2-static)
-set_target_properties(ege_imgui PROPERTIES FOLDER "Dependencies")
+set_target_properties(ege_imgui PROPERTIES FOLDER "Legacy dependencies")
 
 add_library(ege_tinygltf INTERFACE)
 add_library(EGE::TinyGLTF ALIAS ege_tinygltf)

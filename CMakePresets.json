@@ -12,6 +12,10 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      },
+      "warnings": {
+        "dev": false,
+        "deprecated": false
       }
     },
     {
@@ -56,4 +60,3 @@
     }
   ]
 }
-
