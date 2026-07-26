@@ -85,6 +85,12 @@ PanelProperties::PanelProperties() : Panel("Properties")
 PanelProperties::~PanelProperties()
 {}
 
+void PanelProperties::ResetProjectState()
+{
+	show_texture.Clear();
+	selectTexture.ClearSelection();
+}
+
 // ---------------------------------------------------------
 void PanelProperties::Draw()
 {

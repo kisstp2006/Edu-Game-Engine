@@ -2,6 +2,9 @@
 #define __MODULEEDITOR_H__
 
 #include "Module.h"
+#include <imgui.h>
+#include "imgui-filebrowser/imfilebrowser.h"
+#include <filesystem>
 #include <vector>
 #include <variant>
 #include <memory>
@@ -90,6 +93,9 @@ public:
 	void Log(const char* entry);
 	void LogInputEvent(uint key, uint state);
 	void LogFPS(float fps, float ms);
+	void PrepareForProjectChange();
+	void SetProjectStatus(bool success, const std::string& message);
+	void ApplyAppearance(const std::string& theme, bool compact);
 
     int GetWidth(TabPanelEnum panel) const { return tab_panels[panel].width; }
     int GetHeight(TabPanelEnum panel) const { return tab_panels[panel].height; }
@@ -106,6 +112,8 @@ private:
 
 	void LoadFile(const char* filter_extension = nullptr, const char* from_dir = nullptr);
 	void DrawDirectoryRecursive(const char* directory, const char* filter_extension) ;
+	void DrawProjectDialogs();
+	void DrawSettingsWindow(bool& open, bool editorSettings);
 
 private:
 
@@ -136,6 +144,18 @@ private:
 	bool in_modal = false;
 	char selected_file[FILE_MAX];
 	bool draw_menu = true;
+	bool open_new_project_popup = false;
+	bool open_project_status_popup = false;
+	bool project_status_success = false;
+	bool show_project_settings = false;
+	bool show_editor_settings = false;
+	char new_project_name[128] = {};
+	char new_project_location[512] = {};
+	std::string project_status_message;
+	ImGui::FileBrowser open_project_dialog;
+	ImGui::FileBrowser project_location_dialog{
+		ImGuiFileBrowserFlags_SelectDirectory |
+		ImGuiFileBrowserFlags_CreateNewDir};
 
     SelectionVariant selected;
 

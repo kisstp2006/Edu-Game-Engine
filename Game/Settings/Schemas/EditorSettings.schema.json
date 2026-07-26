@@ -1,0 +1,100 @@
+{
+  "FormatVersion": 1,
+  "Title": "Editor Settings",
+  "Categories": [
+    {
+      "Id": "appearance",
+      "Label": "Appearance",
+      "Settings": [
+        {
+          "Id": "appearance.theme",
+          "Label": "Theme",
+          "Description": "The visual theme used by the editor.",
+          "Type": "enum",
+          "Default": "midnight",
+          "Options": [
+            {
+              "Value": "midnight",
+              "Label": "Midnight"
+            },
+            {
+              "Value": "dark",
+              "Label": "Dark"
+            },
+            {
+              "Value": "classic",
+              "Label": "Classic"
+            },
+            {
+              "Value": "light",
+              "Label": "Light"
+            }
+          ]
+        },
+        {
+          "Id": "appearance.compact_ui",
+          "Label": "Compact Controls",
+          "Description": "Use tighter spacing for editor controls.",
+          "Type": "boolean",
+          "Default": false
+        }
+      ]
+    },
+    {
+      "Id": "scene_camera",
+      "Label": "Scene Camera",
+      "Settings": [
+        {
+          "Id": "camera.move_speed",
+          "Label": "Move Speed",
+          "Description": "Base speed of WASD scene camera movement.",
+          "Type": "number",
+          "Default": 4.4,
+          "Min": 0.1,
+          "Max": 100.0,
+          "Step": 0.1
+        },
+        {
+          "Id": "camera.rotation_speed",
+          "Label": "Rotation Speed",
+          "Description": "Mouse sensitivity for orbit and fly look.",
+          "Type": "number",
+          "Default": 1.0,
+          "Min": 0.1,
+          "Max": 10.0,
+          "Step": 0.05
+        },
+        {
+          "Id": "camera.zoom_speed",
+          "Label": "Zoom Speed",
+          "Description": "Scene camera wheel and dolly speed.",
+          "Type": "number",
+          "Default": 1.5,
+          "Min": 0.1,
+          "Max": 20.0,
+          "Step": 0.1
+        }
+      ]
+    },
+    {
+      "Id": "projects",
+      "Label": "Projects",
+      "Settings": [
+        {
+          "Id": "projects.save_before_switch",
+          "Label": "Save Before Switching",
+          "Description": "Save project settings and the resource registry before opening another project.",
+          "Type": "boolean",
+          "Default": true
+        },
+        {
+          "Id": "projects.default_location",
+          "Label": "Default Project Location",
+          "Description": "Optional parent directory used by the New Project dialog.",
+          "Type": "string",
+          "Default": ""
+        }
+      ]
+    }
+  ]
+}

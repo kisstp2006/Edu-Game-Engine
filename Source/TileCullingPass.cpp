@@ -82,8 +82,15 @@ void TileCullingPass::useProgram()
 
 void TileCullingPass::generateTextureBuffer(int tilesX, int tilesY, int numPoints, int numSpots)
 {
-    uint newPointSize = tilesX * tilesY * numPoints*sizeof(int32_t);
-    uint newSpotSize = tilesX * tilesY * numSpots*sizeof(int32_t);
+    // An empty scene has no lights, but the compute pass still binds its
+    // output images. Keep a minimal backing buffer so a newly created project
+    // can render safely before the user adds the first light.
+    const uint tileCount =
+        uint((tilesX > 0 ? tilesX : 1) * (tilesY > 0 ? tilesY : 1));
+    const uint pointCount = uint(numPoints > 0 ? numPoints : 1);
+    const uint spotCount = uint(numSpots > 0 ? numSpots : 1);
+    uint newPointSize = tileCount * pointCount * sizeof(int32_t);
+    uint newSpotSize = tileCount * spotCount * sizeof(int32_t);
 
 
     if(newPointSize > pointSize)

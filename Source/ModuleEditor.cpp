@@ -19,9 +19,14 @@
 #include "PanelAbout.h"
 #include "PanelResources.h"
 #include "Event.h"
+#include "Project/Project.h"
+#include "Settings/SettingsService.h"
+#include "Settings/SettingsStore.h"
+#include "EditorTheme.h"
 
 #include "imgui_node_editor.h"
 
+#include <filesystem>
 #include <string.h>
 #include <algorithm>
 
@@ -39,6 +44,9 @@ namespace ed = ax::NodeEditor;
 ModuleEditor::ModuleEditor(bool start_enabled) : Module("Editor", start_enabled)
 {
 	selected_file[0] = '\0';
+	open_project_dialog.SetTitle("Open Edu Game Engine Project");
+	open_project_dialog.SetTypeFilters({".egeproject"});
+	project_location_dialog.SetTitle("Select Project Location");
 }
 
 // Destructor
@@ -61,9 +69,8 @@ bool ModuleEditor::Init(Config* config)
     ImGui_ImplSDL2_InitForOpenGL(App->window->GetWindow(), App->renderer3D->context);
     ImGui_ImplOpenGL3_Init("#version 330 core");
 
-    // Setup style
-    ImGui::StyleColorsDark();
-    //ImGui::StyleColorsClassic();
+    // Apply the default immediately. Editor settings may override it later.
+	EGE::EditorTheme::Apply("midnight", false);
 
 	// create all panels
 	
@@ -152,14 +159,49 @@ update_status ModuleEditor::Update(float dt)
 			bool selected = false;
 			if (ImGui::BeginMenu("File"))
 			{
-				ImGui::MenuItem("New ...");
-				ImGui::MenuItem("Load ...");
-				if (ImGui::MenuItem("Save ..."))
+				const bool can_change_project = App->IsStop();
+				if (ImGui::MenuItem(
+						"New Project...", nullptr, false,
+						can_change_project))
+				{
+					open_new_project_popup = true;
+				}
+				if (ImGui::MenuItem(
+						"Open Project...", nullptr, false,
+						can_change_project))
+				{
+					const std::shared_ptr<const EGE::Project> project =
+						App->GetActiveProject();
+					if (project)
+						open_project_dialog.SetPwd(
+							project->GetProjectDirectory().parent_path());
+					open_project_dialog.Open();
+				}
+
+				if (const std::shared_ptr<const EGE::Project> project =
+						App->GetActiveProject())
+				{
+					ImGui::Separator();
+					ImGui::TextDisabled(
+						"Project: %s", project->GetName().c_str());
+				}
+
+				ImGui::Separator();
+				if (ImGui::MenuItem("Save Scene"))
 					App->level->Save("level.json");
 
 				if (ImGui::MenuItem("Quit", "ESC"))
 					ret = UPDATE_STOP;
 
+				ImGui::EndMenu();
+			}
+
+			if (ImGui::BeginMenu("Edit"))
+			{
+				if (ImGui::MenuItem("Project Settings..."))
+					show_project_settings = true;
+				if (ImGui::MenuItem("Editor Settings..."))
+					show_editor_settings = true;
 				ImGui::EndMenu();
 			}
 
@@ -182,6 +224,10 @@ update_status ModuleEditor::Update(float dt)
 			ImGui::EndMainMenuBar();
 		}
 	}
+
+	DrawProjectDialogs();
+	DrawSettingsWindow(show_project_settings, false);
+	DrawSettingsWindow(show_editor_settings, true);
 
     for(uint i=0; i< TabPanelCount; ++i)
     {
@@ -226,7 +272,351 @@ update_status ModuleEditor::Update(float dt)
         ImGui::ShowMetricsWindow();
     }
 
-    return ret;
+	return ret;
+}
+
+void ModuleEditor::DrawProjectDialogs()
+{
+	if (open_new_project_popup)
+	{
+		open_new_project_popup = false;
+		if (new_project_location[0] == '\0')
+		{
+			std::filesystem::path location =
+				std::filesystem::current_path().parent_path();
+			bool hasConfiguredLocation = false;
+			if (const EGE::SettingsService* settings = App->GetSettings();
+				settings && settings->HasEditorSettings())
+			{
+				const std::string configuredLocation =
+					settings->Editor().GetString(
+						"projects.default_location", "");
+				std::error_code locationError;
+				if (!configuredLocation.empty() &&
+					std::filesystem::is_directory(
+						configuredLocation, locationError))
+				{
+					location = configuredLocation;
+					hasConfiguredLocation = true;
+				}
+			}
+			if (const std::shared_ptr<const EGE::Project> project =
+					App->GetActiveProject())
+			{
+				if (!hasConfiguredLocation)
+					location = project->GetProjectDirectory().parent_path();
+			}
+
+			const std::string location_text = location.string();
+			strncpy_s(
+				new_project_location, sizeof(new_project_location),
+				location_text.c_str(), _TRUNCATE);
+		}
+		ImGui::OpenPopup("New Project");
+	}
+
+	if (ImGui::BeginPopupModal(
+			"New Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::InputTextWithHint(
+			"##ProjectName", "Project name",
+			new_project_name, sizeof(new_project_name));
+
+		ImGui::InputText(
+			"##ProjectLocation", new_project_location,
+			sizeof(new_project_location), ImGuiInputTextFlags_ReadOnly);
+		ImGui::SameLine();
+		if (ImGui::Button("Browse..."))
+		{
+			project_location_dialog.SetPwd(new_project_location);
+			project_location_dialog.Open();
+		}
+
+		const bool can_create =
+			new_project_name[0] != '\0' &&
+			new_project_location[0] != '\0';
+		if (ImGui::Button("Create") && can_create)
+		{
+			const std::filesystem::path project_directory =
+				std::filesystem::path(new_project_location) /
+				new_project_name;
+			if (!App->RequestCreateProject(
+					project_directory, new_project_name))
+			{
+				SetProjectStatus(
+					false, "Another project operation is already pending.");
+			}
+			new_project_name[0] = '\0';
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+
+		ImGui::EndPopup();
+	}
+
+	project_location_dialog.Display();
+	if (project_location_dialog.HasSelected())
+	{
+		const std::string selected_location =
+			project_location_dialog.GetSelected().string();
+		strncpy_s(
+			new_project_location, sizeof(new_project_location),
+			selected_location.c_str(), _TRUNCATE);
+		project_location_dialog.ClearSelected();
+	}
+
+	open_project_dialog.Display();
+	if (open_project_dialog.HasSelected())
+	{
+		if (!App->RequestOpenProject(
+				open_project_dialog.GetSelected()))
+		{
+			SetProjectStatus(
+				false, "Another project operation is already pending.");
+		}
+		open_project_dialog.ClearSelected();
+	}
+
+	if (open_project_status_popup)
+	{
+		open_project_status_popup = false;
+		ImGui::OpenPopup("Project Status");
+	}
+
+	if (ImGui::BeginPopupModal(
+			"Project Status", nullptr,
+			ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		const ImVec4 color = project_status_success
+			? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
+			: ImVec4(0.95f, 0.35f, 0.35f, 1.0f);
+		ImGui::TextColored(
+			color, "%s", project_status_success ? "Success" : "Error");
+		ImGui::TextWrapped("%s", project_status_message.c_str());
+		if (ImGui::Button("OK"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+}
+
+void ModuleEditor::DrawSettingsWindow(
+	bool& open, bool editorSettings)
+{
+	if (!open)
+		return;
+
+	EGE::SettingsService* service = App->GetSettings();
+	if (!service || (editorSettings && !service->HasEditorSettings()))
+	{
+		open = false;
+		return;
+	}
+
+	EGE::SettingsStore& store =
+		editorSettings ? service->Editor() : service->Project();
+	ImGui::SetNextWindowSize(ImVec2(620.0f, 620.0f), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin(store.GetTitle().c_str(), &open))
+	{
+		ImGui::End();
+		return;
+	}
+
+	ImGui::TextDisabled(
+		"%s", store.GetValuesPath().string().c_str());
+	if (store.IsDirty())
+	{
+		ImGui::SameLine();
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "Modified");
+	}
+	ImGui::Separator();
+
+	for (const EGE::SettingCategory& category : store.GetCategories())
+	{
+		if (!ImGui::CollapsingHeader(
+				category.label.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			continue;
+		}
+
+		ImGui::Indent();
+		for (const EGE::SettingDefinition& definition :
+			category.settings)
+		{
+			const EGE::SettingValue* storedValue =
+				store.FindValue(definition.id);
+			if (!storedValue)
+				continue;
+
+			ImGui::PushID(definition.id.c_str());
+			bool changed = false;
+			EGE::SettingValue value = *storedValue;
+
+			switch (definition.type)
+			{
+			case EGE::SettingType::Boolean:
+			{
+				bool current = std::get<bool>(value);
+				if (ImGui::Checkbox(
+						definition.label.c_str(), &current))
+				{
+					value = current;
+					changed = true;
+				}
+				break;
+			}
+			case EGE::SettingType::Integer:
+			{
+				int current = std::get<int>(value);
+				if (definition.hasRange)
+				{
+					changed = ImGui::SliderInt(
+						definition.label.c_str(), &current,
+						static_cast<int>(definition.minimum),
+						static_cast<int>(definition.maximum));
+				}
+				else
+				{
+					changed = ImGui::InputInt(
+						definition.label.c_str(), &current,
+						static_cast<int>(definition.step));
+				}
+				if (changed)
+					value = current;
+				break;
+			}
+			case EGE::SettingType::Number:
+			{
+				float current =
+					static_cast<float>(std::get<double>(value));
+				if (definition.hasRange)
+				{
+					changed = ImGui::SliderFloat(
+						definition.label.c_str(), &current,
+						static_cast<float>(definition.minimum),
+						static_cast<float>(definition.maximum));
+				}
+				else
+				{
+					changed = ImGui::InputFloat(
+						definition.label.c_str(), &current,
+						static_cast<float>(definition.step));
+				}
+				if (changed)
+					value = static_cast<double>(current);
+				break;
+			}
+			case EGE::SettingType::String:
+			{
+				char text[512] = {};
+				strncpy_s(
+					text, sizeof(text),
+					std::get<std::string>(value).c_str(), _TRUNCATE);
+				if (ImGui::InputText(
+						definition.label.c_str(), text, sizeof(text)))
+				{
+					value = std::string(text);
+					changed = true;
+				}
+				break;
+			}
+			case EGE::SettingType::Enumeration:
+			{
+				const std::string currentValue =
+					std::get<std::string>(value);
+				const char* preview = currentValue.c_str();
+				for (const EGE::SettingOption& option :
+					definition.options)
+				{
+					if (option.value == currentValue)
+					{
+						preview = option.label.c_str();
+						break;
+					}
+				}
+
+				if (ImGui::BeginCombo(
+						definition.label.c_str(), preview))
+				{
+					for (const EGE::SettingOption& option :
+						definition.options)
+					{
+						const bool selected =
+							option.value == currentValue;
+						if (ImGui::Selectable(
+								option.label.c_str(), selected))
+						{
+							value = option.value;
+							changed = true;
+						}
+						if (selected)
+							ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+				break;
+			}
+			}
+
+			if (!definition.description.empty())
+			{
+				ImGui::TextDisabled(
+					"%s", definition.description.c_str());
+			}
+			if (definition.restartRequired)
+			{
+				ImGui::SameLine();
+				ImGui::TextColored(
+					ImVec4(0.95f, 0.75f, 0.25f, 1.0f),
+					"(restart required)");
+			}
+
+			if (changed && store.SetValue(
+					definition.id, std::move(value)))
+			{
+				App->ApplySettings();
+			}
+			ImGui::Spacing();
+			ImGui::PopID();
+		}
+		ImGui::Unindent();
+	}
+
+	ImGui::Separator();
+	if (ImGui::Button("Save"))
+	{
+		std::string error;
+		if (!store.Save(error))
+			SetProjectStatus(false, error);
+		else
+			SetProjectStatus(true, store.GetTitle() + " saved.");
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Reload"))
+	{
+		std::string error;
+		if (!store.ReloadValues(error))
+			SetProjectStatus(false, error);
+		else
+			App->ApplySettings();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Reset to Defaults"))
+	{
+		store.ResetToDefaults();
+		App->ApplySettings();
+	}
+
+	ImGui::End();
+}
+
+void ModuleEditor::ApplyAppearance(
+	const std::string& theme, bool compact)
+{
+	EGE::EditorTheme::Apply(theme, compact);
 }
 
 // Called before quitting
@@ -252,6 +642,32 @@ bool ModuleEditor::CleanUp()
     ImGui::DestroyContext();
 
 	return true;
+}
+
+void ModuleEditor::PrepareForProjectChange()
+{
+	ClearSelected();
+	if (tree)
+		tree->drag = nullptr;
+	if (props)
+		props->ResetProjectState();
+	if (res)
+		res->ResetProjectState();
+
+	file_dialog = closed;
+	selected_file[0] = '\0';
+	open_project_dialog.Close();
+	open_project_dialog.ClearSelected();
+	project_location_dialog.Close();
+	project_location_dialog.ClearSelected();
+}
+
+void ModuleEditor::SetProjectStatus(
+	bool success, const std::string& message)
+{
+	project_status_success = success;
+	project_status_message = message;
+	open_project_status_popup = true;
 }
 
 void ModuleEditor::ReceiveEvent(const Event& event)

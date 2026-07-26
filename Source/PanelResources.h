@@ -20,6 +20,7 @@ public:
 	virtual ~PanelResources();
 
 	void Draw() override;
+	void ResetProjectState();
 
 
 private:

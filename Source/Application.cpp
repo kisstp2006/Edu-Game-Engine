@@ -19,6 +19,12 @@
 #include "Config.h"
 #include "ThreadPool.h"
 #include "GameObject.h"
+#include "Project/ProjectManager.h"
+#include "Project/ProjectSerializer.h"
+#include "Settings/SettingsService.h"
+#include "OpenGL.h"
+
+#include <filesystem>
 
 using namespace std;
 
@@ -26,6 +32,7 @@ using namespace std;
 Application::Application(EngineMode mode) : mode(mode)
 {
     threadPool = std::make_unique<ThreadPool>();
+	project_manager = std::make_unique<EGE::ProjectManager>();
 
     frames = 0;
 	last_frame_ms = -1;
@@ -85,6 +92,9 @@ bool Application::Init()
 {
 	bool ret = true;
 
+	if (!InitializeProjectSystem())
+		return false;
+
 	char* buffer = nullptr;
 	fs->Load(SETTINGS_FOLDER "config.json", &buffer);
 
@@ -107,16 +117,235 @@ bool Application::Init()
         {
             Config section = config.GetSection((*it)->GetName());
             ret = (*it)->Start(&section);
-        }
+		}
 	}
+
+	if (ret)
+		ret = InitializeSettingsSystem();
 
 	RELEASE_ARRAY(buffer);
 	return ret;
 }
 
+bool Application::InitializeProjectSystem()
+{
+	std::error_code error;
+	fallback_project_file = std::filesystem::absolute(
+		"Fallback.egeproject", error).lexically_normal();
+	if (error)
+	{
+		LOG("Could not resolve the fallback project path");
+		return false;
+	}
+
+	const EGE::ProjectOpenResult opened =
+		project_manager->OpenProject(fallback_project_file);
+	if (!opened)
+	{
+		LOG("Could not open fallback project: %s",
+			opened.status.message.c_str());
+		return false;
+	}
+
+	if (!fs->SetProjectRoot(opened.project->GetProjectDirectory()))
+	{
+		LOG("Could not mount fallback project directory");
+		return false;
+	}
+
+	LOG("Opened fallback project [%s]",
+		opened.project->GetProjectFilePath().string().c_str());
+	return true;
+}
+
+bool Application::InitializeSettingsSystem()
+{
+	settings_service = std::make_unique<EGE::SettingsService>();
+	std::string error;
+	if (!settings_service->Initialize(
+			fs->GetFallbackRoot(), fs->GetProjectRoot(), IsEditor(), error))
+	{
+		LOG("Could not initialize settings: %s", error.c_str());
+		settings_service.reset();
+		return false;
+	}
+
+	ApplySettings();
+	LOG("Loaded data-driven project%s settings",
+		IsEditor() ? " and editor" : "");
+	return true;
+}
+
+void Application::ProcessPendingProjectChange()
+{
+	if (pending_project_change.action == ProjectChangeAction::None)
+		return;
+
+	PendingProjectChange request = std::move(pending_project_change);
+	pending_project_change = {};
+
+	if (!IsStop())
+	{
+		NotifyProjectChange(
+			false, "Stop Play Mode before changing projects.");
+		return;
+	}
+
+	const std::shared_ptr<EGE::Project> previous_project =
+		project_manager->GetActiveProject();
+	if (!previous_project)
+	{
+		NotifyProjectChange(false, "There is no active project.");
+		return;
+	}
+
+	std::string settings_error;
+	if (settings_service && !settings_service->SaveAll(settings_error))
+	{
+		NotifyProjectChange(false, settings_error);
+		return;
+	}
+
+	const bool save_resources =
+		!settings_service || !settings_service->HasEditorSettings() ||
+		settings_service->Editor().GetBool(
+			"projects.save_before_switch", true);
+	if (save_resources)
+		resources->SaveResources();
+
+	const EGE::ProjectStatus save_status =
+		project_manager->SaveActiveProject();
+	if (!save_status)
+	{
+		NotifyProjectChange(false, save_status.message);
+		return;
+	}
+
+	EGE::ProjectOpenResult result;
+	if (request.action == ProjectChangeAction::Create)
+	{
+		result = project_manager->CreateProject(
+			request.path, request.name);
+	}
+	else
+	{
+		result = project_manager->OpenProject(request.path);
+	}
+
+	if (!result)
+	{
+		NotifyProjectChange(false, result.status.message);
+		return;
+	}
+
+	if (result.project->GetProjectFilePath() ==
+		previous_project->GetProjectFilePath())
+	{
+		NotifyProjectChange(
+			true, "Project is already open: " + result.project->GetName());
+		return;
+	}
+
+	// No old-frame GPU command may still reference scene-owned resources.
+	glFinish();
+	if (editor)
+		editor->PrepareForProjectChange();
+
+	level->UnloadCurrent();
+	resources->UnloadProjectResources();
+
+	if (!fs->SetProjectRoot(result.project->GetProjectDirectory()))
+	{
+		project_manager->ActivateProject(previous_project);
+		resources->LoadProjectResources();
+		LoadProjectContent(previous_project);
+		NotifyProjectChange(
+			false, "Could not mount the selected project. "
+				"The previous project was restored.");
+		return;
+	}
+
+	if (settings_service &&
+		!settings_service->ChangeProject(
+			result.project->GetProjectDirectory(), settings_error))
+	{
+		fs->SetProjectRoot(previous_project->GetProjectDirectory());
+		project_manager->ActivateProject(previous_project);
+		std::string restore_error;
+		settings_service->ChangeProject(
+			previous_project->GetProjectDirectory(), restore_error);
+		resources->LoadProjectResources();
+		LoadProjectContent(previous_project);
+		ApplySettings();
+		NotifyProjectChange(
+			false, settings_error +
+				" The previous project was restored.");
+		return;
+	}
+
+	resources->LoadProjectResources();
+	ApplySettings();
+	const bool scene_loaded = LoadProjectContent(result.project);
+
+	std::string title = "Edu Engine - " + result.project->GetName();
+	window->SetTitle(title.c_str());
+
+	if (scene_loaded)
+	{
+		NotifyProjectChange(
+			true, "Project opened: " + result.project->GetName());
+	}
+	else
+	{
+		NotifyProjectChange(
+			true, "Project opened with an empty scene because its "
+				"start scene could not be loaded.");
+	}
+}
+
+bool Application::LoadProjectContent(
+	const std::shared_ptr<EGE::Project>& project)
+{
+	if (!project || project->GetConfig().startScene.empty())
+	{
+		level->CreateNewEmpty(
+			project ? project->GetName().c_str() : "Untitled");
+		return true;
+	}
+
+	std::error_code error;
+	if (!std::filesystem::is_regular_file(
+			project->GetStartScenePath(), error))
+	{
+		level->CreateNewEmpty(project->GetName().c_str());
+		return false;
+	}
+
+	const std::string scene_path =
+		project->GetConfig().startScene.generic_string();
+	if (!level->Load(scene_path.c_str()))
+	{
+		level->CreateNewEmpty(project->GetName().c_str());
+		return false;
+	}
+
+	return true;
+}
+
+void Application::NotifyProjectChange(
+	bool success, const std::string& message)
+{
+	LOG("%s: %s", success ? "Project" : "Project error",
+		message.c_str());
+	if (editor)
+		editor->SetProjectStatus(success, message);
+}
+
 // ---------------------------------------------
 void Application::PrepareUpdate()
 {
+	ProcessPendingProjectChange();
+
 	dt = (float)ms_timer.Read() / 1000.0f;
 	ms_timer.Start();
 
@@ -199,6 +428,14 @@ bool Application::CleanUp()
 
     fs->Save(SETTINGS_FOLDER "Engine.log", log.c_str(), uint(log.size()));
 	SavePrefs();
+	if (settings_service)
+	{
+		std::string settings_error;
+		if (!settings_service->SaveAll(settings_error))
+		{
+			LOG("Could not save settings: %s", settings_error.c_str());
+		}
+	}
 
 	for(list<Module*>::reverse_iterator it = modules.rbegin(); it != modules.rend() && ret; ++it)
 		if((*it)->IsActive() == true) 
@@ -394,4 +631,123 @@ bool Application::IsPause() const
 bool Application::IsStop() const
 {
 	return state == State::stop;
+}
+
+std::shared_ptr<const EGE::Project> Application::GetActiveProject() const
+{
+	return project_manager ? project_manager->GetActiveProject() : nullptr;
+}
+
+bool Application::RequestCreateProject(
+	const std::filesystem::path& project_directory,
+	const std::string& project_name)
+{
+	if (!IsEditor() || pending_project_change.action !=
+		ProjectChangeAction::None)
+	{
+		return false;
+	}
+
+	pending_project_change.action = ProjectChangeAction::Create;
+	pending_project_change.path = project_directory;
+	pending_project_change.name = project_name;
+	return true;
+}
+
+bool Application::RequestOpenProject(
+	const std::filesystem::path& project_file)
+{
+	if (!IsEditor() || pending_project_change.action !=
+		ProjectChangeAction::None)
+	{
+		return false;
+	}
+
+	pending_project_change.action = ProjectChangeAction::Open;
+	pending_project_change.path = project_file;
+	pending_project_change.name.clear();
+	return true;
+}
+
+EGE::SettingsService* Application::GetSettings()
+{
+	return settings_service.get();
+}
+
+const EGE::SettingsService* Application::GetSettings() const
+{
+	return settings_service.get();
+}
+
+void Application::ApplySettings()
+{
+	if (!settings_service)
+		return;
+
+	const EGE::SettingsStore& project = settings_service->Project();
+	if (!IsEditor())
+	{
+		SetAppName(project.GetString(
+			"application.display_name", GetAppName()).c_str());
+		SetOrganizationName(project.GetString(
+			"application.organization", GetOrganizationName()).c_str());
+	}
+	SetFramerateLimit(static_cast<uint>(
+		project.GetInt("runtime.max_framerate", 0)));
+
+	if (renderer3D)
+		renderer3D->SetVSync(
+			project.GetBool("rendering.vertical_sync", true));
+
+	if (physics3D)
+	{
+		physics3D->SetGravity(float3(
+			static_cast<float>(
+				project.GetNumber("physics.gravity_x", 0.0)),
+			static_cast<float>(
+				project.GetNumber("physics.gravity_y", -10.0)),
+			static_cast<float>(
+				project.GetNumber("physics.gravity_z", 0.0))));
+	}
+
+	if (IsEditor() && settings_service->HasEditorSettings())
+	{
+		const EGE::SettingsStore& editorSettings =
+			settings_service->Editor();
+		if (camera)
+		{
+			camera->mov_speed = static_cast<float>(
+				editorSettings.GetNumber("camera.move_speed", 4.4));
+			camera->rot_speed = static_cast<float>(
+				editorSettings.GetNumber("camera.rotation_speed", 1.0));
+			camera->zoom_speed = static_cast<float>(
+				editorSettings.GetNumber("camera.zoom_speed", 1.5));
+		}
+		if (editor)
+		{
+			editor->ApplyAppearance(
+				editorSettings.GetString("appearance.theme", "midnight"),
+				editorSettings.GetBool(
+					"appearance.compact_ui", false));
+		}
+	}
+
+	if (window)
+	{
+		std::string title;
+		if (IsEditor())
+		{
+			const std::shared_ptr<const EGE::Project> activeProject =
+				GetActiveProject();
+			title = "Edu Engine";
+			if (activeProject)
+				title += " - " + activeProject->GetName();
+		}
+		else
+		{
+			title = project.GetString(
+				"application.display_name", "Edu Game");
+		}
+		window->SetTitle(title.c_str());
+	}
 }

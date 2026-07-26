@@ -8,7 +8,7 @@
 #include <vector>
 #include <memory>
 
-#define RESERVED_RESOURCES 7 // cube/sphere/cylinde/cone/pyramid primitives + checker texture
+#define RESERVED_RESOURCES 9 // Engine-owned meshes and fallback textures.
 
 class Resource;
 class LoaderAnimation;
@@ -30,9 +30,11 @@ public:
 	bool CleanUp() override;
 	void ReceiveEvent(const Event& event) override;
 
-    void SaveTypedResources(Resource::Type type);
+	void SaveTypedResources(Resource::Type type);
 	void SaveResources() const;
 	void LoadResources();
+	void UnloadProjectResources();
+	void LoadProjectResources();
     void SaveResourcesTo(const char* path);
 
 	Resource::Type TypeFromExtension(const char* extension) const;

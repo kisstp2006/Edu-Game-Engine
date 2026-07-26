@@ -1,0 +1,10 @@
+{
+    "FormatVersion": 1,
+    "Project": {
+        "Name": "Fallback",
+        "AssetDirectory": "Assets",
+        "LibraryDirectory": "Library",
+        "SettingsDirectory": "Settings",
+        "StartScene": "Assets\/Scenes\/default.eduscene"
+    }
+}

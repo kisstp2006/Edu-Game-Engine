@@ -2,6 +2,7 @@
 #define __MODULEFILESYSTEM_H__
 
 #include "Module.h"
+#include <filesystem>
 #include <vector>
 #include <string>
 
@@ -28,6 +29,9 @@ public:
 
 	// Utility functions
 	bool AddPath(const char* path_or_zip);
+	bool SetProjectRoot(const std::filesystem::path& project_root);
+	const std::filesystem::path& GetProjectRoot() const;
+	const std::filesystem::path& GetFallbackRoot() const;
 	bool Exists(const char* file) const;
 	bool IsDirectory(const char* file) const;
     void CreateDirectory(const char* directory);
@@ -60,11 +64,15 @@ private:
 
 	void CreateAssimpIO();
 	void CreateAudioVFS();
+	bool CreateStandardDirectories();
 
 private:
 
 	aiFileIO* AssimpIO = nullptr;
 	PhysFSVFS* AudioVFS = nullptr;
+	std::filesystem::path fallback_root;
+	std::filesystem::path project_root;
+	std::string mounted_project_path;
 };
 
 #endif // __MODULEFILESYSTEM_H__

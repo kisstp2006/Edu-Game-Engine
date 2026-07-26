@@ -6,6 +6,7 @@
 #include <list>
 #include <string>
 #include <memory>
+#include <filesystem>
 #include "Timer.h"
 #include "MathGeoLib/include/Algorithm/Random/LCG.h"
 
@@ -30,6 +31,13 @@ class ModuleDebugDraw;
 class ThreadPool;
 
 struct Event;
+
+namespace EGE
+{
+	class Project;
+	class ProjectManager;
+	class SettingsService;
+}
 
 class Application
 {
@@ -77,12 +85,40 @@ public:
 	bool IsPause() const;
 	bool IsStop() const;
 	bool IsEditor() const { return mode == EngineMode::Editor; }
+	std::shared_ptr<const EGE::Project> GetActiveProject() const;
+	bool RequestCreateProject(
+		const std::filesystem::path& project_directory,
+		const std::string& project_name);
+	bool RequestOpenProject(
+		const std::filesystem::path& project_file);
+	EGE::SettingsService* GetSettings();
+	const EGE::SettingsService* GetSettings() const;
+	void ApplySettings();
 
 	ThreadPool* getThreadPool() {return threadPool.get(); }
 private:
 
 	void PrepareUpdate();
 	void FinishUpdate();
+	bool InitializeProjectSystem();
+	bool InitializeSettingsSystem();
+	void ProcessPendingProjectChange();
+	bool LoadProjectContent(const std::shared_ptr<EGE::Project>& project);
+	void NotifyProjectChange(bool success, const std::string& message);
+
+	enum class ProjectChangeAction
+	{
+		None,
+		Create,
+		Open
+	};
+
+	struct PendingProjectChange
+	{
+		ProjectChangeAction action = ProjectChangeAction::None;
+		std::filesystem::path path;
+		std::string name;
+	};
 
 public:
 
@@ -122,6 +158,10 @@ private:
 	std::string organization_name;
 
 	std::unique_ptr<ThreadPool> threadPool;
+	std::unique_ptr<EGE::ProjectManager> project_manager;
+	std::unique_ptr<EGE::SettingsService> settings_service;
+	PendingProjectChange pending_project_change;
+	std::filesystem::path fallback_project_file;
 
 	State state = State::stop;
 	EngineMode mode = EngineMode::Editor;

@@ -31,13 +31,30 @@ PanelResources::PanelResources() : Panel("Resources")
 PanelResources::~PanelResources()
 {}
 
+void PanelResources::ResetProjectState()
+{
+	fileDialog.Close();
+	fileDialog.ClearSelected();
+	textures_dlg.ClearSelection();
+	animation_dlg.ClearSelection();
+	model_dlg.ClearSelection();
+	show_texture.Clear();
+	waiting_to_load_file = false;
+	waiting_to_load = Resource::unknown;
+	selection.clear();
+	multiple_select_type = Resource::unknown;
+	multiple_select_pivot = 0;
+}
+
 // ---------------------------------------------------------
 void PanelResources::Draw()
 {
     fileDialog.Display();
 	if(fileDialog.HasSelected())
     {
-        ImportResource(std::filesystem::relative(fileDialog.GetSelected(), std::filesystem::current_path()).generic_string());
+        ImportResource(std::filesystem::relative(
+			fileDialog.GetSelected(),
+			App->fs->GetProjectRoot()).generic_string());
         fileDialog.ClearSelected();
     }
 
@@ -321,7 +338,8 @@ void PanelResources::DrawResourcePopup(Resource::Type type)
 		if (ImGui::MenuItem("Import.."))
         {
             waiting_to_load = type;
-            fileDialog.SetPwd(std::filesystem::path("Assets"));
+            fileDialog.SetPwd(
+				App->fs->GetProjectRoot() / "Assets");
             fileDialog.Open();
         }
 

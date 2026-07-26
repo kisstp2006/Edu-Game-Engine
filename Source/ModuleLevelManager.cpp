@@ -3,6 +3,7 @@
 #include "ModuleLevelManager.h"
 #include "ModuleFileSystem.h"
 #include "GameObject.h"
+#include "Project/Project.h"
 #include "Config.h"
 
 #include "ModuleRenderer3D.h"
@@ -57,8 +58,12 @@ bool ModuleLevelManager::Init(Config* config)
 
 bool ModuleLevelManager::Start(Config * config)
 {
-	// Load a default map
-	Load("default.eduscene");
+	const std::shared_ptr<const EGE::Project> project =
+		App->GetActiveProject();
+	if (project && !project->GetConfig().startScene.empty())
+		Load(project->GetConfig().startScene.generic_string().c_str());
+	else
+		CreateNewEmpty(project ? project->GetName().c_str() : "Untitled");
 	
 	return true;
 }
@@ -162,7 +167,8 @@ GameObject * ModuleLevelManager::Find(uint uid)
 bool ModuleLevelManager::CreateNewEmpty(const char * name)
 {
 	UnloadCurrent();
-	return false;
+	this->name = name ? name : "Untitled";
+	return true;
 }
 
 GameObject * ModuleLevelManager::CreateGameObject(GameObject * parent, const float3 & pos, const float3 & scale, const Quat & rot, const char * name)
@@ -258,15 +264,21 @@ bool ModuleLevelManager::Load(const char * file)
 		{
 			Config config(buffer);
 
-			// Load level description
-			Config desc(config.GetSection("Description"));
-			name = desc.GetString("Name", "Unnamed level");
-            //App->hints->Init(&desc);
-			//App->camera->Load(&desc);
+			if (config.IsValid())
+			{
+				UnloadCurrent();
 
-            lightManager->LoadLights(config.GetSection("Lights"));
-            LoadGameObjects(config);
-			skybox->Load(config.GetSection("Skybox"));
+				// Load level description
+				Config desc(config.GetSection("Description"));
+				name = desc.GetString("Name", "Unnamed level");
+				//App->hints->Init(&desc);
+				//App->camera->Load(&desc);
+
+				lightManager->LoadLights(config.GetSection("Lights"));
+				LoadGameObjects(config);
+				skybox->Load(config.GetSection("Skybox"));
+				ret = true;
+			}
         }
 
 		RELEASE_ARRAY(buffer); 
@@ -310,6 +322,21 @@ bool ModuleLevelManager::Save(const char * file)
 
 void ModuleLevelManager::UnloadCurrent()
 {
+	if (App->renderer3D && App->camera)
+	{
+		App->renderer3D->active_camera = App->camera->GetDummy();
+		App->renderer3D->culling_camera = App->camera->GetDummy();
+	}
+
+	if (root)
+		root->Remove();
+
+	quadtree.Clear();
+	quadtree.SetBoundaries(
+		AABB(float3(-500, 0, -500), float3(500, 30, 500)));
+	skybox = std::make_unique<IBLData>();
+	lightManager = std::make_unique<LightManager>();
+	name.clear();
 }
 
 void ModuleLevelManager::RecursiveProcessEvent(GameObject * go, const Event & event) const

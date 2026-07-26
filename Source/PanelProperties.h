@@ -58,6 +58,7 @@ public:
 	virtual ~PanelProperties();
 
 	void Draw() override;
+	void ResetProjectState();
 
 	UID PickResource(UID resource, int type = -1);
 	UID PickResourceModal(int type);

@@ -12,6 +12,7 @@
 #include "ResourceAnimation.h"
 #include "ResourceStateMachine.h"
 #include "Config.h"
+#include <filesystem>
 #include <string>
 
 #include "OpenGL.h"
@@ -83,9 +84,22 @@ bool ModuleResources::CleanUp()
 		RELEASE(*it);
 
 	resources.clear();
+	removed.clear();
 
 	delete white_fallback;
     delete black_fallback;
+	white_fallback = nullptr;
+	black_fallback = nullptr;
+	checkers = nullptr;
+	skybox = nullptr;
+	blueNoise = nullptr;
+	loopNoise = nullptr;
+	cube = nullptr;
+	sphere = nullptr;
+	plane = nullptr;
+	cylinder = nullptr;
+	cone = nullptr;
+	lut.reset();
 
 	return true;
 }
@@ -268,6 +282,49 @@ void ModuleResources::LoadResources()
 		}
 		RELEASE_ARRAY(buffer); 
 	}
+}
+
+void ModuleResources::UnloadProjectResources()
+{
+	for (auto iterator = resources.begin(); iterator != resources.end();)
+	{
+		if (iterator->first > RESERVED_RESOURCES)
+		{
+			RELEASE(iterator->second);
+			iterator = resources.erase(iterator);
+		}
+		else
+		{
+			++iterator;
+		}
+	}
+
+	for (Resource*& resource : removed)
+		RELEASE(resource);
+	removed.clear();
+	last_uid = RESERVED_RESOURCES + 1;
+}
+
+void ModuleResources::LoadProjectResources()
+{
+	last_uid = RESERVED_RESOURCES + 1;
+
+	const std::filesystem::path settings_directory =
+		App->fs->GetProjectRoot() / "Settings";
+	const std::filesystem::path uid_file =
+		settings_directory / LAST_UID_FILE;
+	const std::filesystem::path registry_file =
+		settings_directory / "resources.json";
+
+	if (std::filesystem::is_regular_file(uid_file))
+		LoadUID();
+	else
+		SaveUID();
+
+	if (!std::filesystem::is_regular_file(registry_file))
+		SaveResources();
+
+	LoadResources();
 }
 
 Resource::Type ModuleResources::TypeFromExtension(const char * extension) const
@@ -686,7 +743,7 @@ bool ModuleResources::LoadDefaultSkybox()
 
 bool ModuleResources::LoadDefaultLoopNoise()
 {
-    loopNoise = static_cast<ResourceTexture*>(CreateNewResource(Resource::texture, 6));
+    loopNoise = static_cast<ResourceTexture*>(CreateNewResource(Resource::texture, 8));
 
     char* buffer = nullptr;
     uint size = App->fs->Load("Assets/Textures/fog.png", &buffer);
@@ -713,7 +770,7 @@ bool ModuleResources::LoadDefaultLoopNoise()
 
 bool ModuleResources::LoadDefaultBlueNoise()
 {
-    blueNoise = static_cast<ResourceTexture*>(CreateNewResource(Resource::texture, 6));
+    blueNoise = static_cast<ResourceTexture*>(CreateNewResource(Resource::texture, 9));
 
     char* buffer = nullptr;
     //uint size = App->fs->Load("Assets/Textures/BlueNoise/512_512/LDR_LLL1_0.png", &buffer);

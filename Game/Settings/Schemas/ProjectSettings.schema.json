@@ -1,0 +1,85 @@
+{
+  "FormatVersion": 1,
+  "Title": "Project Settings",
+  "Categories": [
+    {
+      "Id": "application",
+      "Label": "Application",
+      "Settings": [
+        {
+          "Id": "application.display_name",
+          "Label": "Display Name",
+          "Description": "The name shown for the running project.",
+          "Type": "string",
+          "Default": "Edu Engine"
+        },
+        {
+          "Id": "application.organization",
+          "Label": "Organization",
+          "Description": "The studio or publisher name stored with the project.",
+          "Type": "string",
+          "Default": "UPC CITM"
+        },
+        {
+          "Id": "runtime.max_framerate",
+          "Label": "Maximum Framerate",
+          "Description": "Zero disables the software framerate limit.",
+          "Type": "integer",
+          "Default": 0,
+          "Min": 0,
+          "Max": 360,
+          "Step": 1
+        }
+      ]
+    },
+    {
+      "Id": "rendering",
+      "Label": "Rendering",
+      "Settings": [
+        {
+          "Id": "rendering.vertical_sync",
+          "Label": "Vertical Sync",
+          "Description": "Synchronize presentation with the display refresh rate.",
+          "Type": "boolean",
+          "Default": false
+        }
+      ]
+    },
+    {
+      "Id": "physics",
+      "Label": "Physics",
+      "Settings": [
+        {
+          "Id": "physics.gravity_x",
+          "Label": "Gravity X",
+          "Description": "World gravity on the X axis.",
+          "Type": "number",
+          "Default": 0.0,
+          "Min": -100.0,
+          "Max": 100.0,
+          "Step": 0.1
+        },
+        {
+          "Id": "physics.gravity_y",
+          "Label": "Gravity Y",
+          "Description": "World gravity on the Y axis.",
+          "Type": "number",
+          "Default": -10.0,
+          "Min": -100.0,
+          "Max": 100.0,
+          "Step": 0.1
+        },
+        {
+          "Id": "physics.gravity_z",
+          "Label": "Gravity Z",
+          "Description": "World gravity on the Z axis.",
+          "Type": "number",
+          "Default": 0.0,
+          "Min": -100.0,
+          "Max": 100.0,
+          "Step": 0.1
+        }
+      ]
+    }
+  ]
+}

@@ -6,6 +6,7 @@
 #include <assimp/cfileio.h>
 #include <assimp/types.h>
 #include <miniaudio.h>
+#include <filesystem>
 
 // miniaudio pulls in <windows.h> on Windows, which #defines CreateDirectory to
 // CreateDirectoryA/W and breaks ModuleFileSystem::CreateDirectory()'s own definition below
@@ -29,8 +30,15 @@ ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System"
 	PHYSFS_init(base_path);
 	SDL_free(base_path);
 
-	// workaround VS string directory mess
-	AddPath(".");
+	std::error_code path_error;
+	fallback_root = std::filesystem::absolute(
+		std::filesystem::current_path(), path_error).lexically_normal();
+	if (path_error)
+		fallback_root = std::filesystem::current_path().lexically_normal();
+	project_root = fallback_root;
+
+	// Keep the bundled fallback project mounted behind every user project.
+	AddPath(fallback_root.string().c_str());
 
 	if(0&&game_path != nullptr)
 		AddPath(game_path);
@@ -40,10 +48,18 @@ ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System"
 	LOG(GetReadPaths());
 
 	// enable us to write in the game's dir area
-	if(PHYSFS_setWriteDir(".") == 0)
+	if(PHYSFS_setWriteDir(fallback_root.string().c_str()) == 0)
 		LOG("File System error while creating write dir: %s\n", PHYSFS_getLastError());
 
-	// Make sure standard paths exist
+	CreateStandardDirectories();
+
+	// Generate IO interfaces
+	CreateAssimpIO();
+	CreateAudioVFS();
+}
+
+bool ModuleFileSystem::CreateStandardDirectories()
+{
 	const char* dirs[] = {
 		SETTINGS_FOLDER, ASSETS_FOLDER, LIBRARY_FOLDER,
 		LIBRARY_AUDIO_FOLDER, LIBRARY_MESH_FOLDER,
@@ -54,12 +70,17 @@ ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System"
 	for (uint i = 0; i < sizeof(dirs)/sizeof(const char*); ++i)
 	{
 		if (PHYSFS_exists(dirs[i]) == 0)
-			PHYSFS_mkdir(dirs[i]);
+		{
+			if (PHYSFS_mkdir(dirs[i]) == 0)
+			{
+				LOG("File System error while creating directory [%s]: %s",
+					dirs[i], PHYSFS_getLastError());
+				return false;
+			}
+		}
 	}
 
-	// Generate IO interfaces
-	CreateAssimpIO();
-	CreateAudioVFS();
+	return true;
 }
 
 // Destructor
@@ -108,6 +129,90 @@ bool ModuleFileSystem::AddPath(const char* path_or_zip)
 		ret = true;
 
 	return ret;
+}
+
+bool ModuleFileSystem::SetProjectRoot(
+	const std::filesystem::path& requested_root)
+{
+	std::error_code error;
+	std::filesystem::path normalized_root =
+		std::filesystem::absolute(requested_root, error).lexically_normal();
+	if (error || !std::filesystem::is_directory(normalized_root, error))
+	{
+		LOG("Cannot use project directory [%s]",
+			requested_root.string().c_str());
+		return false;
+	}
+
+	if (normalized_root == project_root)
+		return true;
+
+	const std::string new_path = normalized_root.string();
+	const bool use_fallback = normalized_root == fallback_root;
+
+	if (use_fallback)
+	{
+		if (!mounted_project_path.empty() &&
+			PHYSFS_unmount(mounted_project_path.c_str()) == 0)
+		{
+			LOG("Cannot unmount previous project [%s]: %s",
+				mounted_project_path.c_str(), PHYSFS_getLastError());
+			return false;
+		}
+
+		if (PHYSFS_setWriteDir(new_path.c_str()) == 0)
+		{
+			if (!mounted_project_path.empty())
+				PHYSFS_mount(mounted_project_path.c_str(), nullptr, 0);
+			LOG("Cannot set fallback project write directory [%s]: %s",
+				new_path.c_str(), PHYSFS_getLastError());
+			return false;
+		}
+
+		mounted_project_path.clear();
+	}
+	else
+	{
+		if (PHYSFS_mount(new_path.c_str(), nullptr, 0) == 0)
+		{
+			LOG("Cannot mount project [%s]: %s",
+				new_path.c_str(), PHYSFS_getLastError());
+			return false;
+		}
+
+		if (PHYSFS_setWriteDir(new_path.c_str()) == 0)
+		{
+			PHYSFS_unmount(new_path.c_str());
+			LOG("Cannot set project write directory [%s]: %s",
+				new_path.c_str(), PHYSFS_getLastError());
+			return false;
+		}
+
+		if (!mounted_project_path.empty() &&
+			PHYSFS_unmount(mounted_project_path.c_str()) == 0)
+		{
+			PHYSFS_setWriteDir(project_root.string().c_str());
+			PHYSFS_unmount(new_path.c_str());
+			LOG("Cannot unmount previous project [%s]: %s",
+				mounted_project_path.c_str(), PHYSFS_getLastError());
+			return false;
+		}
+
+		mounted_project_path = new_path;
+	}
+
+	project_root = std::move(normalized_root);
+	return CreateStandardDirectories();
+}
+
+const std::filesystem::path& ModuleFileSystem::GetProjectRoot() const
+{
+	return project_root;
+}
+
+const std::filesystem::path& ModuleFileSystem::GetFallbackRoot() const
+{
+	return fallback_root;
 }
 
 // Check if a file exists
@@ -288,7 +393,7 @@ uint ModuleFileSystem::Load(const char* file, char** buffer) const
 
 		if(size > 0)
 		{
-			*buffer = new char[size];
+			*buffer = new char[size + 1];
 			uint readed = (uint) PHYSFS_read(fs_file, *buffer, 1, size);
 			if(readed != size)
 			{
@@ -296,7 +401,10 @@ uint ModuleFileSystem::Load(const char* file, char** buffer) const
 				RELEASE(buffer);
 			}
 			else
+			{
+				(*buffer)[size] = '\0';
 				ret = readed;
+			}
 		}
 
 		if(PHYSFS_close(fs_file) == 0)
