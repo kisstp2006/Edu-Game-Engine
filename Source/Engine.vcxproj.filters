@@ -105,6 +105,9 @@
     <ClInclude Include="Module.h">
       <Filter>Core Modules</Filter>
     </ClInclude>
+    <ClInclude Include="miniaudio\miniaudio.h">
+      <Filter>3rd Party</Filter>
+    </ClInclude>
     <ClInclude Include="ModuleAudio.h">
       <Filter>Core Modules</Filter>
     </ClInclude>
@@ -821,6 +824,9 @@
     </ClCompile>
     <ClCompile Include="Main.cpp">
       <Filter>Main</Filter>
+    </ClCompile>
+    <ClCompile Include="miniaudio_impl.cpp">
+      <Filter>3rd Party</Filter>
     </ClCompile>
     <ClCompile Include="ModuleAudio.cpp">
       <Filter>Core Modules</Filter>

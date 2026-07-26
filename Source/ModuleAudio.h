@@ -3,12 +3,7 @@
 
 #include <vector>
 #include "Module.h"
-
-#define DEFAULT_MUSIC_FADE_TIME 2.0f
-
-struct _Mix_Music;
-struct Mix_Chunk;
-typedef struct _Mix_Music Mix_Music;
+#include "miniaudio/miniaudio.h"
 
 class GameObject;
 class ComponentAudioListener;
@@ -23,7 +18,7 @@ public:
 	~ModuleAudio();
 
 	bool Init(Config* config = nullptr) override;
-	
+
 	bool Start(Config* config = nullptr) override;
 	update_status PostUpdate(float dt) override;
 	bool CleanUp() override;
@@ -32,10 +27,9 @@ public:
 	void Load(Config* config) override;
 
 	// Load audio assets
-	const char* ImportSlow(const char* file);  // too slow for now, better to just copy the file
-	bool Import(const char* file, std::string& output_file); 
+	bool Import(const char* file, std::string& output_file);
 	bool Load(ResourceAudio* resource);
-	void Unload(ulong id);
+	void Unload(ma_sound* sound);
 
 	float GetVolume() const;
 	float GetMusicVolume() const;
@@ -62,6 +56,11 @@ private:
 	float fx_volume = 1.0f;
 	std::vector<ComponentAudioSource*> sources;
 	std::vector<ComponentAudioListener*> listeners;
+
+	ma_engine engine;
+	ma_sound_group music_group; // streams (music)
+	ma_sound_group fx_group;    // samples (fx)
+	bool engine_initialized = false;
 };
 
 #endif // __MODULEAUDIO_H__

@@ -3,6 +3,8 @@
 
 #include "Resource.h"
 
+struct ma_sound;
+
 class ResourceAudio : public Resource
 {
 	friend class ModuleMeshes;
@@ -29,7 +31,7 @@ public:
 	void Load(const Config& config) override;
 
 public:
-	ulong audio_id = 0;
+	ma_sound* sound = nullptr;
 	Format format = unknown;
 };
 

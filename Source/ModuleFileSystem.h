@@ -9,8 +9,7 @@ struct SDL_RWops;
 int close_sdl_rwops(SDL_RWops *rw);
 
 struct aiFileIO;
-#include "Bass/include/bass.h"
-//struct BASS_FILEPROCS;
+struct PhysFSVFS;
 
 class ModuleFileSystem : public Module
 {
@@ -43,11 +42,10 @@ public:
 	unsigned int Load(const char* path, const char* file, char** buffer) const;
 	unsigned int Load(const char* file, char** buffer) const;
 	SDL_RWops* Load(const char* file) const;
-	void* BassLoad(const char* file) const;
 
 	// IO interfaces for other libs to handle files via PHYSfs
 	aiFileIO* GetAssimpIO();
-	BASS_FILEPROCS* GetBassIO();
+	void* GetAudioVFS();
 
     unsigned int Save(const char* path, const char* file, const void* buffer, unsigned int size, bool append = false) const;
 	unsigned int Save(const char* file, const void* buffer, unsigned int size, bool append = false) const;
@@ -61,12 +59,12 @@ public:
 private:
 
 	void CreateAssimpIO();
-	void CreateBassIO();
+	void CreateAudioVFS();
 
 private:
 
 	aiFileIO* AssimpIO = nullptr;
-	BASS_FILEPROCS* BassIO = nullptr;
+	PhysFSVFS* AudioVFS = nullptr;
 };
 
 #endif // __MODULEFILESYSTEM_H__

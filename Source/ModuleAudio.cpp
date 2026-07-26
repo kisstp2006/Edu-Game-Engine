@@ -9,62 +9,10 @@
 #include "ComponentAudioListener.h"
 #include "ComponentAudioSource.h"
 #include "Config.h"
-#include "Bass/include/bass.h"
-#include "Bass/include/bassenc.h"
-#include "Bass/include/bassenc_ogg.h"
 
 #include "Leaks.h"
 
-#pragma comment( lib, "Bass/lib/bass.lib" )
-#pragma comment( lib, "Bass/lib/bassenc.lib" )
-#pragma comment( lib, "Bass/lib/bassenc_ogg.lib" )
-
 using namespace std;
-
-static const char* BASS_GetErrorString()
-{
-	switch (BASS_ErrorGetCode())
-	{
-	case -1: return "mystery problem";
-	case 0: return "all is OK";
-	case 1: return "memory error";
-	case 2: return "can't open the file";
-	case 3: return "can't find a free/valid driver";
-	case 4: return "the sample buffer was lost";
-	case 5: return "invalid handle";
-	case 6: return "unsupported sample format";
-	case 7: return "invalid position";
-	case 8: return "BASS_Init has not been successfully called";
-	case 9: return "BASS_Start has not been successfully called";
-	case 10: return "SSL/HTTPS support isn't available";
-	case 14: return "already initialized/paused/whatever";
-	case 18: return "can't get a free channel";
-	case 19: return "an illegal type was specified";
-	case 20: return "an illegal parameter was specified";
-	case 21: return "no 3D support";
-	case 22: return "no EAX support";
-	case 23: return "illegal device number";
-	case 24: return "not playing";
-	case 25: return "illegal sample rate";
-	case 27: return "the stream is not a file stream";
-	case 29: return "no hardware voices available";
-	case 31: return "the MOD music has no sequence data";
-	case 32: return "no internet connection could be opened";
-	case 33: return "couldn't create the file";
-	case 34: return "effects are not available";
-	case 37: return "requested data is not available";
-	case 38: return "the channel is/isn't a 'decoding channel'";
-	case 39: return "a sufficient DirectX version is not installed";
-	case 40: return "connection timedout";
-	case 41: return "unsupported file format";
-	case 42: return "unavailable speaker";
-	case 43: return "invalid BASS version (used by add-ons)";
-	case 44: return "codec is not available or supported";
-	case 45: return "the channel/file has ended";
-	case 46: return "the device is busy";
-	default: return "unknown error code";
-	}	  
-}
 
 ModuleAudio::ModuleAudio( bool start_enabled) : Module("Audio", start_enabled)
 {}
@@ -78,21 +26,30 @@ bool ModuleAudio::Init(Config* config)
 {
 	bool ret = true;
 	LOG("Loading Audio Mixer");
-	
-	if (BASS_Init(-1, 44100, BASS_DEVICE_3D, 0, NULL) != TRUE)
+
+	ma_engine_config engine_config = ma_engine_config_init();
+	engine_config.pResourceManagerVFS = (ma_vfs*) App->fs->GetAudioVFS();
+	engine_config.listenerCount = 1;
+
+	if (ma_engine_init(&engine_config, &engine) != MA_SUCCESS)
 	{
-		LOG("BASS_Init() error: %s", BASS_GetErrorString());
+		LOG("ma_engine_init() error");
 		ret = false;
 	}
 	else
 	{
-		LOG("Using Bass %s", BASSVERSIONTEXT);
+		engine_initialized = true;
+		LOG("Using miniaudio %s", ma_version_string());
 
-		int a, count = 0;
-		BASS_DEVICEINFO info;
-		for (a = 0; BASS_GetDeviceInfo(a, &info); a++)
-			if (info.flags & BASS_DEVICE_ENABLED) // device is enabled
-				LOG("Audio device detected: %s", info.name);
+		const ma_device* device = ma_engine_get_device(&engine);
+		if (device != nullptr)
+			LOG("Audio device in use: %s", device->playback.name);
+
+		if (ma_sound_group_init(&engine, 0, nullptr, &music_group) != MA_SUCCESS)
+			LOG("Could not create the music sound group");
+
+		if (ma_sound_group_init(&engine, 0, nullptr, &fx_group) != MA_SUCCESS)
+			LOG("Could not create the fx sound group");
 	}
 
 	// Settings
@@ -113,10 +70,7 @@ bool ModuleAudio::Start(Config * config)
 
 update_status ModuleAudio::PostUpdate(float dt)
 {
-	// Update all 3D values
 	UpdateAudio();
-
-	BASS_Apply3D();
 
 	return UPDATE_CONTINUE;
 }
@@ -126,7 +80,14 @@ bool ModuleAudio::CleanUp()
 {
 	LOG("Freeing sound FX, closing Mixer and Audio subsystem");
 
-	BASS_Free();
+	if (engine_initialized == true)
+	{
+		ma_sound_group_uninit(&fx_group);
+		ma_sound_group_uninit(&music_group);
+		ma_engine_uninit(&engine);
+		engine_initialized = false;
+	}
+
 	return true;
 }
 
@@ -146,58 +107,6 @@ void ModuleAudio::Load(Config * config)
 
 }
 
-void CALLBACK EncodeNewData(HENCODE encoder, DWORD channel, const void* buffer, DWORD lenght, void* user)
-{
-	LOG("Received encoding chunk of %u bytes for %s", lenght, (const char*)user);
-	App->fs->Save((const char*)user, (const char*) buffer, lenght, true);
-}
-
-const char * ModuleAudio::ImportSlow(const char * file)
-{
-	static uint asset_id = 0;
-	static char name[80];
-
-	sprintf_s(name, 80, "stream_%u.ogg", ++asset_id);
-
-	BASS_SetConfig( BASS_CONFIG_BUFFER, 65535);
-
-	ulong id = BASS_StreamCreateFileUser( 
-				STREAMFILE_NOBUFFER, 
-				BASS_STREAM_DECODE | BASS_ASYNCFILE, 
-				App->fs->GetBassIO(), 
-				App->fs->BassLoad(file) );
-
-	// Start encode paused
-	HENCODE encoder = BASS_Encode_OGG_Start(
-		id,
-		"-m 80",
-		BASS_ENCODE_AUTOFREE | BASS_ENCODE_CAST_NOLIMIT,
-		EncodeNewData, 
-		(void*) name);
-	
-	if (encoder == 0)
-		LOG("BASS_Encode_OGG_Start() error: %s", BASS_GetErrorString());
-	else
-	{
-		// truncate file if it already exist
-		App->fs->Remove(name);
-
-		char* buffer = new char[1024*1024];
-		BASS_ChannelPlay(id, 0);
-
-		while (BASS_ChannelIsActive(id) == BASS_ACTIVE_PLAYING)
-		{
-			uint len = BASS_ChannelGetData(id, buffer, 655350);
-			BASS_Encode_Write(id, buffer, len);
-			LOG("Got %u", len);
-		}
-
-		RELEASE(buffer);
-	}
-
-	return nullptr;
-}
-
 bool ModuleAudio::Import(const char * full_path, string& output_file)
 {
 	// Try to load and free immediately to check if the resource is valid
@@ -208,46 +117,23 @@ bool ModuleAudio::Import(const char * full_path, string& output_file)
 	{
 		App->fs->SplitFilePath(full_path, nullptr, nullptr, &extension);
 
-		if (extension == "ogg")
+		if (extension == "ogg" || extension == "wav")
 		{
-			// OGG files will be streams
-			HSTREAM stream = BASS_StreamCreateFileUser( 
-				STREAMFILE_BUFFER, BASS_STREAM_AUTOFREE, 
-				App->fs->GetBassIO(), App->fs->BassLoad(full_path) );
+			ma_decoder_config decoder_config = ma_decoder_config_init_default();
+			ma_decoder decoder;
 
-			if (stream != 0)
+			if (ma_decoder_init_vfs((ma_vfs*) App->fs->GetAudioVFS(), full_path, &decoder_config, &decoder) == MA_SUCCESS)
 			{
-				BASS_StreamFree(stream);
+				ma_decoder_uninit(&decoder);
 				ret = true;
 			}
 			else
-				LOG("BASS_StreamCreateFile() error: %s", BASS_GetErrorString());
-		}
-		else if (extension == "wav")
-		{
-			// WAV for samples
-			char* buffer = nullptr;
-			uint size = App->fs->Load(full_path, &buffer);
-
-			if (buffer != nullptr)
-			{
-				HSAMPLE sample = BASS_SampleLoad(TRUE, buffer, 0, size, 5, BASS_SAMPLE_OVER_VOL);
-
-				if (sample != 0)
-				{
-					BASS_SampleFree(sample);
-					ret = true;
-				}
-				else
-					LOG("BASS_SampleLoad() file [%s] error: %s", full_path, BASS_GetErrorString());
-
-				RELEASE(buffer);
-			}
+				LOG("miniaudio could not open [%s] to validate the import", full_path);
 		}
 	}
 
 	// Just copy the file for now
-	// TODO: decode and encode again - check ImportSlow()
+	// TODO: decode and re-encode to ogg to save space
 	if (ret == true)
 	{
 		char result[250];
@@ -263,74 +149,58 @@ bool ModuleAudio::Import(const char * full_path, string& output_file)
 bool ModuleAudio::Load(ResourceAudio * resource)
 {
 	bool ret = false;
-	ulong id = 0;
 
 	if (resource != nullptr && resource->GetExportedFile())
 	{
 		string extension;
 		App->fs->SplitFilePath(resource->GetExportedFile(), nullptr, nullptr, &extension);
 
+		ma_sound_group* group = nullptr;
+		bool should_loop = false;
+
 		if (extension == "ogg")
 		{
 			// OGG files will be streams
-			id = BASS_StreamCreateFileUser( 
-				STREAMFILE_BUFFER, 
-				BASS_SAMPLE_LOOP | BASS_STREAM_AUTOFREE, 
-				App->fs->GetBassIO(), 
-				App->fs->BassLoad(resource->GetExportedFile()) );
-
-			if (id != 0)
-				resource->format = ResourceAudio::stream;
-			else
-				LOG("BASS_StreamCreateFile() error: %s", BASS_GetErrorString());
+			resource->format = ResourceAudio::stream;
+			group = &music_group;
+			should_loop = true;
 		}
 		else if (extension == "wav")
 		{
 			// WAV for samples
-			char* buffer = nullptr;
-			uint size = App->fs->Load(resource->GetExportedFile(), &buffer);
+			resource->format = ResourceAudio::sample;
+			group = &fx_group;
+			should_loop = false;
+		}
 
-			if (buffer != nullptr)
+		if (group != nullptr)
+		{
+			ma_uint32 flags = (resource->format == ResourceAudio::stream) ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
+			ma_sound* sound = new ma_sound;
+
+			if (ma_sound_init_from_file(&engine, resource->GetExportedFile(), flags, group, nullptr, sound) == MA_SUCCESS)
 			{
-				HSAMPLE sample = BASS_SampleLoad(TRUE, buffer, 0, size, 5, BASS_SAMPLE_OVER_VOL);
-
-				if (sample == 0)
-					LOG("BASS_SampleLoad() file [%s] error: %s", resource->GetExportedFile(), BASS_GetErrorString());
-				else
-				{
-					id = BASS_SampleGetChannel(sample, FALSE);
-
-					if (id != 0)
-						resource->format = ResourceAudio::sample;
-					else
-						LOG("BASS_SampleGetChannel() with id [%ul] error: %s", sample, BASS_GetErrorString());
-				}
-
-				// since we are not buffering the file, we can safely remove it
-				RELEASE(buffer); 
+				ma_sound_set_looping(sound, should_loop ? MA_TRUE : MA_FALSE);
+				resource->sound = sound;
+				ret = true;
+			}
+			else
+			{
+				LOG("miniaudio could not load sound [%s]", resource->GetExportedFile());
+				delete sound;
 			}
 		}
-	}
-
-	if(id != 0)
-	{
-		resource->audio_id = id;
-		ret = true;
 	}
 
 	return ret;
 }
 
-void ModuleAudio::Unload(ulong id)
+void ModuleAudio::Unload(ma_sound* sound)
 {
-	if (id != 0)
+	if (sound != nullptr)
 	{
-		BASS_CHANNELINFO info;
-		BASS_ChannelGetInfo(id, &info );
-		if (info.filename != nullptr)
-			BASS_SampleFree(id);
-		else
-			BASS_StreamFree(id);
+		ma_sound_uninit(sound);
+		delete sound;
 	}
 }
 
@@ -353,88 +223,67 @@ void ModuleAudio::SetVolume(float new_volume)
 {
 	volume = new_volume;
 	CAP(volume);
-	BASS_SetVolume(volume);
+
+	if (engine_initialized == true)
+		ma_engine_set_volume(&engine, volume);
 }
 
 void ModuleAudio::SetMusicVolume(float new_music_volume)
 {
 	music_volume = new_music_volume;
 	CAP(music_volume);
-	BASS_SetConfig(BASS_CONFIG_GVOL_STREAM, (DWORD) (music_volume * 10000.0f));
+
+	if (engine_initialized == true)
+		ma_sound_set_volume(&music_group, music_volume);
 }
 
 void ModuleAudio::SetFXVolume(float new_fx_volume)
 {
 	fx_volume = new_fx_volume;
 	CAP(fx_volume);
-	BASS_SetConfig(BASS_CONFIG_GVOL_SAMPLE, (DWORD) (fx_volume * 10000.0f));
+
+	if (engine_initialized == true)
+		ma_sound_set_volume(&fx_group, fx_volume);
 }
 
-void ModuleAudio::UpdateAudio()	const
+void ModuleAudio::UpdateAudio() const
 {
-	//RecursiveUpdateAudio(App->level->GetRoot());
-
-	/*
-	// While in debug, make the debug camera the listener
-	BASS_Set3DPosition(
-		(BASS_3DVECTOR*)&App->camera->Position, // position
-		nullptr, // speed
-		(BASS_3DVECTOR*)&App->camera->Z, // front
-		(BASS_3DVECTOR*)&App->camera->Y); // up
-	*/
-}
-
-void ModuleAudio::RecursiveUpdateAudio(GameObject* go) const
-{
-	/*
-	for(ComponentAudioListener* listener : listeners)
+	for (ComponentAudioListener* listener : listeners)
 	{
-		UpdateListener(listener);
+		if (listener->IsActive())
+			UpdateListener(listener);
 	}
 
-	for(ComponentAudioSource* source : sources)
+	for (ComponentAudioSource* source : sources)
 	{
-		UpdateSource(source);
+		if (source->IsActive())
+			UpdateSource(source);
 	}
-
-	for (list<Component*>::iterator it = go->components.begin(); it != go->components.end(); ++it)
-	{
-		if ((*it)->IsActive() == false)
-			continue;
-
-		switch((*it)->GetType())
-		{
-			case Component::Types::AudioListener:
-				UpdateListener((ComponentAudioListener*) *it);
-			 break;
-
-			case Component::Types::AudioSource:
-				UpdateSource((ComponentAudioSource*) *it);
-			break;
-		}
-	}
-
-	// Recursive call to all childs
-	for (list<GameObject*>::iterator it = go->childs.begin(); it != go->childs.end(); ++it)
-		RecursiveUpdateAudio(*it);
-		*/
 }
 
 void ModuleAudio::UpdateListener(ComponentAudioListener * listener) const
 {
-	// Setup 3D factors
-	BASS_Set3DFactors(listener->distance, listener->roll_off, listener->doppler);
-
 	// Update position and orientation
 	const GameObject* go = listener->GetGameObject();
-    float3 pos = go->GetGlobalTransformation().TranslatePart();
-    float3 front = go->GetGlobalTransformation().WorldZ();
-    float3 up = go->GetGlobalTransformation().WorldY();
-	BASS_Set3DPosition(
-		(BASS_3DVECTOR*)&pos, // position
-		nullptr, // speed
-		(BASS_3DVECTOR*)&front, // front
-		(BASS_3DVECTOR*)&up); // up
+	float3 pos = go->GetGlobalTransformation().TranslatePart();
+	float3 front = go->GetGlobalTransformation().WorldZ();
+	float3 up = go->GetGlobalTransformation().WorldY();
+
+	ma_engine_listener_set_position(&engine, 0, pos.x, pos.y, pos.z);
+	ma_engine_listener_set_direction(&engine, 0, front.x, front.y, front.z);
+	ma_engine_listener_set_world_up(&engine, 0, up.x, up.y, up.z);
+
+	// miniaudio applies rolloff/doppler per-sound rather than globally like BASS did,
+	// so propagate the listener's factors onto every active source to keep the same behaviour
+	for (ComponentAudioSource* source : sources)
+	{
+		const ResourceAudio* resource = (const ResourceAudio*) source->GetResource();
+		if (resource != nullptr && resource->sound != nullptr)
+		{
+			ma_sound_set_rolloff(resource->sound, listener->roll_off);
+			ma_sound_set_doppler_factor(resource->sound, listener->doppler);
+		}
+	}
 }
 
 void ModuleAudio::UpdateSource(ComponentAudioSource* source) const
@@ -444,73 +293,63 @@ void ModuleAudio::UpdateSource(ComponentAudioSource* source) const
 
 	const ResourceAudio* resource = (const ResourceAudio*) source->GetResource();
 
-	if (resource == nullptr)
+	if (resource == nullptr || resource->sound == nullptr)
 		return;
 
-	ulong id = resource->audio_id;
-
-	if (id == 0)
-		return;
+	ma_sound* sound = resource->sound;
 
 	switch (source->current_state)
 	{
 		case ComponentAudioSource::state::playing:
 		{
 			// Setup 3D attributes for this gameobject
-			BASS_ChannelSet3DAttributes(id,
-				source->is_2d ? BASS_3DMODE_OFF : BASS_3DMODE_NORMAL,
-				source->min_distance,
-				source->max_distance,
-				source->cone_angle_in,
-				source->cone_angle_out,
+			ma_sound_set_spatialization_enabled(sound, source->is_2d ? MA_FALSE : MA_TRUE);
+			ma_sound_set_min_distance(sound, source->min_distance);
+			ma_sound_set_max_distance(sound, source->max_distance);
+			ma_sound_set_cone(sound,
+				source->cone_angle_in * (MA_PI / 180.0f),
+				source->cone_angle_out * (MA_PI / 180.0f),
 				source->out_cone_vol);
 
 			// Update 3D position
 			const GameObject* go = source->GetGameObject();
-            float3 pos = go->GetGlobalPosition();
-            float3 front = go->GetGlobalTransformation().WorldZ();
-			BASS_ChannelSet3DPosition(id,
-				(BASS_3DVECTOR*)&pos, // position
-				(BASS_3DVECTOR*)&front, // front
-				nullptr); // velocity
+			float3 pos = go->GetGlobalPosition();
+			float3 front = go->GetGlobalTransformation().WorldZ();
+			ma_sound_set_position(sound, pos.x, pos.y, pos.z);
+			ma_sound_set_direction(sound, front.x, front.y, front.z);
 		} break;
 
 		case ComponentAudioSource::state::waiting_to_play:
 		{
-			if (BASS_ChannelPlay(id, FALSE) == FALSE)
-				LOG("BASS_ChannelPlay() with channel [%ul] error: %s", id, BASS_GetErrorString());
+			if (ma_sound_start(sound) != MA_SUCCESS)
+				LOG("miniaudio could not start the sound");
 			else
 			{
-				BASS_ChannelSetAttribute(id, BASS_ATTRIB_VOL, 0.0f );
-				BASS_ChannelSlideAttribute(id, BASS_ATTRIB_VOL, 1.0f, DWORD(source->fade_in * 1000.0f));
+				ma_sound_set_fade_in_milliseconds(sound, 0.0f, 1.0f, (ma_uint64) (source->fade_in * 1000.0f));
 				source->current_state = ComponentAudioSource::state::playing;
 			}
 		} break;
 
 		case ComponentAudioSource::state::waiting_to_stop:
 		{
-			if (BASS_ChannelStop(id) == FALSE)
-				LOG("BASS_ChannelStop() with channel [%ul] error: %s", id, BASS_GetErrorString());
-			else
-			{
-				// TODO: test
-				BASS_ChannelSlideAttribute(id, BASS_ATTRIB_VOL, 0.0f, DWORD(source->fade_out * 1000.0f));
-				source->current_state = ComponentAudioSource::state::stopped;
-			}
+			if (ma_sound_stop_with_fade_in_milliseconds(sound, (ma_uint64) (source->fade_out * 1000.0f)) != MA_SUCCESS)
+				LOG("miniaudio could not stop the sound");
+
+			source->current_state = ComponentAudioSource::state::stopped;
 		} break;
 
 		case ComponentAudioSource::state::waiting_to_pause:
 		{
-			if (BASS_ChannelPause(id) == FALSE)
-				LOG("BASS_ChannelPause() with channel [%ul] error: %s", id, BASS_GetErrorString());
+			if (ma_sound_stop(sound) != MA_SUCCESS)
+				LOG("miniaudio could not pause the sound");
 			else
 				source->current_state = ComponentAudioSource::state::paused;
 		} break;
 
 		case ComponentAudioSource::state::waiting_to_unpause:
 		{
-			if (BASS_ChannelPlay(id, FALSE) == FALSE)
-				LOG("BASS_ChannelPlay() with channel [%ul] error: %s", id, BASS_GetErrorString());
+			if (ma_sound_start(sound) != MA_SUCCESS)
+				LOG("miniaudio could not resume the sound");
 			else
 				source->current_state = ComponentAudioSource::state::playing;
 		} break;

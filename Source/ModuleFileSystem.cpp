@@ -5,12 +5,18 @@
 #include "PhysFS/include/physfs.h"
 #include <assimp/cfileio.h>
 #include <assimp/types.h>
+#include "miniaudio/miniaudio.h"
 
 #include "Leaks.h"
 
 #pragma comment( lib, "PhysFS/lib/physfs.lib" )
 
 using namespace std;
+
+struct PhysFSVFS
+{
+	ma_vfs_callbacks cb;
+};
 
 ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System", true)
 {
@@ -49,14 +55,14 @@ ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System"
 
 	// Generate IO interfaces
 	CreateAssimpIO();
-	CreateBassIO();
+	CreateAudioVFS();
 }
 
 // Destructor
 ModuleFileSystem::~ModuleFileSystem()
 {
 	RELEASE(AssimpIO);
-	RELEASE(BassIO);
+	RELEASE(AudioVFS);
 	PHYSFS_deinit();
 }
 
@@ -316,16 +322,6 @@ SDL_RWops* ModuleFileSystem::Load(const char* file) const
 		return nullptr;
 }
 
-void * ModuleFileSystem::BassLoad(const char * file) const
-{
-	PHYSFS_file* fs_file = PHYSFS_openRead(file);
-
-	if(fs_file == nullptr)
-		LOG("File System error while opening file %s: %s\n", file, PHYSFS_getLastError());
-
-	return (void*) fs_file;
-}
-
 int close_sdl_rwops(SDL_RWops *rw)
 {
 	RELEASE_ARRAY(rw->hidden.mem.base);
@@ -537,67 +533,133 @@ aiFileIO * ModuleFileSystem::GetAssimpIO()
 }
 
 // -----------------------------------------------------
-// BASS IO
+// Audio VFS (miniaudio file access via PhysFS)
 // -----------------------------------------------------
-/*
-typedef void (CALLBACK FILECLOSEPROC)(void *user);
-typedef QWORD (CALLBACK FILELENPROC)(void *user);
-typedef DWORD (CALLBACK FILEREADPROC)(void *buffer, DWORD length, void *user);
-typedef BOOL (CALLBACK FILESEEKPROC)(QWORD offset, void *user);
-
-typedef struct {
-	FILECLOSEPROC *close;
-	FILELENPROC *length;
-	FILEREADPROC *read;
-	FILESEEKPROC *seek;
-} BASS_FILEPROCS;
-*/
-
-void CALLBACK BassClose(void* file)
+static ma_result AudioVFS_Open(ma_vfs* pVFS, const char* pFilePath, ma_uint32 openMode, ma_vfs_file* pFile)
 {
-	if (PHYSFS_close((PHYSFS_File*)file) == 0)
-		LOG("File System error while CLOSE via bass: %s", PHYSFS_getLastError());
+	(void) pVFS;
+
+	if ((openMode & MA_OPEN_MODE_WRITE) != 0)
+		return MA_NOT_IMPLEMENTED; // read-only VFS
+
+	PHYSFS_File* file = PHYSFS_openRead(pFilePath);
+	if (file == nullptr)
+	{
+		LOG("File System error while OPEN via miniaudio: %s", PHYSFS_getLastError());
+		return MA_DOES_NOT_EXIST;
+	}
+
+	*pFile = (ma_vfs_file) file;
+	return MA_SUCCESS;
 }
 
-QWORD CALLBACK BassLength(void* file)
+static ma_result AudioVFS_Close(ma_vfs* pVFS, ma_vfs_file file)
 {
-	PHYSFS_sint64 ret = PHYSFS_fileLength((PHYSFS_File*)file);
-	if(ret == -1)
-		LOG("File System error while SIZE via bass: %s", PHYSFS_getLastError());
+	(void) pVFS;
 
-	return (QWORD) ret;
+	if (PHYSFS_close((PHYSFS_File*) file) == 0)
+	{
+		LOG("File System error while CLOSE via miniaudio: %s", PHYSFS_getLastError());
+		return MA_ERROR;
+	}
+
+	return MA_SUCCESS;
 }
 
-DWORD CALLBACK BassRead(void *buffer, DWORD len, void* file)
+static ma_result AudioVFS_Read(ma_vfs* pVFS, ma_vfs_file file, void* pDst, size_t sizeInBytes, size_t* pBytesRead)
 {
-	PHYSFS_sint64 ret = PHYSFS_read((PHYSFS_File*)file, buffer, 1, len);
-	if(ret == -1)
-		LOG("File System error while READ via bass: %s", PHYSFS_getLastError());
+	(void) pVFS;
 
-	return (DWORD) ret;
+	PHYSFS_sint64 ret = PHYSFS_read((PHYSFS_File*) file, pDst, 1, (PHYSFS_uint32) sizeInBytes);
+	if (ret < 0)
+	{
+		LOG("File System error while READ via miniaudio: %s", PHYSFS_getLastError());
+		if (pBytesRead != nullptr)
+			*pBytesRead = 0;
+		return MA_ERROR;
+	}
+
+	if (pBytesRead != nullptr)
+		*pBytesRead = (size_t) ret;
+
+	return (ret < (PHYSFS_sint64) sizeInBytes) ? MA_AT_END : MA_SUCCESS;
 }
 
-BOOL CALLBACK BassSeek(QWORD offset, void* file)
+static ma_result AudioVFS_Write(ma_vfs* pVFS, ma_vfs_file file, const void* pSrc, size_t sizeInBytes, size_t* pBytesWritten)
 {
-	int res = PHYSFS_seek((PHYSFS_File*)file, offset);
-	if(res == 0)
-		LOG("File System error while SEEK via bass: %s", PHYSFS_getLastError());
+	(void) pVFS; (void) file; (void) pSrc; (void) sizeInBytes;
 
-	return (BOOL) res;
+	if (pBytesWritten != nullptr)
+		*pBytesWritten = 0;
+
+	return MA_NOT_IMPLEMENTED; // read-only VFS
 }
 
-void ModuleFileSystem::CreateBassIO()
+static ma_result AudioVFS_Seek(ma_vfs* pVFS, ma_vfs_file file, ma_int64 offset, ma_seek_origin origin)
 {
-	RELEASE(BassIO);
+	(void) pVFS;
 
-	BassIO = new BASS_FILEPROCS;
-	BassIO->close = BassClose;
-	BassIO->length = BassLength;
-	BassIO->read = BassRead;
-	BassIO->seek = BassSeek;
+	PHYSFS_sint64 base = 0;
+	if (origin == ma_seek_origin_current)
+		base = PHYSFS_tell((PHYSFS_File*) file);
+	else if (origin == ma_seek_origin_end)
+		base = PHYSFS_fileLength((PHYSFS_File*) file);
+
+	if (PHYSFS_seek((PHYSFS_File*) file, (PHYSFS_uint64) (base + offset)) == 0)
+	{
+		LOG("File System error while SEEK via miniaudio: %s", PHYSFS_getLastError());
+		return MA_ERROR;
+	}
+
+	return MA_SUCCESS;
 }
 
-BASS_FILEPROCS * ModuleFileSystem::GetBassIO()
+static ma_result AudioVFS_Tell(ma_vfs* pVFS, ma_vfs_file file, ma_int64* pCursor)
 {
-	return BassIO;
+	(void) pVFS;
+
+	PHYSFS_sint64 pos = PHYSFS_tell((PHYSFS_File*) file);
+	if (pos < 0)
+	{
+		LOG("File System error while TELL via miniaudio: %s", PHYSFS_getLastError());
+		return MA_ERROR;
+	}
+
+	*pCursor = (ma_int64) pos;
+	return MA_SUCCESS;
+}
+
+static ma_result AudioVFS_Info(ma_vfs* pVFS, ma_vfs_file file, ma_file_info* pInfo)
+{
+	(void) pVFS;
+
+	PHYSFS_sint64 len = PHYSFS_fileLength((PHYSFS_File*) file);
+	if (len < 0)
+	{
+		LOG("File System error while INFO via miniaudio: %s", PHYSFS_getLastError());
+		return MA_ERROR;
+	}
+
+	pInfo->sizeInBytes = (ma_uint64) len;
+	return MA_SUCCESS;
+}
+
+void ModuleFileSystem::CreateAudioVFS()
+{
+	if (AudioVFS == nullptr)
+		AudioVFS = new PhysFSVFS;
+
+	AudioVFS->cb.onOpen = AudioVFS_Open;
+	AudioVFS->cb.onOpenW = nullptr;
+	AudioVFS->cb.onClose = AudioVFS_Close;
+	AudioVFS->cb.onRead = AudioVFS_Read;
+	AudioVFS->cb.onWrite = AudioVFS_Write;
+	AudioVFS->cb.onSeek = AudioVFS_Seek;
+	AudioVFS->cb.onTell = AudioVFS_Tell;
+	AudioVFS->cb.onInfo = AudioVFS_Info;
+}
+
+void* ModuleFileSystem::GetAudioVFS()
+{
+	return AudioVFS;
 }

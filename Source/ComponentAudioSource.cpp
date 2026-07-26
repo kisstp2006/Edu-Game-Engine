@@ -67,7 +67,7 @@ bool ComponentAudioSource::SetResource(UID resource)
 	if (resource != 0 && resource != this->resource)
 	{
 		Resource* res = App->resources->Get(resource);
-		if (res != nullptr && res->GetType() == Resource::texture)
+		if (res != nullptr && res->GetType() == Resource::audio)
 		{
 			if(res->LoadToMemory() == true)
 			{
@@ -87,9 +87,9 @@ void ComponentAudioSource::Unload()
 {
 	// TODO: still not a formal way to unload resources
 	const ResourceAudio* res = (const ResourceAudio*) GetResource();
-	if (res != nullptr && res->audio_id != 0)
+	if (res != nullptr && res->sound != nullptr)
 	{
-		App->audio->Unload(res->audio_id);
+		App->audio->Unload(res->sound);
 		current_state = state::unloaded;
 	}
 }
