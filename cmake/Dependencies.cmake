@@ -38,6 +38,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glew)
 
+# GLEW's upstream CMake target does not publish its include path and
+# GLEW_STATIC definition on MSVC. Wrap it so every consumer uses the same
+# header, compile mode and process-wide function-pointer storage.
+if(TARGET libglew_static)
+    set(EGE_GLEW_UPSTREAM_TARGET libglew_static)
+elseif(TARGET glew_s)
+    set(EGE_GLEW_UPSTREAM_TARGET glew_s)
+else()
+    message(FATAL_ERROR "Could not find the static GLEW target")
+endif()
+
+add_library(ege_glew INTERFACE)
+add_library(EGE::GLEW ALIAS ege_glew)
+target_include_directories(ege_glew INTERFACE "${glew_SOURCE_DIR}/include")
+target_compile_definitions(ege_glew INTERFACE GLEW_STATIC)
+target_link_libraries(ege_glew INTERFACE "${EGE_GLEW_UPSTREAM_TARGET}")
+
 # Assimp 5.2.5
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
@@ -139,7 +156,8 @@ target_include_directories(ege_imgui
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui"
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/backends"
 )
-target_link_libraries(ege_imgui PUBLIC SDL2-static)
+target_compile_definitions(ege_imgui PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLEW)
+target_link_libraries(ege_imgui PUBLIC SDL2-static EGE::GLEW)
 set_target_properties(ege_imgui PROPERTIES FOLDER "Legacy dependencies")
 
 add_library(ege_tinygltf INTERFACE)
@@ -151,14 +169,6 @@ add_library(EGE::miniaudio ALIAS ege_miniaudio)
 target_include_directories(ege_miniaudio INTERFACE "${miniaudio_SOURCE_DIR}")
 
 # Normalize dependency target names used by the engine.
-if(TARGET libglew_static)
-    add_library(EGE::GLEW ALIAS libglew_static)
-elseif(TARGET glew_s)
-    add_library(EGE::GLEW ALIAS glew_s)
-else()
-    message(FATAL_ERROR "Could not find the static GLEW target")
-endif()
-
 if(TARGET physfs-static)
     add_library(EGE::PhysFS ALIAS physfs-static)
 elseif(TARGET PhysFS::PhysFS-static)

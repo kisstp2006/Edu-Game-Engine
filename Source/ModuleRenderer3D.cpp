@@ -91,22 +91,37 @@ bool ModuleRenderer3D::Init(Config* config)
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
     //Create context
-	context = SDL_GL_CreateContext(App->window->GetWindow());
+    context = SDL_GL_CreateContext(App->window->GetWindow());
 	if(context == nullptr)
 	{
 		LOG("OpenGL context could not be created! SDL_Error: %s\n", SDL_GetError());
 		ret = false;
 	}
 
-	GLenum err = glewInit();
-
-	if (err != GLEW_OK)
+	if (ret && SDL_GL_MakeCurrent(App->window->GetWindow(), context) != 0)
 	{
-		LOG("Glew library could not init %s\n", glewGetErrorString(err));
+		LOG("OpenGL context could not be made current! SDL_Error: %s\n", SDL_GetError());
 		ret = false;
 	}
-	else
-		LOG("Using Glew %s", glewGetString(GLEW_VERSION));
+
+	if (ret)
+	{
+		// Required for loading all modern core-profile entry points.
+		glewExperimental = GL_TRUE;
+		const GLenum err = glewInit();
+
+		if (err != GLEW_OK)
+		{
+			LOG("Glew library could not init %s\n", glewGetErrorString(err));
+			ret = false;
+		}
+		else
+		{
+			// GLEW may leave GL_INVALID_ENUM behind on core contexts.
+			glGetError();
+			LOG("Using Glew %s", glewGetString(GLEW_VERSION));
+		}
+	}
 
 	if(ret == true)
 	{

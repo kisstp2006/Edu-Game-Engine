@@ -52,6 +52,7 @@ target_link_libraries(Engine
 
 if(MSVC)
     target_compile_options(Engine PRIVATE
+        /MP
         /W3
         /arch:AVX
         $<$<BOOL:${EGE_WARNINGS_AS_ERRORS}>:/WX>)

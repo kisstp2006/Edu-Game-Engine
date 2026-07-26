@@ -59,7 +59,7 @@ bool ModuleEditor::Init(Config* config)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableSetMousePos | ImGuiConfigFlags_DockingEnable;  // Enable Keyboard Controls
 	io.WantSetMousePos = true;
     ImGui_ImplSDL2_InitForOpenGL(App->window->GetWindow(), App->renderer3D->context);
-    ImGui_ImplOpenGL3_Init("#version 130");
+    ImGui_ImplOpenGL3_Init("#version 330 core");
 
     // Setup style
     ImGui::StyleColorsDark();
