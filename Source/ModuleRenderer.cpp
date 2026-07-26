@@ -57,7 +57,7 @@
 #include "OpenGL.h"
 #include "DebugDraw.h"
 
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 #include <string>
 #include <functional>

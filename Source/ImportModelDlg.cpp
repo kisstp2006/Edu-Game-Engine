@@ -2,7 +2,7 @@
 
 #include "ImportModelDlg.h"
 
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 #include "Application.h"
 #include "ModuleFileSystem.h"

@@ -2,10 +2,10 @@
 #include "Application.h"
 #include "ModuleFileSystem.h"
 #include "ModuleResources.h"
-#include "PhysFS/include/physfs.h"
+#include <physfs.h>
 #include <assimp/cfileio.h>
 #include <assimp/types.h>
-#include "miniaudio/miniaudio.h"
+#include <miniaudio.h>
 
 // miniaudio pulls in <windows.h> on Windows, which #defines CreateDirectory to
 // CreateDirectoryA/W and breaks ModuleFileSystem::CreateDirectory()'s own definition below
@@ -14,8 +14,6 @@
 #endif
 
 #include "Leaks.h"
-
-#pragma comment( lib, "PhysFS/lib/physfs.lib" )
 
 using namespace std;
 

@@ -18,10 +18,6 @@
 
 #include "Leaks.h"
 
-#pragma comment (lib, "opengl32.lib") /* link Microsoft OpenGL lib   */
-#pragma comment (lib, "glu32.lib")    /* link OpenGL Utility lib     */
-#pragma comment (lib, "glew32.lib") /* link Microsoft OpenGL lib   */
-
 void __stdcall DebugMessageGL(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam)
 {
 	if (id == 131185 || id == 131204) return;

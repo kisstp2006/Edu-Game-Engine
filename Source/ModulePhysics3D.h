@@ -5,7 +5,7 @@
 #include "Globals.h"
 #include <list>
 #include "Primitive.h"
-#include "Bullet/include/LinearMath/btIDebugDraw.h"
+#include <LinearMath/btIDebugDraw.h>
 #include "Math.h"
 
 // Recommended scale is 1.0f == 1 meter, no less than 0.2 objects

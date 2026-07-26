@@ -9,7 +9,7 @@
 #include "DebugDraw.h"
 #include "ModuleEditor.h"
 #include "PanelProperties.h"
-#include "Imgui/imgui.h"
+#include <imgui.h>
 
 #include "Leaks.h"
 

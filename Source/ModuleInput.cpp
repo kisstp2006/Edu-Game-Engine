@@ -4,7 +4,7 @@
 #include "ModuleWindow.h"
 #include "ModuleEditor.h"
 #include "Event.h"
-#include "SDL/include/SDL.h"
+#include <SDL.h>
 
 #include "Leaks.h"
 

@@ -9,9 +9,9 @@
 #include "ModuleFileSystem.h"
 #include "ModuleResources.h"
 
-#include "Assimp/scene.h"
-#include "Assimp/cimport.h"
-#include "Assimp/postprocess.h"
+#include <assimp/scene.h>
+#include <assimp/cimport.h>
+#include <assimp/postprocess.h>
 
 #include "ResourceMaterial.h"
 #include "ResourceMesh.h"
@@ -20,9 +20,6 @@
 #include "HashString.h"
 
 #include "Leaks.h"
-
-#pragma comment (lib, "Assimp/lib/assimp-vc142-mt.lib")
-
 
 ResourceModel::ResourceModel(UID id) : Resource(id, Resource::Type::model)
 {

@@ -11,8 +11,8 @@
 #include "ModuleHints.h"
 #include "ModulePrograms.h"
 
-#include "Assimp/types.h"
-#include "Assimp/material.h"
+#include <assimp/types.h>
+#include <assimp/material.h>
 
 #include "OpenGL.h"
 

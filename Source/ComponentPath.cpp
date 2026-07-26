@@ -3,8 +3,8 @@
 #include "Application.h"
 #include "GameObject.h"
 #include "DebugDraw.h"
-#include "Imgui/imgui.h"
-#include "tinyspline/include/tinysplinecpp.h"
+#include <imgui.h>
+#include <tinysplinecpp.h>
 #include <list>
 
 #include "Leaks.h"

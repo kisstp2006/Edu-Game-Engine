@@ -2,7 +2,7 @@
 
 #include "ImportTextureDlg.h"
 
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 ImportTexturesDlg::ImportTexturesDlg()
 {

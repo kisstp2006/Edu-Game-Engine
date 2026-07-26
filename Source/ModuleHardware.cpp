@@ -1,7 +1,7 @@
 #include "Globals.h"
 #include "ModuleHardware.h"
 #include "gpudetect/DeviceId.h"
-#include "SDL/include/SDL.h"
+#include <SDL.h>
 
 #include "Leaks.h"
 

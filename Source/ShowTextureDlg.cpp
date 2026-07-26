@@ -10,7 +10,7 @@
 #include "OGL.h"
 #include "OpenGL.h"
 
-#include "ImGui/imgui.h"
+#include <imgui.h>
 
 #include "Leaks.h"
 

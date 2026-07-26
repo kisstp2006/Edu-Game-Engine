@@ -5,8 +5,8 @@
 
 #include "Component.h"
 #include "Math.h"
-#include "Bullet/include/LinearMath/btMotionState.h"
-#include "Bullet/include/LinearMath/btTransform.h"
+#include <LinearMath/btMotionState.h>
+#include <LinearMath/btTransform.h>
 
 class btRigidBody;
 

@@ -4,7 +4,7 @@
 // Base class for all possible Editor Panels
 #include "Globals.h"
 #include <string>
-#include "SDL/include/SDL_scancode.h"
+#include <SDL_scancode.h>
 
 class Panel
 {

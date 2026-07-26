@@ -5,7 +5,7 @@
 #include "Config.h"
 
 
-#include "DirectXTex/DirectXTex.h"
+#include <DirectXTex.h>
 
 #include "OpenGL.h"
 

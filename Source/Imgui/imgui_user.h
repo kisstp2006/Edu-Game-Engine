@@ -1,7 +1,7 @@
 #pragma once
 
-#include "imgui.h"
-#include "imgui_internal.h"
+#include <imgui.h>
+#include <imgui_internal.h>
 
 #define IMGUI_LIGHT_GREY ImVec4(0.8f,0.8f,0.8f,1.f)
 #define IMGUI_GREY ImVec4(0.6f,0.6f,0.6f,1.f)

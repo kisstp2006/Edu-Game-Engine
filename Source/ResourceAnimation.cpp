@@ -4,9 +4,9 @@
 #include "Config.h"
 #include "ModuleFileSystem.h"
 
-#include "Assimp/scene.h"
-#include "Assimp/cimport.h"
-#include "Assimp/postprocess.h"
+#include <assimp/scene.h>
+#include <assimp/cimport.h>
+#include <assimp/postprocess.h>
 
 #include "gltf.h"
 

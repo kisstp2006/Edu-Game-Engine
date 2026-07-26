@@ -3,7 +3,7 @@
 #include "Component.h"
 
 #include "imgui_color_gradient.h"
-#include "imgui/imgui_bezier.h"
+#include <imgui_bezier.h>
 
 
 #include "ResHandle.h"

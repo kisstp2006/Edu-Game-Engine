@@ -13,7 +13,7 @@
 #include "Resource.h"
 #include "ResourceTexture.h"
 
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 #include "OGL.h"
 #include "OpenGL.h"

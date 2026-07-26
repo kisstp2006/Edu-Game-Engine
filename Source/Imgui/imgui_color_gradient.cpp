@@ -6,7 +6,7 @@
 
 
 #include "imgui_color_gradient.h"
-#include "imgui_internal.h"
+#include <imgui_internal.h>
 
 static const float GRADIENT_BAR_WIDGET_HEIGHT = 25;
 static const float GRADIENT_BAR_EDITOR_HEIGHT = 40;

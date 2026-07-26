@@ -3,7 +3,7 @@
 
 #include <vector>
 #include "Module.h"
-#include "miniaudio/miniaudio.h"
+#include <miniaudio.h>
 
 // miniaudio pulls in <windows.h> on Windows, which #defines CreateDirectory to
 // CreateDirectoryA/W and breaks ModuleFileSystem::CreateDirectory() call sites

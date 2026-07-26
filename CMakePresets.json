@@ -1,0 +1,59 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+      }
+    },
+    {
+      "name": "vs2022",
+      "displayName": "Visual Studio 2022 x64",
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64"
+    },
+    {
+      "name": "vs2026",
+      "displayName": "Visual Studio 2026 x64",
+      "inherits": "base",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "vs2022",
+      "configuration": "Debug",
+      "jobs": 0
+    },
+    {
+      "name": "release",
+      "configurePreset": "vs2022",
+      "configuration": "Release",
+      "jobs": 0
+    },
+    {
+      "name": "debug-vs2026",
+      "configurePreset": "vs2026",
+      "configuration": "Debug",
+      "jobs": 0
+    },
+    {
+      "name": "release-vs2026",
+      "configurePreset": "vs2026",
+      "configuration": "Release",
+      "jobs": 0
+    }
+  ]
+}
+

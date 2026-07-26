@@ -1,5 +1,5 @@
 #include "PanelConfiguration.h"
-#include "Imgui/imgui.h"
+#include <imgui.h>
 #include "Application.h"
 #include "Module.h"
 #include "ModuleHardware.h"

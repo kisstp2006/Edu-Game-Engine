@@ -11,7 +11,7 @@
 
 #include "OpenGL.h"
 
-#include "Assimp/mesh.h"
+#include <assimp/mesh.h>
 #include "utils/SimpleBinStream.h"
 #include "thekla_atlas/src/thekla/thekla_atlas.h"
 #include <SDL_assert.h>

@@ -1,5 +1,5 @@
 #include "PanelAbout.h"
-#include "Imgui/imgui.h"
+#include <imgui.h>
 
 #include "Leaks.h"
 

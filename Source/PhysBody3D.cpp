@@ -1,7 +1,7 @@
 #include "Globals.h"
 #include "PhysBody3D.h"
 #include "glmath.h"
-#include "Bullet/include/btBulletDynamicsCommon.h"
+#include <btBulletDynamicsCommon.h>
 
 #include "Leaks.h"
 

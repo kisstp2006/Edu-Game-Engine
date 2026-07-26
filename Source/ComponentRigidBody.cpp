@@ -5,8 +5,8 @@
 #include "Component.h"
 #include "ModulePhysics3D.h"
 #include "DebugDraw.h"
-#include "Bullet/include/btBulletDynamicsCommon.h"
-#include "Imgui/imgui.h"
+#include <btBulletDynamicsCommon.h>
+#include <imgui.h>
 
 using namespace std;
 

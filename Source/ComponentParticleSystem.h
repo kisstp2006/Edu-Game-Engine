@@ -6,8 +6,8 @@
 
 #include "Noise.h"
 
-#include "imgui/imgui_color_gradient.h"
-#include "imgui/imgui_bezier.h"
+#include <imgui_color_gradient.h>
+#include <imgui_bezier.h>
 
 class ResourceTexture;
 class PanelProperties;

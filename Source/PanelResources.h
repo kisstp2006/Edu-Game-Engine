@@ -3,7 +3,7 @@
 
 #include "Panel.h"
 #include "Resource.h"
-#include "Imgui/imgui.h"
+#include <imgui.h>
 #include "imgui-filebrowser/imfilebrowser.h"
 #include "ImportAnimationDlg.h"
 #include "ImportTextureDlg.h"

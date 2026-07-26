@@ -4,7 +4,7 @@
 #include "Noise.h"
 #include "OpenGL.h"
 
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 #include "Leaks.h"
 

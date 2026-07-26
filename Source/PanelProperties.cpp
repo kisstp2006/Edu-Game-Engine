@@ -1,7 +1,7 @@
 #include "PanelProperties.h"
 #include "Application.h"
-#include "Imgui/imgui.h"
-#include "Imgui/imguizmo.h"
+#include <imgui.h>
+#include <ImGuizmo.h>
 #include "GameObject.h"
 #include "Component.h"
 #include "ComponentAudioSource.h"

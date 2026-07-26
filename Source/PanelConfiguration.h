@@ -3,7 +3,7 @@
 
 // Editor Panel for all Module's configuration
 #include "Panel.h"
-#include "Imgui/imgui.h"
+#include <imgui.h>
 #include <vector>
 
 #define FPS_LOG_SIZE 100

@@ -1,5 +1,5 @@
-#include "imgui.h"
-#include "imgui_internal.h"
+#include <imgui.h>
+#include <imgui_internal.h>
 #include "imgui_user.h"
 
 // From: https://github.com/jarikomppa/img2spec/blob/master/src/imgui/imgui_user.inl

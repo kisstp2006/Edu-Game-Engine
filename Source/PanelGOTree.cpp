@@ -1,7 +1,7 @@
 #include "Globals.h"
 #include "Application.h"
 #include "PanelGOTree.h"
-#include "Imgui/imgui.h"
+#include <imgui.h>
 #include "Application.h"
 #include "ModuleLevelManager.h"
 #include "LightManager.h"

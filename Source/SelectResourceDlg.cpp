@@ -5,7 +5,7 @@
 #include "Application.h"
 #include "ModuleResources.h"
 
-#include "imgui/imgui.h"
+#include <imgui.h>
 
 #include "Leaks.h"
 
