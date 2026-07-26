@@ -7,6 +7,12 @@
 #include <assimp/types.h>
 #include "miniaudio/miniaudio.h"
 
+// miniaudio pulls in <windows.h> on Windows, which #defines CreateDirectory to
+// CreateDirectoryA/W and breaks ModuleFileSystem::CreateDirectory()'s own definition below
+#ifdef CreateDirectory
+#undef CreateDirectory
+#endif
+
 #include "Leaks.h"
 
 #pragma comment( lib, "PhysFS/lib/physfs.lib" )

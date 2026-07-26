@@ -5,6 +5,12 @@
 #include "Module.h"
 #include "miniaudio/miniaudio.h"
 
+// miniaudio pulls in <windows.h> on Windows, which #defines CreateDirectory to
+// CreateDirectoryA/W and breaks ModuleFileSystem::CreateDirectory() call sites
+#ifdef CreateDirectory
+#undef CreateDirectory
+#endif
+
 class GameObject;
 class ComponentAudioListener;
 class ComponentAudioSource;
@@ -41,11 +47,10 @@ public:
 
 private:
 
-	void UpdateAudio() const;
-	void RecursiveUpdateAudio(GameObject* go) const;
+	void UpdateAudio();
 
-	void UpdateListener(ComponentAudioListener* listener) const;
-	void UpdateSource(ComponentAudioSource* source) const;
+	void UpdateListener(ComponentAudioListener* listener);
+	void UpdateSource(ComponentAudioSource* source);
 
 private:
 	friend class ComponentAudioSource;

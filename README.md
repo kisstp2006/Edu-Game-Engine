@@ -16,6 +16,8 @@ Download the code and play with it to learn, there is no formal installation pro
 Carlos Fuentes<br>
 Ricard Pillosu
 
+
+
 ## License
 
 This is free and unencumbered software released into the public domain.
@@ -42,3 +44,6 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <http://unlicense.org/>
+
+<br>
+The dependecies licenses may wary on the project and projects license doesnt cover them 

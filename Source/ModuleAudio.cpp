@@ -14,6 +14,8 @@
 
 using namespace std;
 
+static const float DEG2RAD = 3.14159265358979323846f / 180.0f;
+
 ModuleAudio::ModuleAudio( bool start_enabled) : Module("Audio", start_enabled)
 {}
 
@@ -246,7 +248,7 @@ void ModuleAudio::SetFXVolume(float new_fx_volume)
 		ma_sound_set_volume(&fx_group, fx_volume);
 }
 
-void ModuleAudio::UpdateAudio() const
+void ModuleAudio::UpdateAudio()
 {
 	for (ComponentAudioListener* listener : listeners)
 	{
@@ -261,7 +263,7 @@ void ModuleAudio::UpdateAudio() const
 	}
 }
 
-void ModuleAudio::UpdateListener(ComponentAudioListener * listener) const
+void ModuleAudio::UpdateListener(ComponentAudioListener * listener)
 {
 	// Update position and orientation
 	const GameObject* go = listener->GetGameObject();
@@ -286,7 +288,7 @@ void ModuleAudio::UpdateListener(ComponentAudioListener * listener) const
 	}
 }
 
-void ModuleAudio::UpdateSource(ComponentAudioSource* source) const
+void ModuleAudio::UpdateSource(ComponentAudioSource* source)
 {
 	if (source == nullptr)
 		return;
@@ -307,8 +309,8 @@ void ModuleAudio::UpdateSource(ComponentAudioSource* source) const
 			ma_sound_set_min_distance(sound, source->min_distance);
 			ma_sound_set_max_distance(sound, source->max_distance);
 			ma_sound_set_cone(sound,
-				source->cone_angle_in * (MA_PI / 180.0f),
-				source->cone_angle_out * (MA_PI / 180.0f),
+				source->cone_angle_in * DEG2RAD,
+				source->cone_angle_out * DEG2RAD,
 				source->out_cone_vol);
 
 			// Update 3D position

@@ -8,4 +8,10 @@
 #include <gl/GL.h>
 #include <gl/GLU.h>
 
+// Windows.h #defines CreateDirectory to CreateDirectoryA/W, which clashes with
+// ModuleFileSystem::CreateDirectory() call sites in files included after this header
+#ifdef CreateDirectory
+#undef CreateDirectory
+#endif
+
 #endif // __OPENGL_H__
