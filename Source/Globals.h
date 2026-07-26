@@ -1,7 +1,9 @@
 #ifndef __GLOBALS_H__
 #define __GLOBALS_H__
 
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 
 #define LOG(format, ...) _log(__FILE__, __LINE__, format, __VA_ARGS__)
 

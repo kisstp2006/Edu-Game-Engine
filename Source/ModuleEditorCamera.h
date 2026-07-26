@@ -33,7 +33,9 @@ private:
 	void Move(float dt);
 	void Orbit(float motion_x, float motion_y);
 	void LookAt(float motion_x, float motion_y);
+	void Pan(float motion_x, float motion_y);
 	void Zoom(float zoom);
+	void SetFlyMode(bool enabled);
 	GameObject* Pick(float3* hit_point = nullptr) const;
 
 public: 
@@ -45,6 +47,7 @@ private:
 
 	float3 looking_at;
 	bool looking = false;
+	bool fly_mode = false;
 	ComponentCamera* dummy = nullptr;
 	LineSegment picking;
 	float3 last_hit;

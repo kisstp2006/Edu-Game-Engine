@@ -23,7 +23,7 @@
 using namespace std;
 
 // ---------------------------------------------
-Application::Application()
+Application::Application(EngineMode mode) : mode(mode)
 {
     threadPool = std::make_unique<ThreadPool>();
 
@@ -47,7 +47,8 @@ Application::Application()
 	modules.push_back(camera = new ModuleEditorCamera());
 	modules.push_back(renderer3D = new ModuleRenderer3D());
 	modules.push_back(input = new ModuleInput());
-	modules.push_back(editor = new ModuleEditor());
+	if (IsEditor())
+		modules.push_back(editor = new ModuleEditor());
 	modules.push_back(audio = new ModuleAudio(true));
 	modules.push_back(ai = new ModuleAI());
 	modules.push_back(level = new ModuleLevelManager());
@@ -187,7 +188,8 @@ void Application::FinishUpdate()
 		SDL_Delay(capped_ms - last_frame_ms);
 
 	// notify the editor
-	editor->LogFPS((float) last_fps, (float) last_frame_ms);
+	if (editor)
+		editor->LogFPS((float) last_fps, (float) last_frame_ms);
 }
 
 // ---------------------------------------------
@@ -270,7 +272,8 @@ void Application::Log(const char * entry)
 	log.append(entry);
 
 	// send to editor console
-	editor->Log(entry);
+	if (editor)
+		editor->Log(entry);
 }
 
 // ---------------------------------------------

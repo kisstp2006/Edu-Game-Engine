@@ -56,12 +56,14 @@ update_status ModuleInput::PreUpdate(float dt)
 			if (keyboard[i] == KEY_IDLE)
 			{
 				keyboard[i] = KEY_DOWN;
-				App->editor->LogInputEvent(i, KEY_DOWN);
+				if (App->editor)
+					App->editor->LogInputEvent(i, KEY_DOWN);
 			}
 			else if(keyboard[i] != KEY_REPEAT)
 			{
 				
-				App->editor->LogInputEvent(i, KEY_REPEAT);
+				if (App->editor)
+					App->editor->LogInputEvent(i, KEY_REPEAT);
 				keyboard[i] = KEY_REPEAT;
 			}
 		}
@@ -70,7 +72,8 @@ update_status ModuleInput::PreUpdate(float dt)
 			if (keyboard[i] == KEY_REPEAT || keyboard[i] == KEY_DOWN)
 			{
 				keyboard[i] = KEY_UP;
-				App->editor->LogInputEvent(i, KEY_UP);
+				if (App->editor)
+					App->editor->LogInputEvent(i, KEY_UP);
 			}
 			else
 				keyboard[i] = KEY_IDLE;
@@ -81,15 +84,19 @@ update_status ModuleInput::PreUpdate(float dt)
 	{
 		if (mouse_buttons[i] == KEY_DOWN)
 		{
-			App->editor->LogInputEvent(1000 + i, KEY_DOWN);
-			App->editor->LogInputEvent(1000 + i, KEY_REPEAT);
+			if (App->editor)
+			{
+				App->editor->LogInputEvent(1000 + i, KEY_DOWN);
+				App->editor->LogInputEvent(1000 + i, KEY_REPEAT);
+			}
 			mouse_buttons[i] = KEY_REPEAT;
 		}
 
 		if (mouse_buttons[i] == KEY_UP)
 		{
 			mouse_buttons[i] = KEY_IDLE;
-			App->editor->LogInputEvent(1000 + i, KEY_UP);
+			if (App->editor)
+				App->editor->LogInputEvent(1000 + i, KEY_UP);
 		}
 	}
 
@@ -97,7 +104,8 @@ update_status ModuleInput::PreUpdate(float dt)
 
 	while(SDL_PollEvent(&event) != 0)
 	{
-		App->editor->HandleInput(&event);
+		if (App->editor)
+			App->editor->HandleInput(&event);
 		switch(event.type)
 		{
 			case SDL_QUIT:

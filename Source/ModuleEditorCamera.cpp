@@ -12,11 +12,21 @@
 #include "DebugDraw.h"
 #include "ModuleLevelManager.h"
 #include "GameObject.h"
+#include <SDL.h>
+#include <algorithm>
 #include <vector>
 
 #include "Leaks.h"
 
 using namespace std;
+
+namespace
+{
+	bool IsHeld(KeyState state)
+	{
+		return state == KEY_DOWN || state == KEY_REPEAT;
+	}
+}
 
 ModuleEditorCamera::ModuleEditorCamera(bool start_enabled) : Module("Camera", start_enabled)
 {
@@ -56,6 +66,7 @@ bool ModuleEditorCamera::CleanUp()
 {
 	LOG("Cleaning camera");
 
+	SetFlyMode(false);
 	App->renderer3D->active_camera = nullptr;
 	return true;
 }
@@ -89,48 +100,70 @@ void ModuleEditorCamera::DrawDebug()
 // -----------------------------------------------------------------
 update_status ModuleEditorCamera::Update(float dt)
 {
-	// Keyboard for WASD movement -------
-	if (App->renderer3D->viewport->GetScene()->IsFocused()) 
-    {
-		Move(dt);
-        App->renderer3D->active_camera->OnUpdateFrustum();
-    }
-
-	// Mouse ----------------------------
-	if (App->renderer3D->viewport->GetScene()->IsFocused() && App->renderer3D->viewport->GetScene()->IsUsingGuizmo() == false)
+	if (!App->renderer3D->viewport)
 	{
-		// Check motion for lookat / Orbit cameras
+		SetFlyMode(false);
+		App->renderer3D->active_camera->OnUpdateFrustum();
+		return UPDATE_CONTINUE;
+	}
+
+	const bool focused = App->renderer3D->viewport->GetScene()->IsFocused();
+	const bool navigating = focused && !App->renderer3D->viewport->GetScene()->IsUsingGuizmo();
+	const KeyState rightMouse = App->input->GetMouseButton(SDL_BUTTON_RIGHT);
+	const KeyState middleMouse = App->input->GetMouseButton(SDL_BUTTON_MIDDLE);
+	const KeyState leftMouse = App->input->GetMouseButton(SDL_BUTTON_LEFT);
+	const bool altPressed =
+		IsHeld(App->input->GetKey(SDL_SCANCODE_LALT)) ||
+		IsHeld(App->input->GetKey(SDL_SCANCODE_RALT));
+
+	const bool wantsFlyMode = navigating && !altPressed &&
+		IsHeld(rightMouse);
+	SetFlyMode(wantsFlyMode);
+
+	if (navigating)
+	{
 		int motion_x, motion_y;
 		App->input->GetMouseMotion(motion_x, motion_y);
-		if (App->input->GetMouseButton(SDL_BUTTON_MIDDLE) == KEY_REPEAT && (motion_x != 0 || motion_y != 0))
-		{
-			float dx = (float)-motion_x * rot_speed * dt;
-			float dy = (float)-motion_y * rot_speed * dt;
+		const bool mouseMoved = motion_x != 0 || motion_y != 0;
+		const float mouseSensitivity = rot_speed * 0.005f;
 
-			if (App->input->GetKey(SDL_SCANCODE_LCTRL) == KEY_REPEAT)
-				Orbit(dx, dy);
-			else
-				LookAt(dx, dy);
+		// Unity-style scene navigation:
+		// RMB + mouse/WASD/QE = fly, Alt+LMB = orbit,
+		// MMB = pan, Alt+RMB = dolly.
+		if (fly_mode)
+		{
+			if (mouseMoved)
+				LookAt(-float(motion_x) * mouseSensitivity,
+					-float(motion_y) * mouseSensitivity);
+			Move(dt);
+		}
+		else if (altPressed &&
+			IsHeld(leftMouse) && mouseMoved)
+		{
+			Orbit(-float(motion_x) * mouseSensitivity,
+				-float(motion_y) * mouseSensitivity);
+		}
+		else if (IsHeld(middleMouse) && mouseMoved)
+		{
+			Pan(float(motion_x), float(motion_y));
+		}
+		else if (altPressed &&
+			IsHeld(rightMouse) && mouseMoved)
+		{
+			Zoom(-float(motion_y) * zoom_speed * 0.1f);
 		}
 
-        float metric_proportion = App->hints->GetFloatValue(ModuleHints::METRIC_PROPORTION);
-
-		// Mouse wheel for zoom
-		int wheel = App->input->GetMouseWheel();
+		const int wheel = App->input->GetMouseWheel();
 		if (wheel != 0)
-			Zoom(wheel * zoom_speed * metric_proportion* dt);
+			Zoom(float(wheel) * zoom_speed *
+				App->hints->GetFloatValue(ModuleHints::METRIC_PROPORTION));
 
-		// Mouse Picking
-		if (App->input->GetMouseButton(SDL_BUTTON_RIGHT) == KEY_DOWN)
-		{
-			//GameObject* pick = Pick();
-			//if (pick != nullptr)
-				//App->editor->SetSelected(pick, (App->editor->selection_type == ModuleEditor::SelectionGameObject && App->editor->selected.go == pick));
-		}
-
-        App->renderer3D->active_camera->OnUpdateFrustum();
-    }
-
+		App->renderer3D->active_camera->OnUpdateFrustum();
+	}
+	else
+	{
+		SetFlyMode(false);
+	}
 
 	return UPDATE_CONTINUE;
 }
@@ -163,8 +196,9 @@ void ModuleEditorCamera::Move(float dt)
 
 	float adjusted_speed = mov_speed;
 
-	if (App->input->GetKey(SDL_SCANCODE_LSHIFT) == KEY_REPEAT) adjusted_speed *= 5.0f;
-	if (App->input->GetKey(SDL_SCANCODE_LALT) == KEY_REPEAT) adjusted_speed *= 0.5f;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_LSHIFT)) ||
+		IsHeld(App->input->GetKey(SDL_SCANCODE_RSHIFT)))
+		adjusted_speed *= 5.0f;
 
 	float3 right(frustum->WorldRight());
 	float3 forward(frustum->front);
@@ -173,16 +207,17 @@ void ModuleEditorCamera::Move(float dt)
 
     float metric_proportion = App->hints->GetFloatValue(ModuleHints::METRIC_PROPORTION);
 
-	if (App->input->GetKey(SDL_SCANCODE_W) == KEY_REPEAT) movement += forward;
-	if (App->input->GetKey(SDL_SCANCODE_S) == KEY_REPEAT) movement -= forward;
-	if (App->input->GetKey(SDL_SCANCODE_A) == KEY_REPEAT) movement -= right;
-	if (App->input->GetKey(SDL_SCANCODE_D) == KEY_REPEAT) movement += right;
-	if (App->input->GetKey(SDL_SCANCODE_R) == KEY_REPEAT) movement += float3::unitY;
-	if (App->input->GetKey(SDL_SCANCODE_F) == KEY_REPEAT) movement -= float3::unitY;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_W))) movement += forward;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_S))) movement -= forward;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_A))) movement -= right;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_D))) movement += right;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_E))) movement += float3::unitY;
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_Q))) movement -= float3::unitY;
 
 	if (movement.Equals(float3::zero) == false)
 	{
-		frustum->Translate(movement * (metric_proportion*adjusted_speed * dt));
+		frustum->Translate(movement.Normalized() *
+			(metric_proportion * adjusted_speed * dt));
 		looking = false;
 	}
 }
@@ -210,10 +245,14 @@ void ModuleEditorCamera::Orbit(float dx, float dy)
 
 	float3 focus = App->renderer3D->active_camera->frustum.pos - point;
 
-	Quat qy(App->renderer3D->active_camera->frustum.up, dx);
+	Quat qy = Quat::RotateY(dx);
 	Quat qx(App->renderer3D->active_camera->frustum.WorldRight(), dy);
 
-	focus = qx.Transform(focus);
+	const float3 pitchedFocus = qx.Transform(focus);
+	const float3 pitchedUp = qx.Transform(
+		App->renderer3D->active_camera->frustum.up).Normalized();
+	if (pitchedUp.y > 0.0f)
+		focus = pitchedFocus;
 	focus = qy.Transform(focus);
 
 	App->renderer3D->active_camera->frustum.pos = focus + point;
@@ -266,11 +305,43 @@ void ModuleEditorCamera::Zoom(float zoom)
 			zoom = 0;
 	}
 
-	if (App->input->GetKey(SDL_SCANCODE_LSHIFT) == KEY_REPEAT) 
+	if (IsHeld(App->input->GetKey(SDL_SCANCODE_LSHIFT)) ||
+		IsHeld(App->input->GetKey(SDL_SCANCODE_RSHIFT)))
 		zoom *= 5.0f;
 
 	float3 p = App->renderer3D->active_camera->frustum.front * zoom;
 	App->renderer3D->active_camera->frustum.pos += p;
+}
+
+// -----------------------------------------------------------------
+void ModuleEditorCamera::Pan(float motion_x, float motion_y)
+{
+	Frustum& frustum = App->renderer3D->active_camera->frustum;
+	float distance = looking
+		? looking_at.Distance(frustum.pos)
+		: 10.0f;
+	distance = std::max(distance, 1.0f);
+
+	const float metricProportion =
+		App->hints->GetFloatValue(ModuleHints::METRIC_PROPORTION);
+	const float panScale = distance * 0.0025f * metricProportion;
+	const float3 movement =
+		frustum.WorldRight() * (-motion_x * panScale) +
+		frustum.up * (motion_y * panScale);
+
+	frustum.Translate(movement);
+	if (looking)
+		looking_at += movement;
+}
+
+// -----------------------------------------------------------------
+void ModuleEditorCamera::SetFlyMode(bool enabled)
+{
+	if (fly_mode == enabled)
+		return;
+
+	fly_mode = enabled;
+	SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
 }
 
 // -----------------------------------------------------------------

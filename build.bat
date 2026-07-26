@@ -106,22 +106,24 @@ if /I "%EGE_ACTION%"=="clean" (
 )
 
 if /I "%EGE_ACTION%"=="rebuild" (
-    echo [EGE] Rebuilding Engine...
-    cmake --build --preset "%EGE_BUILD_PRESET%" --target Engine --clean-first
+    echo [EGE] Rebuilding Engine DLL, Editor, and Runtime...
+    cmake --build --preset "%EGE_BUILD_PRESET%" --target Editor Runtime --clean-first
 ) else (
-    echo [EGE] Building Engine...
-    cmake --build --preset "%EGE_BUILD_PRESET%" --target Engine
+    echo [EGE] Building Engine DLL, Editor, and Runtime...
+    cmake --build --preset "%EGE_BUILD_PRESET%" --target Editor Runtime
 )
 
 if errorlevel 1 (
     echo.
-    echo [ERROR] Engine build failed.
+    echo [ERROR] Engine, Editor, or Runtime build failed.
     exit /b 1
 )
 
 echo.
 echo [EGE] Build completed successfully:
-echo       %EGE_BUILD_DIRECTORY%\bin\%EGE_CONFIGURATION%\Engine.exe
+echo       %EGE_BUILD_DIRECTORY%\bin\%EGE_CONFIGURATION%\Engine.dll
+echo       %EGE_BUILD_DIRECTORY%\bin\%EGE_CONFIGURATION%\Editor.exe
+echo       %EGE_BUILD_DIRECTORY%\bin\%EGE_CONFIGURATION%\Runtime.exe
 exit /b 0
 
 :detect_visual_studio

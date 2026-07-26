@@ -12,7 +12,7 @@ if(NOT WIN32)
     message(FATAL_ERROR "Edu Game Engine currently supports Windows only.")
 endif()
 
-option(EGE_BUILD_ENGINE "Build the editor/engine executable" ON)
+option(EGE_BUILD_ENGINE "Build the Engine DLL and Editor/Runtime applications" ON)
 option(EGE_WARNINGS_AS_ERRORS "Treat Edu Game Engine warnings as errors" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -35,4 +35,3 @@ include(LegacyThirdParty)
 if(EGE_BUILD_ENGINE)
     add_subdirectory(Source)
 endif()
-

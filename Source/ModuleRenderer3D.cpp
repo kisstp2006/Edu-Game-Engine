@@ -166,7 +166,8 @@ bool ModuleRenderer3D::Init(Config* config)
     }
 
 
-    viewport = new Viewport;
+	if (App->IsEditor())
+		viewport = new Viewport;
 
 	Load(config);
 
@@ -201,8 +202,11 @@ update_status ModuleRenderer3D::Update(float dt)
 // PostUpdate present buffer to screen
 update_status ModuleRenderer3D::PostUpdate(float dt)
 {
-    viewport->Draw(active_camera, culling_camera);
-    App->editor->Draw();
+	if (viewport && App->editor)
+	{
+		viewport->Draw(active_camera, culling_camera);
+		App->editor->Draw();
+	}
 
     SDL_GL_SwapWindow(App->window->GetWindow());
 
@@ -232,13 +236,15 @@ void ModuleRenderer3D::ReceiveEvent(const Event& event)
 void ModuleRenderer3D::Save(Config * config) const
 {
 	config->AddBool("Vertical Sync", GetVSync());
-    viewport->Save(config);
+	if (viewport)
+		viewport->Save(config);
 }
 
 void ModuleRenderer3D::Load(Config * config)
 {
 	SetVSync(config->GetBool("Vertical Sync", true));
-    viewport->Load(config);
+	if (viewport)
+		viewport->Load(config);
 }
 
 void ModuleRenderer3D::OnResize(int width, int height)

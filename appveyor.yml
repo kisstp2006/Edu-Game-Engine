@@ -7,7 +7,9 @@ platform: x64
 build_script:
 - cmd: build.bat %CONFIGURATION% vs2022 build
 before_package:
-- ps: Copy-Item "build\vs2022\bin\$env:CONFIGURATION\Engine.exe" "Game\Engine.exe"
+- ps: Copy-Item "build\vs2022\bin\$env:CONFIGURATION\Engine.dll" "Game\Engine.dll"
+- ps: Copy-Item "build\vs2022\bin\$env:CONFIGURATION\Editor.exe" "Game\Editor.exe"
+- ps: Copy-Item "build\vs2022\bin\$env:CONFIGURATION\Runtime.exe" "Game\Runtime.exe"
 artifacts:
 - path: Game
   name: game_files

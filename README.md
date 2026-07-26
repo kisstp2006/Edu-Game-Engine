@@ -37,22 +37,27 @@ build.bat Debug auto clean
 
 Arguments can be supplied in any order. Run `build.bat help` for the full
 syntax. The `generate` action only creates the Visual Studio solution, while
-`build`, `rebuild`, and `clean` also operate on the `Engine` target.
+`build` and `rebuild` build the Engine DLL plus the Editor and Runtime apps.
 
 You can still invoke CMake directly:
 
 ```powershell
 cmake --preset vs2022
-cmake --build --preset debug --target Engine
+cmake --build --preset debug --target Editor Runtime
 ```
 
-The Debug executable is written to
-`build/<preset>/bin/Debug/Engine.exe`.
-Run it with `Game` as its working directory:
+The Debug outputs are written to `build/<preset>/bin/Debug`:
+
+- `Engine.dll` contains the shared engine implementation.
+- `Editor.exe` starts the engine with the editor module.
+- `Runtime.exe` starts the engine without the editor module.
+
+Run either application with `Game` as its working directory:
 
 ```powershell
 Set-Location Game
-..\build\vs2022\bin\Debug\Engine.exe
+..\build\vs2022\bin\Debug\Editor.exe
+..\build\vs2022\bin\Debug\Runtime.exe
 ```
 
 Visual Studio 2026 users can use the equivalent `vs2026`,

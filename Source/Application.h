@@ -2,6 +2,7 @@
 #define __APPLICATION_CPP__
 
 #include "Globals.h"
+#include "EngineAPI.h"
 #include <list>
 #include <string>
 #include <memory>
@@ -45,7 +46,7 @@ public:
 	};
 
 public:
-	Application();
+	explicit Application(EngineMode mode);
 	~Application();
 
 	void ReadConfiguration(const Config& config);
@@ -75,6 +76,7 @@ public:
 	bool IsPlay() const;
 	bool IsPause() const;
 	bool IsStop() const;
+	bool IsEditor() const { return mode == EngineMode::Editor; }
 
 	ThreadPool* getThreadPool() {return threadPool.get(); }
 private:
@@ -122,6 +124,7 @@ private:
 	std::unique_ptr<ThreadPool> threadPool;
 
 	State state = State::stop;
+	EngineMode mode = EngineMode::Editor;
 };
 
 // Give App pointer access everywhere
