@@ -986,6 +986,7 @@ namespace EGE
 				builder.DefineWord("EDITOR");
 			else
 				builder.DefineWord("RUNTIME");
+
 			builder.SetIncludeCallback(
 				IncludeCallback, &input);
 
