@@ -6,6 +6,7 @@
 #include "ModuleFileSystem.h"
 #include "ModuleResources.h"
 #include "ResourceTexture.h"
+#include "Scripting/ScriptAsset.h"
 
 #include <algorithm>
 #include <array>
@@ -272,7 +273,7 @@ void PanelAssets::DrawToolbar()
 	ImGui::SetNextItemWidth(115.0f);
 	if (ImGui::BeginCombo("##AssetKindFilter", filterPreview))
 	{
-		constexpr std::array<EGE::AssetKind, 12> filters = {
+		constexpr std::array<EGE::AssetKind, 13> filters = {
 			EGE::AssetKind::Unknown,
 			EGE::AssetKind::Scene,
 			EGE::AssetKind::Model,
@@ -282,6 +283,7 @@ void PanelAssets::DrawToolbar()
 			EGE::AssetKind::Audio,
 			EGE::AssetKind::Animation,
 			EGE::AssetKind::StateMachine,
+			EGE::AssetKind::Script,
 			EGE::AssetKind::Shader,
 			EGE::AssetKind::Font,
 			EGE::AssetKind::Data
@@ -766,6 +768,8 @@ void PanelAssets::DrawCreateMenu()
 {
 	if (ImGui::MenuItem("Folder"))
 		BeginCreate(CreateAssetKind::Folder);
+	if (ImGui::MenuItem("AngelScript"))
+		BeginCreate(CreateAssetKind::AngelScript);
 
 	ImGui::Separator();
 	if (ImGui::BeginMenu("Material"))
@@ -936,6 +940,7 @@ void PanelAssets::BeginCreate(CreateAssetKind kind)
 	switch (kind)
 	{
 	case CreateAssetKind::Folder: baseName = "New Folder"; break;
+	case CreateAssetKind::AngelScript: baseName = "New Script"; break;
 	case CreateAssetKind::MaterialMetallicRoughness:
 	case CreateAssetKind::MaterialSpecularGlossiness:
 		baseName = "New Material";
@@ -978,6 +983,22 @@ void PanelAssets::CreatePendingAsset()
 	}
 
 	const std::string sourcePath = BuildCreateSourcePath();
+	if (createKind_ == CreateAssetKind::AngelScript)
+	{
+		const EGE::ScriptAssetCreationResult result =
+			EGE::ScriptAsset::Create(
+				browser_.GetProjectRoot(),
+				sourcePath,
+				createName_);
+		if (!result)
+		{
+			errorMessage_ = result.error;
+			return;
+		}
+		FinishAssetCreation(result.sourcePath, "AngelScript");
+		return;
+	}
+
 	ModuleResources::AssetCreationResult result;
 	switch (createKind_)
 	{
@@ -1066,15 +1087,22 @@ void PanelAssets::CreatePendingAsset()
 	}
 
 	const std::string createdType = CreateTypeName(createKind_);
+	FinishAssetCreation(result.sourcePath, createdType);
+}
+
+void PanelAssets::FinishAssetCreation(
+	const std::string& sourcePath,
+	const std::string& typeName)
+{
 	Refresh();
 	selection_.clear();
-	selection_.insert(result.sourcePath);
+	selection_.insert(sourcePath);
 	if (const EGE::AssetEntry* entry =
-			browser_.FindBySourcePath(result.sourcePath))
+			browser_.FindBySourcePath(sourcePath))
 	{
 		SelectInInspector(*entry);
 	}
-	statusMessage_ = createdType + " created.";
+	statusMessage_ = typeName + " created.";
 	createKind_ = CreateAssetKind::None;
 }
 
@@ -1160,6 +1188,8 @@ const char* PanelAssets::CreateExtension(CreateAssetKind kind)
 {
 	switch (kind)
 	{
+	case CreateAssetKind::AngelScript:
+		return ".as";
 	case CreateAssetKind::MaterialMetallicRoughness:
 	case CreateAssetKind::MaterialSpecularGlossiness:
 		return ".edumaterial.json";
@@ -1182,6 +1212,7 @@ const char* PanelAssets::CreateTypeName(CreateAssetKind kind)
 	switch (kind)
 	{
 	case CreateAssetKind::Folder: return "Folder";
+	case CreateAssetKind::AngelScript: return "AngelScript";
 	case CreateAssetKind::MaterialMetallicRoughness:
 		return "Metallic / Roughness Material";
 	case CreateAssetKind::MaterialSpecularGlossiness:
@@ -1760,6 +1791,8 @@ ImVec4 PanelAssets::KindColor(EGE::AssetKind kind)
 		return ImVec4(0.39f, 0.82f, 0.72f, 1.0f);
 	case EGE::AssetKind::StateMachine:
 		return ImVec4(0.86f, 0.47f, 0.91f, 1.0f);
+	case EGE::AssetKind::Script:
+		return ImVec4(0.37f, 0.78f, 0.56f, 1.0f);
 	case EGE::AssetKind::Shader:
 		return ImVec4(0.32f, 0.58f, 0.96f, 1.0f);
 	case EGE::AssetKind::Font:
@@ -1784,6 +1817,7 @@ const char* PanelAssets::KindGlyph(EGE::AssetKind kind)
 	case EGE::AssetKind::Audio: return "AUD";
 	case EGE::AssetKind::Animation: return "ANIM";
 	case EGE::AssetKind::StateMachine: return "FSM";
+	case EGE::AssetKind::Script: return "AS";
 	case EGE::AssetKind::Shader: return "FX";
 	case EGE::AssetKind::Font: return "FONT";
 	case EGE::AssetKind::Data: return "DATA";

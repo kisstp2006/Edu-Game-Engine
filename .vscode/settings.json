@@ -13,5 +13,16 @@
         "random": "cpp",
         "xlocale": "cpp",
         "xlocnum": "cpp"
-    }
+    },
+    "angelScript.builtinStringType": "string",
+    "angelScript.implicitMutualInclusion": true,
+    "angelScript.files.angelScript": [
+        "**/*.as"
+    ],
+    "angelScript.files.exclude": [
+        "build/**",
+        "Source/assimp/**",
+        "Source/Bullet/**",
+        "Source/DirectXTex/**"
+    ]
 }

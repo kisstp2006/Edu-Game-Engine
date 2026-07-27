@@ -46,6 +46,19 @@
       ]
     },
     {
+      "Id": "scripting",
+      "Label": "Scripting",
+      "Settings": [
+        {
+          "Id": "scripting.hot_reload",
+          "Label": "Hot Reload",
+          "Description": "Compile changed AngelScript files and atomically replace the running script module.",
+          "Type": "boolean",
+          "Default": true
+        }
+      ]
+    },
+    {
       "Id": "physics",
       "Label": "Physics",
       "Settings": [

@@ -19,6 +19,7 @@ namespace EGE
 		Audio,
 		Animation,
 		StateMachine,
+		Script,
 		Shader,
 		Font,
 		Data,

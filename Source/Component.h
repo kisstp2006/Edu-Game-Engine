@@ -31,6 +31,7 @@ public:
         Grass,
 		Decal,
 		SpotCone,
+		Script,
 		Unknown
 	};
 

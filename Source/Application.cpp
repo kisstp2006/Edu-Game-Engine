@@ -15,6 +15,7 @@
 #include "ModuleHints.h"
 #include "ModuleDebugDraw.h"
 #include "ModuleAI.h"
+#include "ModuleScripting.h"
 #include "Event.h"
 #include "Config.h"
 #include "ThreadPool.h"
@@ -58,6 +59,7 @@ Application::Application(EngineMode mode) : mode(mode)
 		modules.push_back(editor = new ModuleEditor());
 	modules.push_back(audio = new ModuleAudio(true));
 	modules.push_back(ai = new ModuleAI());
+	modules.push_back(scripting = new ModuleScripting());
 	modules.push_back(level = new ModuleLevelManager());
     modules.push_back(programs = new ModulePrograms(true));
     modules.push_back(renderer = new ModuleRenderer());
@@ -708,6 +710,12 @@ void Application::ApplySettings()
 				project.GetNumber("physics.gravity_y", -10.0)),
 			static_cast<float>(
 				project.GetNumber("physics.gravity_z", 0.0))));
+	}
+
+	if (scripting)
+	{
+		scripting->SetHotReloadEnabled(project.GetBool(
+			"scripting.hot_reload", IsEditor()));
 	}
 
 	if (IsEditor() && settings_service->HasEditorSettings())

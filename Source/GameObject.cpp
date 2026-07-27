@@ -19,6 +19,7 @@
 #include "ComponentDecal.h"
 #include "ComponentLine.h"
 #include "ComponentSpotCone.h"
+#include "ComponentScript.h"
 #include "ResourceTexture.h"
 #include "ResourceMesh.h"
 #include "Config.h"
@@ -258,7 +259,7 @@ void GameObject::RecalculateBoundingBox()
 // ---------------------------------------------------------
 Component* GameObject::CreateComponent(Component::Types type)
 {
-	static_assert(Component::Types::Unknown == 16, "code needs update");
+	static_assert(Component::Types::Unknown == 17, "code needs update");
 
 	Component* ret = nullptr;
 
@@ -312,6 +313,9 @@ Component* GameObject::CreateComponent(Component::Types type)
         case Component::Types::SpotCone:
             ret = new ComponentSpotCone(this);
             break;
+		case Component::Types::Script:
+			ret = new ComponentScript(this);
+			break;
 	}
 
 	if (ret != nullptr)

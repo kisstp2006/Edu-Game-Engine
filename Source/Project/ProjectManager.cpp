@@ -73,13 +73,14 @@ namespace EGE
 			const std::filesystem::path library =
 				projectDirectory / config.libraryDirectory;
 
-			const std::array<std::filesystem::path, 18> directories = {
+			const std::array<std::filesystem::path, 19> directories = {
 				assets,
 				assets / "Animation",
 				assets / "Audio",
 				assets / "Fonts",
 				assets / "Models",
 				assets / "Scenes",
+				assets / "Scripts",
 				assets / "Shaders",
 				assets / "Textures",
 				library,

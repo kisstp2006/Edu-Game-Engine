@@ -5,6 +5,7 @@
     "application.organization": "UPC CITM",
     "runtime.max_framerate": 0,
     "rendering.vertical_sync": false,
+    "scripting.hot_reload": true,
     "physics.gravity_x": 0,
     "physics.gravity_y": -10,
     "physics.gravity_z": 0

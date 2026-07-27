@@ -24,6 +24,7 @@ class ComponentParticleSystem;
 class ComponentGrass;
 class ComponentDecal;
 class ComponentSpotCone;
+class ComponentScript;
 class ResourceMaterial;
 class ResourceTexture;
 class ResourceMesh;
@@ -87,6 +88,7 @@ private:
     void DrawGrassComponent(ComponentGrass* component);
     void DrawDecalComponent(ComponentDecal* decal);
     void DrawSpotConeComponent(ComponentSpotCone* spotCone);
+	void DrawScriptComponent(ComponentScript* component);
 	void DrawAudioSourceComponent(ComponentAudioSource * component);
 	void DrawAudioListenerComponent(ComponentAudioListener * component);
     bool TextureButton(UID& uid, ResourceMesh* mesh, const char* name);

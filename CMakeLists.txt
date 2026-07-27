@@ -14,6 +14,11 @@ endif()
 
 option(EGE_BUILD_ENGINE "Build the Engine DLL and Editor/Runtime applications" ON)
 option(EGE_WARNINGS_AS_ERRORS "Treat Edu Game Engine warnings as errors" OFF)
+option(EGE_BUILD_TESTS "Build Edu Game Engine backend tests" ON)
+
+if(EGE_BUILD_TESTS)
+    enable_testing()
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

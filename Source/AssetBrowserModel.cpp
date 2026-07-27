@@ -276,6 +276,8 @@ namespace EGE
 		{
 			return AssetKind::Animation;
 		}
+		if (extension == ".as")
+			return AssetKind::Script;
 		if (HasExtension(
 				extension,
 				{".glsl", ".vert", ".frag", ".vs", ".fs",
@@ -308,6 +310,7 @@ namespace EGE
 		case AssetKind::Audio: return "Audio";
 		case AssetKind::Animation: return "Animation";
 		case AssetKind::StateMachine: return "State Machine";
+		case AssetKind::Script: return "AngelScript";
 		case AssetKind::Shader: return "Shader";
 		case AssetKind::Font: return "Font";
 		case AssetKind::Data: return "Data";

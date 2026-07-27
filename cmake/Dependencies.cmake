@@ -160,8 +160,20 @@ target_include_directories(ege_angelscript
     INTERFACE "${angelscript_SOURCE_DIR}/sdk/angelscript/include")
 target_link_libraries(ege_angelscript
     INTERFACE "${EGE_ANGELSCRIPT_UPSTREAM_TARGET}")
+
+add_library(ege_angelscript_addons STATIC
+    "${angelscript_SOURCE_DIR}/sdk/add_on/scriptbuilder/scriptbuilder.cpp"
+    "${angelscript_SOURCE_DIR}/sdk/add_on/scriptstdstring/scriptstdstring.cpp")
+add_library(EGE::AngelScriptAddons ALIAS ege_angelscript_addons)
+target_include_directories(ege_angelscript_addons
+    PUBLIC
+        "${angelscript_SOURCE_DIR}/sdk/add_on"
+        "${angelscript_SOURCE_DIR}/sdk/angelscript/include")
+target_link_libraries(ege_angelscript_addons
+    PUBLIC EGE::AngelScript)
 set_target_properties(
     "${EGE_ANGELSCRIPT_UPSTREAM_TARGET}"
+    ege_angelscript_addons
     PROPERTIES FOLDER "Third-party dependencies")
 
 # This project uses a customized Dear ImGui 1.80 WIP docking snapshot. The
@@ -178,12 +190,14 @@ add_library(ege_imgui STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui_bezier.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui_color_gradient.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/imgui_user2.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/misc/cpp/imgui_stdlib.cpp"
 )
 add_library(EGE::ImGui ALIAS ege_imgui)
 target_include_directories(ege_imgui
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui"
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/backends"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Imgui/misc/cpp"
 )
 target_compile_definitions(ege_imgui PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLEW)
 target_link_libraries(ege_imgui PUBLIC SDL2-static EGE::GLEW)

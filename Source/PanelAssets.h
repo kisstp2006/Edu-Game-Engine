@@ -38,6 +38,7 @@ private:
 	{
 		None,
 		Folder,
+		AngelScript,
 		MaterialMetallicRoughness,
 		MaterialSpecularGlossiness,
 		StateMachine,
@@ -126,6 +127,9 @@ private:
 	void BeginCreate(CreateAssetKind kind);
 	void CreatePendingAsset();
 	void CreateFolder();
+	void FinishAssetCreation(
+		const std::string& sourcePath,
+		const std::string& typeName);
 	std::string BuildCreateSourcePath() const;
 	std::string MakeUniqueCreateName(
 		const char* baseName,

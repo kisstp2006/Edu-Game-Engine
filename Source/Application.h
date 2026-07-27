@@ -24,6 +24,7 @@ class ModuleEditor;
 class ModuleLevelManager;
 class ModuleResources;
 class ModuleAI;
+class ModuleScripting;
 class ModulePrograms;
 class ModuleRenderer;
 class ModuleHints;
@@ -136,6 +137,7 @@ public:
 	ModuleLevelManager* level = nullptr;
 	ModuleResources* resources = nullptr;
 	ModuleAI* ai = nullptr;
+	ModuleScripting* scripting = nullptr;
     ModulePrograms* programs = nullptr;
     ModuleRenderer* renderer = nullptr;
 	ModuleHints* hints = nullptr;

@@ -11,13 +11,25 @@ file(GLOB EGE_SETTINGS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Settings/*.cpp")
 file(GLOB EGE_SETTINGS_HEADERS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Settings/*.h")
+file(GLOB EGE_SCRIPTING_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/*.cpp")
+file(GLOB EGE_SCRIPTING_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/*.h")
+file(GLOB EGE_REFLECTION_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/*.cpp")
+file(GLOB EGE_REFLECTION_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/*.h")
 
 list(APPEND EGE_ENGINE_SOURCES
     ${EGE_PROJECT_SOURCES}
-    ${EGE_SETTINGS_SOURCES})
+    ${EGE_SETTINGS_SOURCES}
+    ${EGE_SCRIPTING_SOURCES}
+    ${EGE_REFLECTION_SOURCES})
 list(APPEND EGE_ENGINE_HEADERS
     ${EGE_PROJECT_HEADERS}
-    ${EGE_SETTINGS_HEADERS})
+    ${EGE_SETTINGS_HEADERS}
+    ${EGE_SCRIPTING_HEADERS}
+    ${EGE_REFLECTION_HEADERS})
 
 set(EGE_EDITOR_ENTRY "${CMAKE_CURRENT_SOURCE_DIR}/EditorMain.cpp")
 set(EGE_RUNTIME_ENTRY "${CMAKE_CURRENT_SOURCE_DIR}/RuntimeMain.cpp")
@@ -73,7 +85,7 @@ target_link_libraries(Engine
         EGE::ImGui
         EGE::TinyGLTF
         EGE::miniaudio
-        EGE::AngelScript
+        EGE::AngelScriptAddons
         EGE::MathGeoLib
         EGE::TheklaAtlas
         EGE::TinySpline
@@ -116,3 +128,33 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
     PREFIX "Engine"
     FILES ${EGE_ENGINE_SOURCES} ${EGE_ENGINE_HEADERS})
 source_group("Entry points" FILES "${EGE_EDITOR_ENTRY}" "${EGE_RUNTIME_ENTRY}")
+
+if(EGE_BUILD_TESTS)
+    add_executable(ScriptingBackendTests
+        "${CMAKE_CURRENT_SOURCE_DIR}/Config.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Config.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/parson.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/parson.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/PropertyConfigSerializer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/PropertySerializer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/TypeRegistry.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptAsset.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptAsset.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptRuntime.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptRuntime.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tests/ScriptRuntimeTests.cpp")
+    target_compile_features(ScriptingBackendTests PRIVATE cxx_std_20)
+    target_compile_definitions(ScriptingBackendTests
+        PRIVATE EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+    target_link_libraries(ScriptingBackendTests
+        PRIVATE
+            EGE::AngelScriptAddons
+            EGE::MathGeoLib)
+    set_target_properties(ScriptingBackendTests PROPERTIES
+        FOLDER "Tests"
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+
+    add_test(
+        NAME ScriptingBackend
+        COMMAND ScriptingBackendTests)
+endif()

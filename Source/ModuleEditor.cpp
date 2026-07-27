@@ -443,18 +443,20 @@ void ModuleEditor::DrawProjectDialogs()
 		if (ImGui::Button("Cancel"))
 			ImGui::CloseCurrentPopup();
 
-		ImGui::EndPopup();
-	}
+		project_location_dialog.Display();
+		if (project_location_dialog.HasSelected())
+		{
+			const std::string selectedLocation =
+				project_location_dialog.GetSelected().string();
+			strncpy_s(
+				new_project_location,
+				sizeof(new_project_location),
+				selectedLocation.c_str(),
+				_TRUNCATE);
+			project_location_dialog.ClearSelected();
+		}
 
-	project_location_dialog.Display();
-	if (project_location_dialog.HasSelected())
-	{
-		const std::string selected_location =
-			project_location_dialog.GetSelected().string();
-		strncpy_s(
-			new_project_location, sizeof(new_project_location),
-			selected_location.c_str(), _TRUNCATE);
-		project_location_dialog.ClearSelected();
+		ImGui::EndPopup();
 	}
 
 	open_project_dialog.Display();

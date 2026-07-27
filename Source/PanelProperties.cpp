@@ -20,6 +20,7 @@
 #include "ComponentGrass.h"
 #include "ComponentDecal.h"
 #include "ComponentSpotCone.h"
+#include "ComponentScript.h"
 #include "ModuleLevelManager.h"
 #include "ModuleEditor.h"
 #include "ModuleResources.h"
@@ -30,6 +31,7 @@
 #include "ModuleHints.h"
 #include "ModulePrograms.h"
 #include "ModuleInput.h"
+#include "ModuleScripting.h"
 #include "ModuleRenderer.h"
 #include "DebugDraw.h"
 #include "ResourceTexture.h"
@@ -46,6 +48,7 @@
 #include "BatchManager.h"
 #include "SkyboxRollout.h"
 #include "LightManager.h"
+#include "Reflection/PropertyEditor.h"
 
 #include "DirLight.h"
 #include "PointLight.h"
@@ -141,6 +144,8 @@ namespace
 			return "Animation source or clip";
 		case EGE::AssetKind::StateMachine:
 			return "Animation state machine";
+		case EGE::AssetKind::Script:
+			return "AngelScript component source";
 		case EGE::AssetKind::Shader:
 			return "GPU shader source";
 		case EGE::AssetKind::Font:
@@ -972,7 +977,7 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
             go->SetLocalRotation(Quat::identity);
         }
 
-        static_assert(Component::Types::Unknown == 16, "code needs update");
+        static_assert(Component::Types::Unknown == 17, "code needs update");
         if (ImGui::BeginMenu("New Component", (go != nullptr)))
         {
             if (ImGui::MenuItem("Audio Listener"))
@@ -1007,6 +1012,8 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
 				go->CreateComponent(Component::Types::Decal);
             if (ImGui::MenuItem("SpotCone"))
                 go->CreateComponent(Component::Types::SpotCone);
+			if (ImGui::MenuItem("Script"))
+				go->CreateComponent(Component::Types::Script);
             ImGui::EndMenu();
         }
 
@@ -1056,7 +1063,7 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
         }
 
         // Iterate all components and draw
-        static_assert(Component::Types::Unknown == 16, "code needs update");
+        static_assert(Component::Types::Unknown == 17, "code needs update");
         for (list<Component*>::iterator it = go->components.begin(); it != go->components.end(); ++it)
         {
             ImGui::PushID(*it);
@@ -1109,6 +1116,9 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
                     case Component::Types::SpotCone:
                         DrawSpotConeComponent(static_cast<ComponentSpotCone*>(*it));
                         break;
+					case Component::Types::Script:
+						DrawScriptComponent(static_cast<ComponentScript*>(*it));
+						break;
 				}
             }
             ImGui::PopID();
@@ -1116,6 +1126,89 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
 
     }
 
+}
+
+void PanelProperties::DrawScriptComponent(ComponentScript* component)
+{
+	if (!component || !App || !App->scripting)
+	{
+		ImGui::TextDisabled("Scripting runtime is unavailable.");
+		return;
+	}
+
+	EGE::ScriptRuntime& runtime = App->scripting->GetRuntime();
+	const std::vector<EGE::ScriptClassInfo> classes =
+		runtime.GetAvailableClasses();
+	const std::string& selectedClass = component->GetScriptClass();
+
+	std::string preview = "None";
+	for (const EGE::ScriptClassInfo& scriptClass : classes)
+	{
+		if (scriptClass.name == selectedClass)
+		{
+			preview = scriptClass.displayName;
+			break;
+		}
+	}
+	if (!selectedClass.empty() && preview == "None")
+		preview = selectedClass + " (Missing)";
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted("Class");
+	ImGui::SameLine(125.0f);
+	ImGui::SetNextItemWidth(-1.0f);
+	if (ImGui::BeginCombo("##ScriptClass", preview.c_str()))
+	{
+		const bool noClass = selectedClass.empty();
+		if (ImGui::Selectable("None", noClass))
+			component->SetScriptClass({});
+		if (noClass)
+			ImGui::SetItemDefaultFocus();
+
+		for (const EGE::ScriptClassInfo& scriptClass : classes)
+		{
+			const bool selected = scriptClass.name == selectedClass;
+			if (ImGui::Selectable(
+					scriptClass.displayName.c_str(), selected))
+			{
+				component->SetScriptClass(scriptClass.name);
+			}
+			if (selected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
+	if (selectedClass.empty())
+	{
+		ImGui::Spacing();
+		ImGui::TextDisabled(
+			"Choose a script class from the project's Assets.");
+		return;
+	}
+
+	if (!runtime.HasClass(selectedClass))
+	{
+		ImGui::Spacing();
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.40f, 0.35f, 1.0f),
+			"The script class is missing or did not compile.");
+		return;
+	}
+
+	const EGE::ReflectedScriptObject reflected =
+		runtime.GetReflectedInstance(component->GetInstanceHandle());
+	if (!reflected)
+	{
+		ImGui::Spacing();
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.65f, 0.25f, 1.0f),
+			"The script instance could not be created.");
+		return;
+	}
+
+	ImGui::Spacing();
+	EGE::DrawReflectedProperties(*reflected.type, reflected.object);
 }
 
 UID PanelProperties::PickResource(UID resource, int type)
