@@ -33,6 +33,16 @@ namespace EGE
 			LOG("[AngelScript] %s", message.c_str());
 		}
 
+		void ScriptLogWarning(const std::string& message)
+		{
+			LOG("[AngelScript Warning] %s", message.c_str());
+		}
+
+		void ScriptLogError(const std::string& message)
+		{
+			LOG("[AngelScript Error] %s", message.c_str());
+		}
+
 		ScriptDiagnosticSeverity ToSeverity(asEMsgType type)
 		{
 			switch (type)
@@ -588,6 +598,31 @@ namespace EGE
 					result);
 				return false;
 			}
+
+			int warningResult = engine->RegisterGlobalFunction(
+				"void LogWarning(const string &in message)",
+				asFUNCTION(ScriptLogWarning),
+				asCALL_CDECL);
+			if (warningResult < 0)
+			{
+				LOG(
+					"AngelScript API registration failed for LogWarning: %d",
+					warningResult);
+				return false;
+			}
+
+			int errorResult = engine->RegisterGlobalFunction(
+				"void LogError(const string &in message)",
+				asFUNCTION(ScriptLogError),
+				asCALL_CDECL);
+			if (errorResult < 0)
+			{
+				LOG(
+					"AngelScript API registration failed for LogError: %d",
+					errorResult);
+				return false;
+			}
+
 			return true;
 		}
 

@@ -10,3 +10,5 @@ int64 parseInt(const string&in, uint base = 10, uint&out byteCount = 0);
 uint64 parseUInt(const string&in, uint base = 10, uint&out byteCount = 0);
 double parseFloat(const string&in, uint&out byteCount = 0);
 void Log(const string&in message);
+void LogWarning(const string&in message);
+void LogError(const string&in message);
