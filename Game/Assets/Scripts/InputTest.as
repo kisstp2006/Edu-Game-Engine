@@ -7,7 +7,9 @@ class InputTest
 
     void OnStart()
     {
-        
+#if EDITOR
+        Log("Editorban vagyok");
+#endif
     }
 
     void OnUpdate(float deltaTime)

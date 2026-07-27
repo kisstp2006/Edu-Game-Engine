@@ -1,5 +1,6 @@
 #include "ScriptRuntime.h"
 
+#include "../Application.h"
 #include "../Globals.h"
 #include "../Reflection/PropertySerializer.h"
 
@@ -977,6 +978,8 @@ namespace EGE
 				LOG("Could not create an AngelScript candidate module");
 				return false;
 			}
+			if (App->IsEditor())
+				builder.DefineWord("EDITOR");
 			builder.SetIncludeCallback(
 				IncludeCallback, &input);
 
