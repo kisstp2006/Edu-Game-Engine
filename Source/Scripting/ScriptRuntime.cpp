@@ -1198,6 +1198,149 @@ namespace EGE
 				<< "// The AngelScript language server imports this file "
 					"for engine API completion.\n\n";
 
+			// ── Enums ──────────────────────────────────────────
+			for (asUINT i = 0; i < engine->GetEnumCount(); ++i)
+			{
+				asITypeInfo* type = engine->GetEnumByIndex(i);
+				if (!type)
+					continue;
+				const char* name = type->GetName();
+				if (!name || name[0] == '\0')
+					continue;
+
+				const char* ns = type->GetNamespace();
+				if (ns && ns[0] != '\0')
+					definitions << "namespace " << ns << " {\n";
+
+				definitions << "enum " << name << " {\n";
+				for (asUINT v = 0; v < type->GetEnumValueCount(); ++v)
+				{
+					int value = 0;
+					const char* valueName = type->GetEnumValueByIndex(v, &value);
+					if (valueName)
+						definitions << "    " << valueName << " = " << value << ",\n";
+				}
+				definitions << "}\n";
+
+				if (ns && ns[0] != '\0')
+					definitions << "}\n";
+				definitions << "\n";
+			}
+
+			// ── Classes / Object types ─────────────────────────
+			for (asUINT i = 0; i < engine->GetObjectTypeCount(); ++i)
+			{
+				asITypeInfo* type = engine->GetObjectTypeByIndex(i);
+				if (!type)
+					continue;
+
+				// Skip enums, typedefs, and funcdefs – they are
+				// handled in the dedicated sections below.
+				const asQWORD flags = type->GetFlags();
+				if (flags & (asOBJ_ENUM | asOBJ_TYPEDEF | asOBJ_FUNCDEF))
+					continue;
+
+				const char* typeName = type->GetName();
+				if (!typeName || typeName[0] == '\0')
+					continue;
+
+				const char* ns = type->GetNamespace();
+				if (ns && ns[0] != '\0')
+					definitions << "namespace " << ns << " {\n";
+
+				definitions << "class " << typeName;
+
+				// Inheritances (base class + interfaces)
+				bool hasBase = false;
+				asITypeInfo* baseType = type->GetBaseType();
+				if (baseType)
+				{
+					definitions << " : " << baseType->GetName();
+					hasBase = true;
+				}
+				for (asUINT impl = 0; impl < type->GetInterfaceCount(); ++impl)
+				{
+					asITypeInfo* iface = type->GetInterface(impl);
+					if (iface)
+					{
+						if (!hasBase)
+						{
+							definitions << " : ";
+							hasBase = true;
+						}
+						else
+							definitions << ", ";
+						definitions << iface->GetName();
+					}
+				}
+				definitions << " {\n";
+
+				// Factories (constructors)
+				for (asUINT b = 0; b < type->GetFactoryCount(); ++b)
+				{
+					asIScriptFunction* factory = type->GetFactoryByIndex(b);
+					if (factory)
+						definitions << "    " << factory->GetDeclaration(false, true, true) << ";\n";
+				}
+
+				// Methods
+				for (asUINT m = 0; m < type->GetMethodCount(); ++m)
+				{
+					asIScriptFunction* method = type->GetMethodByIndex(m);
+					if (method)
+						definitions << "    " << method->GetDeclaration(false, true, true) << ";\n";
+				}
+
+				// Properties
+				for (asUINT p = 0; p < type->GetPropertyCount(); ++p)
+				{
+					const char* propName = nullptr;
+					int propTypeId = 0;
+					bool isPrivate = false;
+					bool isProtected = false;
+					if (type->GetProperty(p, &propName, &propTypeId,
+						&isPrivate, &isProtected) >= 0
+						&& propName)
+					{
+						if (!isPrivate && !isProtected)
+						{
+							const char* typeDecl = engine->GetTypeDeclaration(propTypeId, true);
+							if (typeDecl)
+								definitions << "    " << typeDecl << " " << propName << ";\n";
+						}
+					}
+				}
+
+				definitions << "}\n";
+				if (ns && ns[0] != '\0')
+					definitions << "}\n";
+				definitions << "\n";
+			}
+
+			// ── Funcdefs ───────────────────────────────────────
+			for (asUINT i = 0; i < engine->GetFuncdefCount(); ++i)
+			{
+				asITypeInfo* type = engine->GetFuncdefByIndex(i);
+				if (!type)
+					continue;
+				const char* name = type->GetName();
+				if (!name || name[0] == '\0')
+					continue;
+
+				const char* ns = type->GetNamespace();
+				if (ns && ns[0] != '\0')
+					definitions << "namespace " << ns << " {\n";
+
+				asIScriptFunction* sig = type->GetFuncdefSignature();
+				if (sig)
+					definitions << "funcdef " << sig->GetDeclaration(false, true, true) << ";\n";
+
+				if (ns && ns[0] != '\0')
+					definitions << "}\n";
+				definitions << "\n";
+			}
+
+			// ── Global functions ──────────────────────────────
 			for (asUINT index = 0;
 				index < engine->GetGlobalFunctionCount();
 				++index)
@@ -1209,6 +1352,64 @@ namespace EGE
 					definitions
 						<< function->GetDeclaration(true, true, true)
 						<< ";\n";
+				}
+			}
+
+			// ── Global properties ─────────────────────────────
+			for (asUINT index = 0;
+				index < engine->GetGlobalPropertyCount();
+				++index)
+			{
+				const char* propName = nullptr;
+				const char* propNameSpace = nullptr;
+				int propTypeId = 0;
+				bool isConst = false;
+				if (engine->GetGlobalPropertyByIndex(
+					index, &propName, &propNameSpace, &propTypeId, &isConst) >= 0
+					&& propName)
+				{
+					const char* typeDecl = engine->GetTypeDeclaration(propTypeId, true);
+					if (typeDecl)
+					{
+						if (propNameSpace && propNameSpace[0] != '\0')
+						{
+							definitions << "namespace " << propNameSpace << " {\n";
+							definitions << "    ";
+						}
+						if (isConst)
+							definitions << "const ";
+						definitions << typeDecl << " " << propName << ";\n";
+						if (propNameSpace && propNameSpace[0] != '\0')
+							definitions << "}\n";
+					}
+				}
+			}
+
+			// ── Typedefs ──────────────────────────────────────
+			for (asUINT index = 0;
+				index < engine->GetTypedefCount();
+				++index)
+			{
+				asITypeInfo* type = engine->GetTypedefByIndex(index);
+				if (!type)
+					continue;
+				const char* tdName = type->GetName();
+				if (!tdName || tdName[0] == '\0')
+					continue;
+
+				const char* tdNS = type->GetNamespace();
+				int tdTypeId = type->GetTypedefTypeId();
+				const char* typeDecl = engine->GetTypeDeclaration(tdTypeId, true);
+				if (typeDecl)
+				{
+					if (tdNS && tdNS[0] != '\0')
+					{
+						definitions << "namespace " << tdNS << " {\n";
+						definitions << "    ";
+					}
+					definitions << "typedef " << typeDecl << " " << tdName << ";\n";
+					if (tdNS && tdNS[0] != '\0')
+						definitions << "}\n";
 				}
 			}
 
