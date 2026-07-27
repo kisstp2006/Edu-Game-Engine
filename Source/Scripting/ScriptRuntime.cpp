@@ -21,6 +21,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "ScriptBindings.h"
+
 namespace EGE
 {
 	namespace
@@ -588,6 +590,8 @@ namespace EGE
 		{
 			RegisterStdString(engine);
 
+			RegisterEngineBindings(engine);
+
 			const int result = engine->RegisterGlobalFunction(
 				"void Log(const string &in message)",
 				asFUNCTION(ScriptLog),
@@ -980,6 +984,8 @@ namespace EGE
 			}
 			if (App->IsEditor())
 				builder.DefineWord("EDITOR");
+			else
+				builder.DefineWord("RUNTIME");
 			builder.SetIncludeCallback(
 				IncludeCallback, &input);
 

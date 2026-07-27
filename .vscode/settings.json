@@ -24,5 +24,8 @@
         "Source/assimp/**",
         "Source/Bullet/**",
         "Source/DirectXTex/**"
+    ],
+    "angelScript.definedSymbols": [
+        "EDITOR"
     ]
 }

@@ -10,6 +10,7 @@ class InputTest
 #if EDITOR
         Log("Editorban vagyok");
 #endif
+
     }
 
     void OnUpdate(float deltaTime)
@@ -18,5 +19,6 @@ class InputTest
 
     void OnStop()
     {
+
     }
 }
