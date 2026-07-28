@@ -197,6 +197,13 @@ void GameObject::OnPlay()
 }
 
 // ---------------------------------------------------------
+void GameObject::OnFixedUpdate(float dt)
+{
+	for (list<Component*>::iterator it = components.begin(); it != components.end(); ++it)
+		(*it)->OnFixedUpdate(dt);
+}
+
+// ---------------------------------------------------------
 void GameObject::OnUpdate(float dt)
 {
 	for (list<Component*>::iterator it = components.begin(); it != components.end(); ++it)
@@ -204,6 +211,13 @@ void GameObject::OnUpdate(float dt)
 
 	velocity = (last_translation - translation) / dt;
 	last_translation = translation;
+}
+
+// ---------------------------------------------------------
+void GameObject::OnLateUpdate(float dt)
+{
+	for (list<Component*>::iterator it = components.begin(); it != components.end(); ++it)
+		(*it)->OnLateUpdate(dt);
 }
 
 // ---------------------------------------------------------

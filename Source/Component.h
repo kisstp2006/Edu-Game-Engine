@@ -57,7 +57,9 @@ public:
 	virtual void OnDeActivate() {};
 
 	virtual void OnStart() {};
+	virtual void OnFixedUpdate(float dt) {};
 	virtual void OnUpdate(float dt) {};
+	virtual void OnLateUpdate(float dt) {};
 	virtual void OnFinish() {};
 
 	virtual void OnPlay() {};

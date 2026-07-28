@@ -235,6 +235,42 @@ void main()
 		else
 			glDisable(capability);
 	}
+
+	float SmoothDamp(
+		float current,
+		float target,
+		float& velocity,
+		float smoothTime,
+		float deltaTime)
+	{
+		if (deltaTime <= 0.0f)
+			return current;
+
+		smoothTime = std::max(0.0001f, smoothTime);
+		const float omega = 2.0f / smoothTime;
+		const float step = omega * deltaTime;
+		const float decay =
+			1.0f /
+			(1.0f + step + 0.48f * step * step +
+				0.235f * step * step * step);
+		const float difference = current - target;
+		const float movement =
+			(velocity + omega * difference) * deltaTime;
+
+		velocity = (velocity - omega * movement) * decay;
+		const float result =
+			target + (difference + movement) * decay;
+
+		const bool targetIsAhead = target > current;
+		const bool movedPastTarget = result > target;
+		if (targetIsAhead == movedPastTarget)
+		{
+			velocity = 0.0f;
+			return target;
+		}
+
+		return result;
+	}
 }
 
 namespace EGE
@@ -285,14 +321,21 @@ namespace EGE
 	}
 
 	void MaterialPreviewRenderer::DrawShapeButton(
-		const char* label, Shape shape)
+		const char* label,
+		Shape shape,
+		float height)
 	{
 		const bool selected = shape_ == shape;
 		if (selected)
 			ImGui::PushStyleColor(
 				ImGuiCol_Button,
 				ImVec4(0.20f, 0.58f, 0.95f, 0.75f));
-		if (ImGui::SmallButton(label))
+		if (ImGui::Button(
+				label,
+				ImVec2(
+					ImGui::CalcTextSize(label).x +
+						ImGui::GetStyle().FramePadding.x * 2.0f,
+					height)))
 			shape_ = shape;
 		if (selected)
 			ImGui::PopStyleColor();
@@ -302,17 +345,45 @@ namespace EGE
 		ResourceMaterial& material,
 		const ImVec2& requestedSize)
 	{
-		DrawShapeButton("Sphere", Shape::Sphere);
-		ImGui::SameLine();
-		DrawShapeButton("Cube", Shape::Cube);
-		ImGui::SameLine();
+		const float controlHeight = ImGui::GetFrameHeight();
+		const ImGuiStyle& style = ImGui::GetStyle();
+		bool firstControl = true;
+		auto placeControl = [&](float width)
+		{
+			if (!firstControl &&
+				ImGui::GetCursorPosX() + style.ItemSpacing.x + width <=
+					ImGui::GetWindowContentRegionMax().x)
+			{
+				ImGui::SameLine();
+			}
+			firstControl = false;
+		};
+
+		const auto buttonWidth = [&](const char* label)
+		{
+			return ImGui::CalcTextSize(label).x +
+				style.FramePadding.x * 2.0f;
+		};
+		placeControl(buttonWidth("Sphere"));
+		DrawShapeButton("Sphere", Shape::Sphere, controlHeight);
+		placeControl(buttonWidth("Cube"));
+		DrawShapeButton("Cube", Shape::Cube, controlHeight);
+		const float skyboxWidth = controlHeight +
+			style.ItemInnerSpacing.x +
+			ImGui::CalcTextSize("Skybox").x;
+		placeControl(skyboxWidth);
 		ImGui::Checkbox("Skybox", &showSkybox_);
-		ImGui::SameLine();
-		if (ImGui::SmallButton("Reset view"))
+		placeControl(buttonWidth("Reset view"));
+		if (ImGui::Button(
+				"Reset view",
+				ImVec2(buttonWidth("Reset view"), controlHeight)))
 		{
 			yaw_ = targetYaw_ = -0.55f;
 			pitch_ = targetPitch_ = 0.18f;
 			distance_ = targetDistance_ = 3.2f;
+			yawVelocity_ = 0.0f;
+			pitchVelocity_ = 0.0f;
+			distanceVelocity_ = 0.0f;
 		}
 
 		const float side =
@@ -341,9 +412,9 @@ namespace EGE
 		if (active &&
 			ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f))
 		{
-			targetYaw_ += io.MouseDelta.x * 0.010f;
+			targetYaw_ += io.MouseDelta.x * 0.0085f;
 			targetPitch_ = std::clamp(
-				targetPitch_ - io.MouseDelta.y * 0.010f,
+				targetPitch_ - io.MouseDelta.y * 0.0085f,
 				-1.30f, 1.30f);
 		}
 		if (active &&
@@ -351,7 +422,7 @@ namespace EGE
 		{
 			targetDistance_ = std::clamp(
 				targetDistance_ *
-					std::exp(io.MouseDelta.y * 0.012f),
+					std::exp(io.MouseDelta.y * 0.010f),
 				2.0f, 6.0f);
 		}
 		if (hovered && io.MouseWheel != 0.0f)
@@ -367,16 +438,27 @@ namespace EGE
 			targetYaw_ = -0.55f;
 			targetPitch_ = 0.18f;
 			targetDistance_ = 3.2f;
+			yawVelocity_ = 0.0f;
+			pitchVelocity_ = 0.0f;
+			distanceVelocity_ = 0.0f;
 		}
 
-		const float deltaTime = std::clamp(io.DeltaTime, 0.0f, 0.1f);
-		const float response =
-			1.0f - std::exp(-18.0f * deltaTime);
-		const float yawDifference = std::remainder(
-			targetYaw_ - yaw_, 6.28318530718f);
-		yaw_ += yawDifference * response;
-		pitch_ += (targetPitch_ - pitch_) * response;
-		distance_ += (targetDistance_ - distance_) * response;
+		constexpr float TwoPi = 6.28318530718f;
+		const float deltaTime =
+			std::clamp(io.DeltaTime, 0.0f, 1.0f / 30.0f);
+		const float closestTargetYaw =
+			yaw_ + std::remainder(targetYaw_ - yaw_, TwoPi);
+
+		yaw_ = SmoothDamp(
+			yaw_, closestTargetYaw, yawVelocity_, 0.065f, deltaTime);
+		pitch_ = SmoothDamp(
+			pitch_, targetPitch_, pitchVelocity_, 0.065f, deltaTime);
+		distance_ = SmoothDamp(
+			distance_,
+			targetDistance_,
+			distanceVelocity_,
+			0.085f,
+			deltaTime);
 
 		Render(material);
 		const ImVec2 previewMinimum = ImGui::GetItemRectMin();
@@ -395,8 +477,11 @@ namespace EGE
 			ImGui::GetColorU32(ImGuiCol_Border),
 			6.0f);
 
-		const char* controls =
-			"LMB orbit  |  RMB/wheel zoom  |  Double-click reset";
+		const char* controls = side >= 340.0f
+			? "LMB orbit  |  RMB/wheel zoom  |  Double-click reset"
+			: side >= 275.0f
+				? "LMB orbit  |  RMB zoom"
+				: "Orbit / zoom";
 		const ImVec2 controlsSize = ImGui::CalcTextSize(controls);
 		const ImVec2 controlsMinimum(
 			previewMinimum.x + 8.0f,

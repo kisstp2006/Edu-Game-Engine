@@ -1,5 +1,7 @@
 #include "../Scripting/ScriptRuntime.h"
 #include "../Scripting/ScriptAsset.h"
+#include "../Scripting/ScriptResource.h"
+#include "../Project/VsCodeWorkspace.h"
 #include "../Config.h"
 #include "../Reflection/PropertySerializer.h"
 
@@ -96,6 +98,27 @@ namespace
 int main()
 {
 	TemporaryProject createdAssetProject;
+	std::string workspaceError;
+	if (!Check(
+			EGE::EnsureVsCodeWorkspace(
+				createdAssetProject.Root(), workspaceError),
+			"VS Code workspace configuration failed"))
+	{
+		std::cerr << workspaceError << '\n';
+		return 1;
+	}
+	std::ifstream workspaceSettings(
+		createdAssetProject.Root() / ".vscode" / "settings.json");
+	const std::string workspaceSettingsText(
+		(std::istreambuf_iterator<char>(workspaceSettings)),
+		std::istreambuf_iterator<char>());
+	if (!Check(
+			workspaceSettingsText.find("Assets/**/*.as") != std::string::npos,
+			"VS Code workspace does not include AngelScript assets"))
+	{
+		return 1;
+	}
+
 	const EGE::ScriptAssetCreationResult createdAsset =
 		EGE::ScriptAsset::Create(
 			createdAssetProject.Root(),
@@ -106,7 +129,10 @@ int main()
 			"AngelScript asset creation failed") ||
 		!Check(
 			createdAsset.className == "NewPlayerScript",
-			"AngelScript class name generation failed"))
+			"AngelScript class name generation failed") ||
+		!Check(
+			EGE::ScriptResource::IsAssetId(createdAsset.assetId),
+			"AngelScript asset identifier generation failed"))
 	{
 		std::cerr << createdAsset.error << '\n';
 		return 1;
@@ -125,7 +151,51 @@ int main()
 	{
 		return 1;
 	}
+	if (!Check(
+			createdAssetRuntime.ResolveClass(createdAsset.assetId) ==
+				"NewPlayerScript",
+			"AngelScript asset identifier did not resolve its class"))
+	{
+		return 1;
+	}
 	createdAssetRuntime.Shutdown();
+
+	TemporaryProject ownerProject;
+	ownerProject.WriteScript(
+		"[ScriptComponent]\n"
+		"class OwnerProbe : EGEBehaviour\n"
+		"{\n"
+		"    bool ownerBound = false;\n"
+		"    void OnStart()\n"
+		"    {\n"
+		"        ownerBound = gameObject !is null && transform !is null;\n"
+		"    }\n"
+		"}\n");
+	EGE::ScriptRuntime ownerRuntime;
+	if (!Check(ownerRuntime.Initialize(), "Owner runtime initialization failed") ||
+		!Check(
+			ownerRuntime.SetProjectRoot(ownerProject.Root()),
+			"Owner script did not compile"))
+	{
+		return 1;
+	}
+	const EGE::ScriptInstanceHandle ownerInstance =
+		ownerRuntime.CreateInstance("OwnerProbe");
+	ownerRuntime.SetInstanceOwner(ownerInstance, &ownerProject);
+	ownerRuntime.StartInstance(ownerInstance);
+	const EGE::ReflectedScriptObject ownerReflected =
+		ownerRuntime.GetReflectedInstance(ownerInstance);
+	EGE::PropertyValue ownerBoundValue;
+	const EGE::PropertyDescriptor* ownerBound =
+		FindProperty(ownerReflected, "ownerBound");
+	if (!Check(
+		ownerBound && ownerBound->Read(ownerReflected.object, ownerBoundValue) &&
+			std::get<bool>(ownerBoundValue),
+		"EGEBehaviour did not receive its GameObject and Transform handles"))
+	{
+		return 1;
+	}
+	ownerRuntime.Shutdown();
 
 	EGE::PropertyAttributes exposureAttributes;
 	exposureAttributes.range = EGE::PropertyRange{0.0, 4.0};
@@ -227,7 +297,8 @@ int main()
 		runtime.GetAvailableClasses();
 	if (!Check(
 			classes.size() == 1 &&
-				classes.front().name == "PlayerController",
+				classes.front().name == "PlayerController" &&
+				EGE::ScriptResource::IsAssetId(classes.front().assetId),
 			"Script class discovery returned an unexpected result"))
 	{
 		return 1;

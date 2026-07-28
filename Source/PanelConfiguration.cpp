@@ -628,13 +628,13 @@ void PanelConfiguration::DrawModuleHints(ModuleHints * module)
             }
         }
 
-        if (ImGui::Button("EaseIn", ImVec2(55, 20)))
+        if (ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight())))
             module->SetFloat4Value(ModuleHints::DIST_FOG_CURVE, float4(0.0f, 0.0f, 1.0f, 0.0f));
         ImGui::SameLine();
-        if (ImGui::Button("EaseOut", ImVec2(60, 20)))
+        if (ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight())))
             module->SetFloat4Value(ModuleHints::DIST_FOG_CURVE, float4(0.0f, 0.0f, 0.0f, 1.f));
         ImGui::SameLine();
-        if (ImGui::Button("EaseInOut", ImVec2(70, 20)))
+        if (ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight())))
             module->SetFloat4Value(ModuleHints::DIST_FOG_CURVE, float4(0.0, 1.0f, 1.0f, 0.0f));
 
         bool fogBlur = module->GetBoolValue(ModuleHints::DIST_FOG_BLUR);
@@ -672,13 +672,13 @@ void PanelConfiguration::DrawModuleHints(ModuleHints * module)
             }
         }
 
-        if (ImGui::Button("EaseIn", ImVec2(55, 20)))
+        if (ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight())))
             module->SetFloat4Value(ModuleHints::DIST_FOG_CURVE, float4(0.0f, 0.0f, 1.0f, 0.0f));
         ImGui::SameLine();
-        if (ImGui::Button("EaseOut", ImVec2(60, 20)))
+        if (ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight())))
             module->SetFloat4Value(ModuleHints::DIST_FOG_CURVE, float4(0.0f, 0.0f, 0.0f, 1.f));
         ImGui::SameLine();
-        if (ImGui::Button("EaseInOut", ImVec2(70, 20)))
+        if (ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight())))
             module->SetFloat4Value(ModuleHints::DIST_FOG_CURVE, float4(0.0, 1.0f, 1.0f, 0.0f));
 
         bool fogBlur = module->GetBoolValue(ModuleHints::DIST_FOG_BLUR);

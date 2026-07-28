@@ -1,3 +1,4 @@
+// EGE-ScriptId: 6ad99d67-46f3-4cff-9a8c-3611b85207d3
 void OnStart()
 {
     Log("Project scripts started");

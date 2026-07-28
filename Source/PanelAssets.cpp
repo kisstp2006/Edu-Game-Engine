@@ -6,6 +6,7 @@
 #include "ModuleFileSystem.h"
 #include "ModuleResources.h"
 #include "ResourceTexture.h"
+#include "Project/VsCodeWorkspace.h"
 #include "Scripting/ScriptAsset.h"
 
 #include <algorithm>
@@ -35,6 +36,29 @@ namespace
 			return child == parent;
 		const std::string text = relative.generic_string();
 		return text != ".." && !text.starts_with("../");
+	}
+
+	float ButtonWidth(const char* label)
+	{
+		return ImGui::CalcTextSize(label).x +
+			ImGui::GetStyle().FramePadding.x * 2.0f;
+	}
+
+	bool ContinueControlLine(float nextWidth)
+	{
+		const float contentRight =
+			ImGui::GetWindowPos().x +
+			ImGui::GetWindowContentRegionMax().x;
+		if (ImGui::GetItemRectMax().x +
+				ImGui::GetStyle().ItemSpacing.x +
+				nextWidth >
+			contentRight)
+		{
+			return false;
+		}
+
+		ImGui::SameLine();
+		return true;
 	}
 }
 
@@ -233,15 +257,23 @@ void PanelAssets::DrawToolbar()
 		browser_.GetCurrentPath())
 	{
 		breadcrumb /= component;
-		ImGui::SameLine();
-		ImGui::TextDisabled("/");
-		ImGui::SameLine();
 		const std::string label = component.string();
+		const float separatorWidth = ImGui::CalcTextSize("/").x;
+		const float segmentWidth =
+			separatorWidth +
+			ImGui::GetStyle().ItemSpacing.x +
+			ButtonWidth(label.c_str());
+		if (ContinueControlLine(segmentWidth))
+		{
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextDisabled("/");
+			ImGui::SameLine();
+		}
 		if (ImGui::Button(label.c_str()))
 			NavigateTo(breadcrumb);
 	}
 
-	ImGui::SameLine();
+	ImGui::Spacing();
 	if (ImGui::Button("Create"))
 		ImGui::OpenPopup("AssetCreateMenu");
 	if (ImGui::BeginPopup("AssetCreateMenu"))
@@ -250,27 +282,31 @@ void PanelAssets::DrawToolbar()
 		ImGui::EndPopup();
 	}
 
-	ImGui::SameLine();
+	ContinueControlLine(ButtonWidth("Import"));
 	if (ImGui::Button("Import"))
 		ImGui::OpenPopup("AssetImportMenu");
 	DrawImportMenu();
 
-	ImGui::SameLine();
+	ContinueControlLine(ButtonWidth("Refresh"));
 	if (ImGui::Button("Refresh"))
 		Refresh();
 
-	ImGui::SetNextItemWidth(250.0f);
+	const float searchWidth = std::min(
+		250.0f,
+		std::max(1.0f, ImGui::GetContentRegionAvail().x));
+	ImGui::SetNextItemWidth(searchWidth);
 	ImGui::InputTextWithHint(
 		"##AssetSearch",
 		"Search all assets...",
 		search_,
 		sizeof(search_));
 
-	ImGui::SameLine();
 	const char* filterPreview = kindFilter_ == EGE::AssetKind::Unknown
 		? "All types"
 		: EGE::AssetBrowserModel::GetKindName(kindFilter_);
-	ImGui::SetNextItemWidth(115.0f);
+	const float filterWidth = 115.0f;
+	ContinueControlLine(filterWidth);
+	ImGui::SetNextItemWidth(filterWidth);
 	if (ImGui::BeginCombo("##AssetKindFilter", filterPreview))
 	{
 		constexpr std::array<EGE::AssetKind, 13> filters = {
@@ -302,9 +338,11 @@ void PanelAssets::DrawToolbar()
 		ImGui::EndCombo();
 	}
 
-	ImGui::SameLine();
+	const char* viewModeLabel =
+		viewMode_ == ViewMode::Grid ? "Grid" : "List";
+	ContinueControlLine(ButtonWidth(viewModeLabel));
 	if (ImGui::Button(
-			viewMode_ == ViewMode::Grid ? "Grid" : "List"))
+			viewModeLabel))
 	{
 		viewMode_ = viewMode_ == ViewMode::Grid
 			? ViewMode::List
@@ -313,8 +351,9 @@ void PanelAssets::DrawToolbar()
 
 	if (viewMode_ == ViewMode::Grid)
 	{
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(110.0f);
+		const float thumbnailControlWidth = 110.0f;
+		ContinueControlLine(thumbnailControlWidth);
+		ImGui::SetNextItemWidth(thumbnailControlWidth);
 		ImGui::SliderFloat(
 			"##AssetThumbnailSize",
 			&thumbnailSize_,
@@ -746,6 +785,12 @@ void PanelAssets::DrawAssetContextMenu(
 		{
 			if (ImGui::MenuItem("Open Editor"))
 				OpenAssetEditor(entry);
+		}
+
+		if (entry.kind == EGE::AssetKind::Script &&
+			ImGui::MenuItem("Open in VS Code"))
+		{
+			OpenScriptInVsCode(entry);
 		}
 
 		if (importInfo &&
@@ -1531,6 +1576,16 @@ void PanelAssets::OpenAssetEditor(const EGE::AssetEntry& entry)
 	App->editor->OpenAssetEditor(selection);
 }
 
+void PanelAssets::OpenScriptInVsCode(const EGE::AssetEntry& entry)
+{
+	const std::filesystem::path filePath =
+		browser_.GetAssetsRoot() / entry.relativePath;
+	if (!EGE::OpenVsCode(browser_.GetProjectRoot(), filePath, errorMessage_))
+		return;
+
+	statusMessage_ = entry.name + " opened in Visual Studio Code.";
+}
+
 void PanelAssets::HandleAssetInteractions(
 	const EGE::AssetEntry& entry,
 	const std::vector<const EGE::AssetEntry*>& entries,
@@ -1544,6 +1599,8 @@ void PanelAssets::HandleAssetInteractions(
 	{
 		if (entry.directory)
 			pendingNavigation_ = entry.relativePath;
+		else if (entry.kind == EGE::AssetKind::Script)
+			OpenScriptInVsCode(entry);
 		else
 			OpenAssetEditor(entry);
 	}

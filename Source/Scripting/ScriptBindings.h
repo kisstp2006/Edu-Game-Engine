@@ -1,5 +1,10 @@
 #pragma once
 
-class asIScriptEngine;
+#include "ScriptApiRegistry.h"
 
-void RegisterEngineBindings(asIScriptEngine* engine);
+namespace EGE
+{
+	[[nodiscard]] bool RegisterEngineBindings(
+		asIScriptEngine& engine,
+		std::string& error);
+}

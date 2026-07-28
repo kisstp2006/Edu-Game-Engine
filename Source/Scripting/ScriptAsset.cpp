@@ -1,4 +1,5 @@
 #include "ScriptAsset.h"
+#include "ScriptResource.h"
 
 #include <cctype>
 #include <fstream>
@@ -91,7 +92,8 @@ namespace EGE
 			result.error = "The script file could not be created.";
 			return result;
 		}
-		stream << BuildTemplate(className);
+		const std::string assetId = ScriptResource::CreateAssetId();
+		stream << BuildTemplate(className, assetId);
 		if (!stream.good())
 		{
 			result.error = "The script file could not be written.";
@@ -100,6 +102,7 @@ namespace EGE
 
 		result.sourcePath = relative.generic_string();
 		result.className = className;
+		result.assetId = assetId;
 		return result;
 	}
 
@@ -128,12 +131,16 @@ namespace EGE
 	}
 
 	std::string ScriptAsset::BuildTemplate(
-		const std::string& className)
+		const std::string& className,
+		const std::string& assetId)
 	{
 		std::ostringstream source;
 		source
+			<< "// EGE-ScriptId: "
+			<< (assetId.empty() ? ScriptResource::CreateAssetId() : assetId)
+			<< "\n\n"
 			<< "[ScriptComponent]\n"
-			<< "class " << className << "\n"
+			<< "class " << className << " : EGEBehaviour\n"
 			<< "{\n"
 			<< "    [Header(\"Properties\")]\n"
 			<< "    [SerializeField]\n"

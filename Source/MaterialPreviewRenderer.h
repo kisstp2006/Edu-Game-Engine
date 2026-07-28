@@ -33,7 +33,10 @@ namespace EGE
 
 		bool Initialize();
 		void Render(const ResourceMaterial& material);
-		void DrawShapeButton(const char* label, Shape shape);
+		void DrawShapeButton(
+			const char* label,
+			Shape shape,
+			float height);
 
 	private:
 		static constexpr unsigned int PreviewSize = 512;
@@ -53,5 +56,8 @@ namespace EGE
 		float targetYaw_ = -0.55f;
 		float targetPitch_ = 0.18f;
 		float targetDistance_ = 3.2f;
+		float yawVelocity_ = 0.0f;
+		float pitchVelocity_ = 0.0f;
+		float distanceVelocity_ = 0.0f;
 	};
 }

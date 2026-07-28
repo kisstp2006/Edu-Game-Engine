@@ -72,7 +72,7 @@ void SkyboxRollout::DrawProperties(IBLData* skybox)
 
         }
 
-        if (ImGui::SmallButton("Select Texture"))
+        if (ImGui::Button("Select Texture"))
         {
             selectTexture.Open(Resource::texture, "Skybox texture", 0);
         }

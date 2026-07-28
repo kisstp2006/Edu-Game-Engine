@@ -1,0 +1,14 @@
+{
+    "angelScript.builtinStringType": "string",
+    "angelScript.implicitMutualInclusion": true,
+    "angelScript.files.angelScript": [
+        "Assets/**/*.as"
+    ],
+    "angelScript.files.exclude": [
+        "Library/**",
+        "build/**"
+    ],
+    "angelScript.definedSymbols": [
+        "EDITOR"
+    ]
+}

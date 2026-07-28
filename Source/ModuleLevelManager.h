@@ -62,7 +62,9 @@ private:
 	void RecursiveTestRay(const LineSegment& segment, float& dist, GameObject** best_candidate) const;
 	void RecursiveTestRay(const Ray& ray, float& dist, GameObject** best_candidate) const;
 	void RecursiveProcessEvent(GameObject* go, const Event& event) const;
+	void RecursiveFixedUpdate(GameObject* go, float dt) const;
 	void RecursiveUpdate(GameObject* go, float dt) const;
+	void RecursiveLateUpdate(GameObject* go, float dt) const;
 	GameObject* RecursiveFind(uint uid, GameObject* go) const;
 
 	void LoadGameObjects(const Config& config);

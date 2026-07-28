@@ -1,6 +1,7 @@
 #include "ScriptRuntime.h"
+#include "ScriptInstanceContext.h"
+#include "ScriptResource.h"
 
-#include "../Application.h"
 #include "../Globals.h"
 #include "../Reflection/PropertySerializer.h"
 
@@ -15,13 +16,13 @@
 #include <cstdlib>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <utility>
-
-#include "ScriptBindings.h"
 
 namespace EGE
 {
@@ -30,6 +31,33 @@ namespace EGE
 		constexpr std::chrono::milliseconds ScanInterval(250);
 		constexpr std::chrono::milliseconds ReloadDebounce(200);
 		constexpr const char* ScriptReflectionDomain = "AngelScript";
+		constexpr const char* BehaviourModuleName = "EGE.Behaviour";
+		constexpr const char* BehaviourSource = R"(
+shared class EGEBehaviour
+{
+    GameObject@ gameObject;
+    Transform@ transform;
+    bool enabled = true;
+
+    void __EGE_Bind(GameObject@ owner, Transform@ ownerTransform)
+    {
+        @gameObject = owner;
+        @transform = ownerTransform;
+    }
+
+    void OnAwake() {}
+    void OnEnable() {}
+    void OnStart() {}
+    void OnFixedUpdate(float deltaTime) {}
+    void OnUpdate(float deltaTime) {}
+    void OnLateUpdate(float deltaTime) {}
+    void OnDisable() {}
+    void OnStop() {}
+    void OnDestroy() {}
+    void OnBeforeReload() {}
+    void OnAfterReload() {}
+}
+)";
 
 		void ScriptLog(const std::string& message)
 		{
@@ -473,9 +501,15 @@ namespace EGE
 		struct ClassBinding
 		{
 			asITypeInfo* type = nullptr;
+			std::string assetId;
+			std::filesystem::path sourcePath;
+			asIScriptFunction* awake = nullptr;
 			asIScriptFunction* start = nullptr;
+			asIScriptFunction* fixedUpdate = nullptr;
 			asIScriptFunction* update = nullptr;
+			asIScriptFunction* lateUpdate = nullptr;
 			asIScriptFunction* stop = nullptr;
+			asIScriptFunction* destroy = nullptr;
 			asIScriptFunction* enable = nullptr;
 			asIScriptFunction* disable = nullptr;
 			asIScriptFunction* beforeReload = nullptr;
@@ -495,7 +529,9 @@ namespace EGE
 		{
 			ScriptInstanceHandle handle = 0;
 			std::string className;
+			void* owner = nullptr;
 			asIScriptObject* object = nullptr;
+			std::unique_ptr<ScriptInstanceContext> context;
 			PropertyBag state;
 			bool running = false;
 			bool enabled = true;
@@ -505,10 +541,13 @@ namespace EGE
 		struct BuildInput
 		{
 			std::map<std::string, std::string> sources;
+			std::map<std::string, ScriptResourceInfo> resources;
 		};
 
 		asIScriptEngine* engine = nullptr;
-		asIScriptContext* context = nullptr;
+		ScriptInstanceContext globalContext;
+		ScriptApiRegistry apiRegistry;
+		std::recursive_mutex executionMutex;
 		std::filesystem::path projectRoot;
 		std::filesystem::path scriptRoot;
 		std::string activeModuleName;
@@ -523,6 +562,7 @@ namespace EGE
 		unsigned long long generation = 0;
 		ScriptInstanceHandle nextInstanceHandle = 1;
 		bool initialized = false;
+		bool isEditorBuild = true;
 		bool hotReloadEnabled = true;
 		bool playing = false;
 		bool paused = false;
@@ -589,8 +629,14 @@ namespace EGE
 		bool RegisterApi()
 		{
 			RegisterStdString(engine);
-
-			RegisterEngineBindings(engine);
+			if (engine->RegisterObjectType(
+					"GameObject", 0, asOBJ_REF | asOBJ_NOCOUNT) < 0 ||
+				engine->RegisterObjectType(
+					"Transform", 0, asOBJ_REF | asOBJ_NOCOUNT) < 0)
+			{
+				LOG("Could not register core AngelScript object handles");
+				return false;
+			}
 
 			const int result = engine->RegisterGlobalFunction(
 				"void Log(const string &in message)",
@@ -625,6 +671,13 @@ namespace EGE
 				LOG(
 					"AngelScript API registration failed for LogError: %d",
 					errorResult);
+				return false;
+			}
+
+			std::string error;
+			if (!apiRegistry.RegisterAll(*engine, error))
+			{
+				LOG("AngelScript API registration failed: %s", error.c_str());
 				return false;
 			}
 
@@ -679,67 +732,98 @@ namespace EGE
 			return snapshot;
 		}
 
+		void RecordExecutionError(const ScriptExecutionError& error)
+		{
+			ScriptDiagnostic diagnostic;
+			diagnostic.file = error.file;
+			diagnostic.line = error.line;
+			diagnostic.column = error.column;
+			diagnostic.severity = ScriptDiagnosticSeverity::Error;
+			diagnostic.message = error.function.empty()
+				? error.message
+				: error.function + ": " + error.message;
+			diagnostics.push_back(std::move(diagnostic));
+		}
+
 		bool Invoke(
 			asIScriptFunction* function,
 			void* object = nullptr,
-			std::optional<float> deltaTime = std::nullopt)
+			std::optional<float> deltaTime = std::nullopt,
+			ScriptInstanceContext* instanceContext = nullptr)
 		{
 			if (!function)
 				return true;
 
-			if (context->Prepare(function) < 0)
-			{
-				LOG(
-					"[AngelScript] Could not prepare %s",
-					function->GetDeclaration());
-				return false;
-			}
-			if (object && context->SetObject(object) < 0)
-			{
-				context->Unprepare();
-				return false;
-			}
-			if (deltaTime && context->SetArgFloat(0, *deltaTime) < 0)
-			{
-				context->Unprepare();
-				return false;
-			}
-
-			const int result = context->Execute();
-			if (result == asEXECUTION_FINISHED)
-			{
-				context->Unprepare();
+			std::lock_guard lock(executionMutex);
+			ScriptExecutionError error;
+			ScriptInstanceContext& context =
+				instanceContext ? *instanceContext : globalContext;
+			if (context.Execute(*function, object, deltaTime, error))
 				return true;
-			}
 
-			if (result == asEXECUTION_EXCEPTION)
-			{
-				const asIScriptFunction* exceptionFunction =
-					context->GetExceptionFunction();
-				const char* section = nullptr;
-				int column = 0;
-				const int line =
-					context->GetLineNumber(0, &column, &section);
-				LOG(
-					"[AngelScript] Exception in %s at %s(%d, %d): %s",
-					exceptionFunction
-						? exceptionFunction->GetDeclaration()
-						: "<unknown>",
-					section ? section : "<script>",
-					line,
-					column,
-					context->GetExceptionString());
-			}
-			else
-			{
-				LOG(
-					"[AngelScript] Execution of %s ended with code %d",
-					function->GetDeclaration(),
-					result);
-			}
-
-			context->Unprepare();
+			RecordExecutionError(error);
+			LOG(
+				"[AngelScript] Execution of %s failed at %s(%d, %d): %s",
+				function->GetDeclaration(),
+				error.file.string().c_str(),
+				error.line,
+				error.column,
+				error.message.c_str());
 			return false;
+		}
+
+		bool InvokeInstance(
+			ScriptInstance& instance,
+			asIScriptFunction* function,
+			std::optional<float> deltaTime = std::nullopt)
+		{
+			return Invoke(
+				function,
+				instance.object,
+				deltaTime,
+				instance.context.get());
+		}
+
+		bool IsScriptEnabled(const ScriptInstance& instance) const
+		{
+			if (!instance.object)
+				return false;
+
+			for (asUINT index = 0;
+				index < instance.object->GetPropertyCount(); ++index)
+			{
+				const char* name = instance.object->GetPropertyName(index);
+				if (!name || std::string_view(name) != "enabled" ||
+					instance.object->GetPropertyTypeId(index) != asTYPEID_BOOL)
+				{
+					continue;
+				}
+				const bool* enabled = static_cast<const bool*>(
+					instance.object->GetAddressOfProperty(index));
+				return !enabled || *enabled;
+			}
+			return true;
+		}
+
+		void SetScriptEnabled(ScriptInstance& instance, bool enabled)
+		{
+			if (!instance.object)
+				return;
+			for (asUINT index = 0;
+				index < instance.object->GetPropertyCount(); ++index)
+			{
+				const char* name = instance.object->GetPropertyName(index);
+				if (!name || std::string_view(name) != "enabled" ||
+					instance.object->GetPropertyTypeId(index) != asTYPEID_BOOL)
+				{
+					continue;
+				}
+				bool* value = static_cast<bool*>(
+					instance.object->GetAddressOfProperty(index));
+				if (value)
+					*value = enabled;
+				return;
+			}
 		}
 
 		void ReleaseInstanceObject(ScriptInstance& instance)
@@ -753,6 +837,33 @@ namespace EGE
 					instance.object, binding->second.type);
 			}
 			instance.object = nullptr;
+		}
+
+		void BindInstanceOwner(ScriptInstance& instance)
+		{
+			if (!instance.object)
+				return;
+			asIScriptModule* module = engine->GetModule(
+				activeModuleName.c_str());
+			asITypeInfo* behaviour = module
+				? module->GetTypeInfoByName("EGEBehaviour")
+				: nullptr;
+			asIScriptFunction* bind = behaviour
+				? behaviour->GetMethodByName("__EGE_Bind")
+				: nullptr;
+			if (!bind || !instance.context)
+				return;
+
+			ScriptExecutionError error;
+			if (!instance.context->ExecuteWithObjects(
+					*bind,
+					instance.object,
+					instance.owner,
+					instance.owner,
+					error))
+			{
+				RecordExecutionError(error);
+			}
 		}
 
 		bool Instantiate(
@@ -773,6 +884,21 @@ namespace EGE
 					instance.className.c_str());
 				return false;
 			}
+			if (!instance.context)
+			{
+				instance.context = std::make_unique<ScriptInstanceContext>();
+				std::string contextError;
+				if (!instance.context->Initialize(*engine, contextError))
+				{
+					engine->ReleaseScriptObject(
+						instance.object, binding->second.type);
+					instance.object = nullptr;
+					instance.context.reset();
+					LOG("Could not create AngelScript instance context: %s", contextError.c_str());
+					return false;
+				}
+			}
+			BindInstanceOwner(instance);
 
 			const auto descriptor = TypeRegistry::Get().Find(
 				ScriptReflectionDomain, instance.className);
@@ -781,19 +907,31 @@ namespace EGE
 					*descriptor, instance.object, instance.state, false);
 
 			instance.executionFaulted = false;
-			if (afterReload &&
+			if (!afterReload &&
 				!Invoke(
-					binding->second.afterReload, instance.object))
+					binding->second.awake, instance.object, std::nullopt,
+					instance.context.get()))
+			{
+				instance.executionFaulted = true;
+			}
+			else if (afterReload &&
+				!Invoke(
+					binding->second.afterReload, instance.object, std::nullopt,
+					instance.context.get()))
 			{
 				instance.executionFaulted = true;
 			}
 			else if (startIfRunning && instance.running &&
-				!Invoke(binding->second.start, instance.object))
+				!Invoke(
+					binding->second.start, instance.object, std::nullopt,
+					instance.context.get()))
 			{
 				instance.executionFaulted = true;
 			}
 			if (instance.enabled &&
-				!Invoke(binding->second.enable, instance.object))
+				!Invoke(
+					binding->second.enable, instance.object, std::nullopt,
+					instance.context.get()))
 			{
 				instance.executionFaulted = true;
 			}
@@ -881,7 +1019,9 @@ namespace EGE
 		}
 
 		void DiscoverClasses(
-			CScriptBuilder& builder, Candidate& candidate)
+			CScriptBuilder& builder,
+			const BuildInput& input,
+			Candidate& candidate)
 		{
 			for (asUINT index = 0;
 				index < candidate.module->GetObjectTypeCount();
@@ -899,12 +1039,35 @@ namespace EGE
 
 				ClassBinding binding;
 				binding.type = type;
+				const asIScriptFunction* factory = type->GetFactoryByIndex(0);
+				const char* section = nullptr;
+				int line = 0;
+				int column = 0;
+				if (factory)
+					factory->GetDeclaredAt(&section, &line, &column);
+				if (section)
+				{
+					const auto resource = input.resources.find(section);
+					if (resource != input.resources.end())
+					{
+						binding.assetId = resource->second.assetId;
+						binding.sourcePath = resource->second.sourcePath;
+					}
+				}
+				binding.awake =
+					type->GetMethodByDecl("void OnAwake()");
 				binding.start =
 					type->GetMethodByDecl("void OnStart()");
+				binding.fixedUpdate =
+					type->GetMethodByDecl("void OnFixedUpdate(float)");
 				binding.update =
 					type->GetMethodByDecl("void OnUpdate(float)");
+				binding.lateUpdate =
+					type->GetMethodByDecl("void OnLateUpdate(float)");
 				binding.stop =
 					type->GetMethodByDecl("void OnStop()");
+				binding.destroy =
+					type->GetMethodByDecl("void OnDestroy()");
 				binding.enable =
 					type->GetMethodByDecl("void OnEnable()");
 				binding.disable =
@@ -917,7 +1080,9 @@ namespace EGE
 				const std::vector<std::string> classMetadata =
 					builder.GetMetadataForType(type->GetTypeId());
 				const bool hasLifecycle =
-					binding.start || binding.update || binding.stop ||
+					binding.awake || binding.start || binding.fixedUpdate ||
+					binding.update || binding.lateUpdate || binding.stop ||
+					binding.destroy ||
 					binding.enable || binding.disable ||
 					binding.beforeReload || binding.afterReload;
 				if (!hasLifecycle &&
@@ -930,6 +1095,8 @@ namespace EGE
 
 				const std::string qualifiedName =
 					QualifiedTypeName(*type);
+				if (qualifiedName == "EGEBehaviour")
+					continue;
 				TypeDescriptor descriptor;
 				descriptor.domain = ScriptReflectionDomain;
 				descriptor.id = qualifiedName;
@@ -959,11 +1126,38 @@ namespace EGE
 				std::to_string(generation + 1);
 
 			BuildInput input;
+			std::unordered_map<std::string, std::filesystem::path>
+				assetSources;
 			for (const auto& [path, stamp] : snapshot)
 			{
 				(void)stamp;
 				const std::string section =
 					path.lexically_relative(projectRoot).generic_string();
+				std::string resourceError;
+				ScriptResourceInfo resource =
+					ScriptResource::ReadOrCreate(path, resourceError);
+				if (!resource)
+				{
+					LOG(
+						"Could not prepare AngelScript resource [%s]: %s",
+						path.string().c_str(),
+						resourceError.c_str());
+					return false;
+				}
+				resource.sourcePath = section;
+				const auto [existing, inserted] = assetSources.emplace(
+					resource.assetId, path);
+				if (!inserted && existing->second != path)
+				{
+					diagnostics.push_back({
+						path,
+						0,
+						0,
+						ScriptDiagnosticSeverity::Error,
+						"Duplicate script asset ID also used by " +
+							existing->second.string()});
+					return false;
+				}
 				std::string source;
 				if (!ReadTextFile(path, source))
 				{
@@ -973,6 +1167,7 @@ namespace EGE
 					return false;
 				}
 				input.sources.emplace(section, std::move(source));
+				input.resources.emplace(section, std::move(resource));
 			}
 
 			CScriptBuilder builder;
@@ -982,13 +1177,23 @@ namespace EGE
 				LOG("Could not create an AngelScript candidate module");
 				return false;
 			}
-			if (App->IsEditor())
+			if (isEditorBuild)
 				builder.DefineWord("EDITOR");
 			else
 				builder.DefineWord("RUNTIME");
 
 			builder.SetIncludeCallback(
 				IncludeCallback, &input);
+			if (builder.AddSectionFromMemory(
+					BehaviourModuleName,
+					BehaviourSource,
+					static_cast<unsigned int>(
+						std::char_traits<char>::length(BehaviourSource))) < 0)
+			{
+				engine->DiscardModule(candidate.moduleName.c_str());
+				LOG("Could not add the EGEBehaviour base class");
+				return false;
+			}
 
 			for (const auto& [section, source] : input.sources)
 			{
@@ -1019,7 +1224,7 @@ namespace EGE
 					"void OnUpdate(float)");
 			candidate.globalHooks.stop =
 				candidate.module->GetFunctionByDecl("void OnStop()");
-			DiscoverClasses(builder, candidate);
+			DiscoverClasses(builder, input, candidate);
 			return true;
 		}
 
@@ -1062,9 +1267,7 @@ namespace EGE
 				const auto binding = classes.find(instance.className);
 				if (instance.object && binding != classes.end())
 				{
-					Invoke(
-						binding->second.beforeReload,
-						instance.object);
+					InvokeInstance(instance, binding->second.beforeReload);
 					CaptureInstance(instance, false);
 				}
 			}
@@ -1206,7 +1409,23 @@ namespace EGE
 			definitions
 				<< "// Generated by Edu Game Engine. Do not edit by hand.\n"
 				<< "// The AngelScript language server imports this file "
-					"for engine API completion.\n\n";
+					"for engine API completion.\n\n"
+				<< "class EGEBehaviour {\n"
+				<< "    GameObject@ gameObject;\n"
+				<< "    Transform@ transform;\n"
+				<< "    bool enabled;\n"
+				<< "    void OnAwake();\n"
+				<< "    void OnEnable();\n"
+				<< "    void OnStart();\n"
+				<< "    void OnFixedUpdate(float deltaTime);\n"
+				<< "    void OnUpdate(float deltaTime);\n"
+				<< "    void OnLateUpdate(float deltaTime);\n"
+				<< "    void OnDisable();\n"
+				<< "    void OnStop();\n"
+				<< "    void OnDestroy();\n"
+				<< "    void OnBeforeReload();\n"
+				<< "    void OnAfterReload();\n"
+				<< "}\n\n";
 
 			// ── Enums ──────────────────────────────────────────
 			for (asUINT i = 0; i < engine->GetEnumCount(); ++i)
@@ -1444,6 +1663,20 @@ namespace EGE
 		Shutdown();
 	}
 
+	bool ScriptRuntime::RegisterApi(
+		std::string name,
+		ScriptApiRegistry::Registrar registrar,
+		std::string& error)
+	{
+		if (impl_->initialized)
+		{
+			error = "Script APIs must be registered before runtime initialization.";
+			return false;
+		}
+		return impl_->apiRegistry.Add(
+			std::move(name), std::move(registrar), error);
+	}
+
 	bool ScriptRuntime::Initialize()
 	{
 		if (impl_->initialized)
@@ -1466,10 +1699,10 @@ namespace EGE
 			return false;
 		}
 
-		impl_->context = impl_->engine->CreateContext();
-		if (!impl_->context)
+		std::string contextError;
+		if (!impl_->globalContext.Initialize(*impl_->engine, contextError))
 		{
-			LOG("Could not create the AngelScript execution context");
+			LOG("Could not create the AngelScript execution context: %s", contextError.c_str());
 			Shutdown();
 			return false;
 		}
@@ -1489,11 +1722,7 @@ namespace EGE
 		if (impl_->engine)
 			impl_->ClearActiveModule();
 		impl_->instances.clear();
-		if (impl_->context)
-		{
-			impl_->context->Release();
-			impl_->context = nullptr;
-		}
+		impl_->globalContext.Reset();
 		if (impl_->engine)
 		{
 			impl_->engine->ShutDownAndRelease();
@@ -1547,6 +1776,11 @@ namespace EGE
 			std::chrono::steady_clock::now() + ScanInterval;
 		impl_->Reload(impl_->watchedSnapshot);
 		return true;
+	}
+
+	void ScriptRuntime::SetEditorBuild(bool isEditorBuild)
+	{
+		impl_->isEditorBuild = isEditorBuild;
 	}
 
 	void ScriptRuntime::SetHotReloadEnabled(bool enabled)
@@ -1624,18 +1858,49 @@ namespace EGE
 		ScriptRuntime::GetAvailableClasses() const
 	{
 		std::vector<ScriptClassInfo> result;
-		const auto descriptors = TypeRegistry::Get().GetDomain(
-			ScriptReflectionDomain);
-		result.reserve(descriptors.size());
-		for (const auto& descriptor : descriptors)
-			result.push_back(
-				{descriptor->id, descriptor->displayName});
+		result.reserve(impl_->classes.size());
+		for (const auto& [name, binding] : impl_->classes)
+		{
+			const auto descriptor = TypeRegistry::Get().Find(
+				ScriptReflectionDomain, name);
+			result.push_back({
+				name,
+				descriptor ? descriptor->displayName : name,
+				binding.assetId,
+				binding.sourcePath});
+		}
+		std::sort(
+			result.begin(), result.end(),
+			[](const ScriptClassInfo& left, const ScriptClassInfo& right)
+			{
+				return left.displayName < right.displayName;
+			});
 		return result;
 	}
 
 	bool ScriptRuntime::HasClass(const std::string& className) const
 	{
 		return impl_->classes.contains(className);
+	}
+
+	std::string ScriptRuntime::ResolveClass(
+		const std::string& assetId,
+		const std::string& classNameFallback) const
+	{
+		if (!assetId.empty())
+		{
+			for (const auto& [className, binding] : impl_->classes)
+			{
+				if (binding.assetId == assetId &&
+					(classNameFallback.empty() || className == classNameFallback))
+				{
+					return className;
+				}
+			}
+		}
+		return impl_->classes.contains(classNameFallback)
+			? classNameFallback
+			: std::string();
 	}
 
 	ScriptInstanceHandle ScriptRuntime::CreateInstance(
@@ -1675,7 +1940,9 @@ namespace EGE
 		{
 			const auto binding = impl_->classes.find(instance.className);
 			if (wasRunning && binding != impl_->classes.end())
-				impl_->Invoke(binding->second.stop, instance.object);
+				impl_->InvokeInstance(instance, binding->second.stop);
+			if (binding != impl_->classes.end())
+				impl_->InvokeInstance(instance, binding->second.destroy);
 			impl_->ReleaseInstanceObject(instance);
 		}
 
@@ -1685,6 +1952,17 @@ namespace EGE
 		if (className.empty())
 			return true;
 		return impl_->Instantiate(instance, false, wasRunning);
+	}
+
+	void ScriptRuntime::SetInstanceOwner(
+		ScriptInstanceHandle handle,
+		void* owner)
+	{
+		const auto iterator = impl_->instances.find(handle);
+		if (iterator == impl_->instances.end())
+			return;
+		iterator->second.owner = owner;
+		impl_->BindInstanceOwner(iterator->second);
 	}
 
 	void ScriptRuntime::DestroyInstance(ScriptInstanceHandle handle)
@@ -1698,7 +1976,9 @@ namespace EGE
 		{
 			const auto binding = impl_->classes.find(instance.className);
 			if (instance.running && binding != impl_->classes.end())
-				impl_->Invoke(binding->second.stop, instance.object);
+				impl_->InvokeInstance(instance, binding->second.stop);
+			if (binding != impl_->classes.end())
+				impl_->InvokeInstance(instance, binding->second.destroy);
 			impl_->ReleaseInstanceObject(instance);
 		}
 		impl_->instances.erase(iterator);
@@ -1716,7 +1996,7 @@ namespace EGE
 		instance.executionFaulted = false;
 		const auto binding = impl_->classes.find(instance.className);
 		if (instance.object && binding != impl_->classes.end() &&
-			!impl_->Invoke(binding->second.start, instance.object))
+			!impl_->InvokeInstance(instance, binding->second.start))
 		{
 			instance.executionFaulted = true;
 		}
@@ -1730,17 +2010,62 @@ namespace EGE
 			return;
 		Impl::ScriptInstance& instance = iterator->second;
 		if (!instance.object || !instance.running ||
-			!instance.enabled || instance.executionFaulted)
+			!instance.enabled || !impl_->IsScriptEnabled(instance) ||
+			instance.executionFaulted)
 		{
 			return;
 		}
 
 		const auto binding = impl_->classes.find(instance.className);
 		if (binding != impl_->classes.end() &&
-			!impl_->Invoke(
+			!impl_->InvokeInstance(
+				instance,
 				binding->second.update,
-				instance.object,
 				deltaTime))
+		{
+			instance.executionFaulted = true;
+		}
+	}
+
+	void ScriptRuntime::FixedUpdateInstance(
+		ScriptInstanceHandle handle, float deltaTime)
+	{
+		const auto iterator = impl_->instances.find(handle);
+		if (iterator == impl_->instances.end())
+			return;
+		Impl::ScriptInstance& instance = iterator->second;
+		if (!instance.object || !instance.running || !instance.enabled ||
+			!impl_->IsScriptEnabled(instance) || instance.executionFaulted)
+		{
+			return;
+		}
+
+		const auto binding = impl_->classes.find(instance.className);
+		if (binding != impl_->classes.end() &&
+			!impl_->InvokeInstance(
+				instance, binding->second.fixedUpdate, deltaTime))
+		{
+			instance.executionFaulted = true;
+		}
+	}
+
+	void ScriptRuntime::LateUpdateInstance(
+		ScriptInstanceHandle handle, float deltaTime)
+	{
+		const auto iterator = impl_->instances.find(handle);
+		if (iterator == impl_->instances.end())
+			return;
+		Impl::ScriptInstance& instance = iterator->second;
+		if (!instance.object || !instance.running || !instance.enabled ||
+			!impl_->IsScriptEnabled(instance) || instance.executionFaulted)
+		{
+			return;
+		}
+
+		const auto binding = impl_->classes.find(instance.className);
+		if (binding != impl_->classes.end() &&
+			!impl_->InvokeInstance(
+				instance, binding->second.lateUpdate, deltaTime))
 		{
 			instance.executionFaulted = true;
 		}
@@ -1756,7 +2081,7 @@ namespace EGE
 		if (instance.object && instance.running &&
 			binding != impl_->classes.end())
 		{
-			impl_->Invoke(binding->second.stop, instance.object);
+			impl_->InvokeInstance(instance, binding->second.stop);
 		}
 		instance.running = false;
 		instance.executionFaulted = false;
@@ -1771,9 +2096,10 @@ namespace EGE
 		if (instance.enabled)
 			return;
 		instance.enabled = true;
+		impl_->SetScriptEnabled(instance, true);
 		const auto binding = impl_->classes.find(instance.className);
 		if (instance.object && binding != impl_->classes.end() &&
-			!impl_->Invoke(binding->second.enable, instance.object))
+			!impl_->InvokeInstance(instance, binding->second.enable))
 		{
 			instance.executionFaulted = true;
 		}
@@ -1789,7 +2115,8 @@ namespace EGE
 			return;
 		const auto binding = impl_->classes.find(instance.className);
 		if (instance.object && binding != impl_->classes.end())
-			impl_->Invoke(binding->second.disable, instance.object);
+			impl_->InvokeInstance(instance, binding->second.disable);
+		impl_->SetScriptEnabled(instance, false);
 		instance.enabled = false;
 	}
 

@@ -10,6 +10,7 @@ namespace EGE
 	{
 		std::string sourcePath;
 		std::string className;
+		std::string assetId;
 		std::string error;
 
 		[[nodiscard]] explicit operator bool() const
@@ -28,7 +29,8 @@ namespace EGE
 		[[nodiscard]] static std::string MakeClassName(
 			const std::string& assetName);
 		[[nodiscard]] static std::string BuildTemplate(
-			const std::string& className);
+			const std::string& className,
+			const std::string& assetId = {});
 	};
 }
 

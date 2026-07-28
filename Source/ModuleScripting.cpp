@@ -4,6 +4,7 @@
 #include "Event.h"
 #include "Globals.h"
 #include "ModuleFileSystem.h"
+#include "Scripting/ScriptBindings.h"
 
 ModuleScripting::ModuleScripting(bool startEnabled)
 	: Module("Scripting", startEnabled)
@@ -12,6 +13,14 @@ ModuleScripting::ModuleScripting(bool startEnabled)
 
 bool ModuleScripting::Init(Config*)
 {
+	runtime_.SetEditorBuild(App && App->IsEditor());
+	std::string error;
+	if (!runtime_.RegisterApi(
+			"Engine.Input", EGE::RegisterEngineBindings, error))
+	{
+		LOG("Could not configure AngelScript engine bindings: %s", error.c_str());
+		return false;
+	}
 	return runtime_.Initialize();
 }
 

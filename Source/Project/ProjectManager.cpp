@@ -1,6 +1,7 @@
 #include "ProjectManager.h"
 
 #include "ProjectSerializer.h"
+#include "VsCodeWorkspace.h"
 
 #include <algorithm>
 #include <array>
@@ -188,6 +189,14 @@ namespace EGE
 		if (!status)
 			return Failure(std::move(status));
 
+		std::string workspaceError;
+		if (!EnsureVsCodeWorkspace(stagingDirectory, workspaceError))
+		{
+			return Failure(ProjectStatus::Failure(
+				ProjectError::FileSystemError,
+				"Could not configure Visual Studio Code: " + workspaceError));
+		}
+
 		const std::string projectFileName =
 			projectName + std::string(ProjectFileExtension);
 		Project stagingProject(
@@ -259,6 +268,15 @@ namespace EGE
 
 		auto project =
 			std::make_shared<Project>(std::move(config), normalizedPath);
+
+		std::string workspaceError;
+		if (!EnsureVsCodeWorkspace(
+				project->GetProjectDirectory(), workspaceError))
+		{
+			return Failure(ProjectStatus::Failure(
+				ProjectError::FileSystemError,
+				"Could not configure Visual Studio Code: " + workspaceError));
+		}
 
 		// Commit only after the candidate was fully read and validated.
 		activeProject_ = project;

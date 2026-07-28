@@ -388,8 +388,20 @@ namespace EGE
 			ResourceMaterial& material)
 		{
 			bool modified = false;
+			ImGui::PushStyleVar(
+				ImGuiStyleVar_FramePadding, ImVec2(8.0f, 4.0f));
+			ImGui::PushStyleVar(
+				ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+			const float availableWidth = ImGui::GetContentRegionAvail().x;
+			const bool stackPanels = availableWidth < 760.0f;
+			const float summaryWidth = std::clamp(
+				availableWidth * 0.34f, 250.0f, 375.0f);
 			ImGui::BeginChild(
-				"MaterialSummary", ImVec2(375.0f, 0.0f), true);
+				"MaterialSummary",
+				ImVec2(
+					stackPanels ? 0.0f : summaryWidth,
+					stackPanels ? 470.0f : 0.0f),
+				true);
 			ImGui::TextDisabled("MATERIAL");
 			ImGui::Dummy(ImVec2(0.0f, 8.0f));
 			if (editor.materialPreview)
@@ -412,7 +424,8 @@ namespace EGE
 				static_cast<unsigned long long>(material.GetUID()));
 			ImGui::EndChild();
 
-			ImGui::SameLine();
+			if (!stackPanels)
+				ImGui::SameLine();
 			ImGui::BeginChild("MaterialProperties", ImVec2(0.0f, 0.0f));
 			if (ImGui::InputText(
 					"Name", editor.name.data(), editor.name.size()))
@@ -585,6 +598,7 @@ namespace EGE
 				}
 			}
 			ImGui::EndChild();
+			ImGui::PopStyleVar(2);
 		}
 
 		void DrawStateMachineEditor(
@@ -593,9 +607,10 @@ namespace EGE
 		{
 			ImGui::BeginChild(
 				"StateMachineSidebar", ImVec2(285.0f, 0.0f), true);
+			ImGui::AlignTextToFramePadding();
 			ImGui::TextDisabled("ANIMATION CLIPS");
 			ImGui::SameLine();
-			if (ImGui::SmallButton("+ Add"))
+			if (ImGui::Button("+ Add"))
 			{
 				const std::string clipName =
 					"Clip " +
@@ -649,7 +664,7 @@ namespace EGE
 						stateMachine.SetClipLoop(index, loop);
 						modified = true;
 					}
-					if (ImGui::SmallButton("Remove clip"))
+					if (ImGui::Button("Remove clip"))
 						removeClip = static_cast<int>(index);
 					if (modified)
 					{
@@ -790,8 +805,18 @@ namespace EGE
 			}
 
 			ImGui::Dummy(ImVec2(0.0f, 10.0f));
+			const char* regenerationHelp =
+				"Regenerates in place; references keep the same UID.";
+			const float applyButtonWidth = 190.0f;
+			const bool helpFitsSameLine =
+				ImGui::GetContentRegionAvail().x >=
+				applyButtonWidth +
+					ImGui::GetStyle().ItemSpacing.x +
+					ImGui::CalcTextSize(regenerationHelp).x;
 			ImGui::PushStyleColor(ImGuiCol_Button, Accent);
-			if (ImGui::Button("Apply and regenerate", ImVec2(190.0f, 34.0f)))
+			if (ImGui::Button(
+					"Apply and regenerate",
+					ImVec2(applyButtonWidth, 0.0f)))
 			{
 				std::string error;
 				if (App->resources->UpdateProceduralMeshAsset(
@@ -809,9 +834,12 @@ namespace EGE
 				}
 			}
 			ImGui::PopStyleColor();
-			ImGui::SameLine();
-			ImGui::TextDisabled(
-				"Regenerates in place; references keep the same UID.");
+			if (helpFitsSameLine)
+			{
+				ImGui::SameLine();
+				ImGui::AlignTextToFramePadding();
+			}
+			ImGui::TextDisabled("%s", regenerationHelp);
 			ImGui::EndChild();
 		}
 	};

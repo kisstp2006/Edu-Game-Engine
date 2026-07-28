@@ -2,6 +2,7 @@
 #define EGE_SCRIPT_RUNTIME_H
 
 #include "../Reflection/TypeRegistry.h"
+#include "ScriptApiRegistry.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -34,6 +35,8 @@ namespace EGE
 	{
 		std::string name;
 		std::string displayName;
+		std::string assetId;
+		std::filesystem::path sourcePath;
 	};
 
 	struct ReflectedScriptObject
@@ -58,8 +61,13 @@ namespace EGE
 
 		bool Initialize();
 		void Shutdown();
+		[[nodiscard]] bool RegisterApi(
+			std::string name,
+			ScriptApiRegistry::Registrar registrar,
+			std::string& error);
 
 		bool SetProjectRoot(const std::filesystem::path& projectRoot);
+		void SetEditorBuild(bool isEditorBuild);
 		void SetHotReloadEnabled(bool enabled);
 		[[nodiscard]] bool IsHotReloadEnabled() const;
 
@@ -73,6 +81,9 @@ namespace EGE
 		[[nodiscard]] std::vector<ScriptClassInfo>
 			GetAvailableClasses() const;
 		[[nodiscard]] bool HasClass(const std::string& className) const;
+		[[nodiscard]] std::string ResolveClass(
+			const std::string& assetId,
+			const std::string& classNameFallback = {}) const;
 		[[nodiscard]] ScriptInstanceHandle CreateInstance(
 			const std::string& className,
 			PropertyBag initialState = {});
@@ -80,9 +91,14 @@ namespace EGE
 			ScriptInstanceHandle handle,
 			const std::string& className,
 			PropertyBag initialState = {});
+		void SetInstanceOwner(
+			ScriptInstanceHandle handle,
+			void* owner);
 		void DestroyInstance(ScriptInstanceHandle handle);
 		void StartInstance(ScriptInstanceHandle handle);
+		void FixedUpdateInstance(ScriptInstanceHandle handle, float deltaTime);
 		void UpdateInstance(ScriptInstanceHandle handle, float deltaTime);
+		void LateUpdateInstance(ScriptInstanceHandle handle, float deltaTime);
 		void StopInstance(ScriptInstanceHandle handle);
 		void EnableInstance(ScriptInstanceHandle handle);
 		void DisableInstance(ScriptInstanceHandle handle);

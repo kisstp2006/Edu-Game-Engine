@@ -1,28 +1,17 @@
 #include "PanelAbout.h"
+#include "Globals.h"
 #include <imgui.h>
 
-#include "Leaks.h"
-
-// ---------------------------------------------------------
-PanelAbout::PanelAbout() : Panel("About")
+void EGE::DrawAboutSection()
 {
-}
-
-// ---------------------------------------------------------
-PanelAbout::~PanelAbout()
-{}
-
-// ---------------------------------------------------------
-void PanelAbout::Draw()
-{
-    //ImGui::Begin("About EDU Engine", &active, 
-		//ImGuiWindowFlags_NoResize | 
-		//ImGuiWindowFlags_AlwaysAutoResize |
-		//ImGuiWindowFlags_NoCollapse );
-
-    ImGui::Text("Version %s", VERSION);
-    ImGui::Separator();
-    ImGui::Text("By Ricard Pillosu for teaching purposes.");
-    ImGui::Text("EDU Engine is licensed under the Public Domain, see LICENSE for more information.");
-    //ImGui::End();
+	ImGui::Text("Version %s", VERSION);
+	ImGui::Separator();
+	ImGui::TextUnformatted("Developers");
+	ImGui::BulletText("Ricard Pillosu");
+	ImGui::BulletText("Carlos Fuentes (ilgenio)");
+	ImGui::BulletText("Kiss Tibor");
+	ImGui::Spacing();
+	ImGui::TextWrapped(
+		"EDU Engine is licensed under the Public Domain. "
+		"See LICENSE for more information.");
 }

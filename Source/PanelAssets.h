@@ -118,6 +118,7 @@ private:
 		std::size_t preferredIndex);
 	void SelectInInspector(const EGE::AssetEntry& entry);
 	void OpenAssetEditor(const EGE::AssetEntry& entry);
+	void OpenScriptInVsCode(const EGE::AssetEntry& entry);
 	void HandleAssetInteractions(
 		const EGE::AssetEntry& entry,
 		const std::vector<const EGE::AssetEntry*>& entries,

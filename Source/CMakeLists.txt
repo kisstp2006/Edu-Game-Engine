@@ -92,6 +92,7 @@ target_link_libraries(Engine
         EGE::NodeEditor
         opengl32
         glu32
+        shell32
         dbghelp
         shlwapi)
 
@@ -135,11 +136,19 @@ if(EGE_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/Config.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/parson.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/parson.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Project/VsCodeWorkspace.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Project/VsCodeWorkspace.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/PropertyConfigSerializer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/PropertySerializer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Reflection/TypeRegistry.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptAsset.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptAsset.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptApiRegistry.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptApiRegistry.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptInstanceContext.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptInstanceContext.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptResource.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptResource.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptRuntime.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptRuntime.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tests/ScriptRuntimeTests.cpp")
@@ -149,7 +158,8 @@ if(EGE_BUILD_TESTS)
     target_link_libraries(ScriptingBackendTests
         PRIVATE
             EGE::AngelScriptAddons
-            EGE::MathGeoLib)
+            EGE::MathGeoLib
+            shell32)
     set_target_properties(ScriptingBackendTests PROPERTIES
         FOLDER "Tests"
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")

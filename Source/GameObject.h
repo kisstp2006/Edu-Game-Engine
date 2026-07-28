@@ -28,7 +28,9 @@ public:
 	void OnDisable();
 
 	void OnPlay();
+	void OnFixedUpdate(float dt);
 	void OnUpdate(float dt);
+	void OnLateUpdate(float dt);
 	void OnStop();
 	void OnPause();
 	void OnUnPause();

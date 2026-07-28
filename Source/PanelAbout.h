@@ -1,19 +1,9 @@
 #ifndef __PANELABOUT_H__
 #define __PANELABOUT_H__
 
-// Editor Panel to show the properties of a single GameObject and its components
-#include "Panel.h"
-
-class PanelAbout : public Panel
+namespace EGE
 {
-public:
-	PanelAbout();
-	virtual ~PanelAbout();
+	void DrawAboutSection();
+}
 
-	void Draw() override;
-
-private:
-
-};
-
-#endif// __PANELABOUT_H__
+#endif // __PANELABOUT_H__

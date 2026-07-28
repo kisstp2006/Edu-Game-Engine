@@ -18,8 +18,10 @@
 #include "PanelConfiguration.h"
 #include "PanelAbout.h"
 #include "PanelAssets.h"
+#include "PanelScriptDiagnostics.h"
 #include "Event.h"
 #include "Project/Project.h"
+#include "Project/VsCodeWorkspace.h"
 #include "Settings/SettingsService.h"
 #include "Settings/SettingsStore.h"
 #include "EditorTheme.h"
@@ -80,10 +82,11 @@ bool ModuleEditor::Init(Config* config)
     tab_panels[TabPanelRight].name = "Inspector";
 
 	tab_panels[TabPanelBottom].panels.push_back(console = new PanelConsole());
+	tab_panels[TabPanelBottom].panels.push_back(
+		scriptDiagnostics = new PanelScriptDiagnostics());
 	tab_panels[TabPanelLeft].panels.push_back(tree = new PanelGOTree());
 	tab_panels[TabPanelRight].panels.push_back(props = new PanelProperties());
 	tab_panels[TabPanelRight].panels.push_back(conf = new PanelConfiguration());
-	tab_panels[TabPanelRight].panels.push_back(about = new PanelAbout());
 	tab_panels[TabPanelBottom].panels.push_back(assets = new PanelAssets());
 	assetEditorManager = std::make_unique<EGE::AssetEditorManager>();
 
@@ -184,6 +187,12 @@ update_status ModuleEditor::Update(float dt)
 						open_project_dialog.SetPwd(
 							project->GetProjectDirectory().parent_path());
 					open_project_dialog.Open();
+				}
+				if (ImGui::MenuItem(
+						"Open in VS Code", nullptr, false,
+						App->GetActiveProject() != nullptr))
+				{
+					OpenActiveProjectInVsCode();
 				}
 
 				if (const std::shared_ptr<const EGE::Project> project =
@@ -676,6 +685,12 @@ void ModuleEditor::DrawSettingsWindow(
 		ImGui::Unindent();
 	}
 
+	if (editorSettings && ImGui::CollapsingHeader(
+			"About", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		EGE::DrawAboutSection();
+	}
+
 	ImGui::Separator();
 	if (ImGui::Button("Save"))
 	{
@@ -772,6 +787,21 @@ bool ModuleEditor::OpenAssetEditor(
 
 	SetProjectStatus(false, error);
 	return false;
+}
+
+void ModuleEditor::OpenActiveProjectInVsCode()
+{
+	const std::shared_ptr<const EGE::Project> project =
+		App->GetActiveProject();
+	if (!project)
+	{
+		SetProjectStatus(false, "There is no active project to open.");
+		return;
+	}
+
+	std::string error;
+	if (!EGE::OpenVsCode(project->GetProjectDirectory(), error))
+		SetProjectStatus(false, error);
 }
 
 void ModuleEditor::NotifySelectionChanged()
@@ -968,11 +998,13 @@ void ModuleEditor::LoadFile(const char* filter_extension, const char* from_dir)
 
 		ImGui::PopItemWidth();
 		ImGui::SameLine();
-		if (ImGui::Button("Ok", ImVec2(50, 20)))
+		if (ImGui::Button(
+				"Ok", ImVec2(50.0f, ImGui::GetFrameHeight())))
 			file_dialog = ready_to_close;
 		ImGui::SameLine();
 
-		if (ImGui::Button("Cancel", ImVec2(50, 20)))
+		if (ImGui::Button(
+				"Cancel", ImVec2(50.0f, ImGui::GetFrameHeight())))
 		{
 			file_dialog = ready_to_close;
 			selected_file[0] = '\0';

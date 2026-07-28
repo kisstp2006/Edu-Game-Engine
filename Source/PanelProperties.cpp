@@ -250,7 +250,7 @@ void PanelProperties::DrawAssetSelection(
 	{
 		ImGui::TextDisabled("Project path");
 		ImGui::TextWrapped("%s", asset.sourcePath.c_str());
-		if (ImGui::SmallButton("Copy path"))
+		if (ImGui::Button("Copy path"))
 			ImGui::SetClipboardText(asset.sourcePath.c_str());
 
 		std::error_code fileError;
@@ -1140,11 +1140,13 @@ void PanelProperties::DrawScriptComponent(ComponentScript* component)
 	const std::vector<EGE::ScriptClassInfo> classes =
 		runtime.GetAvailableClasses();
 	const std::string& selectedClass = component->GetScriptClass();
+	const std::string& selectedAssetId = component->GetScriptAssetId();
 
 	std::string preview = "None";
 	for (const EGE::ScriptClassInfo& scriptClass : classes)
 	{
-		if (scriptClass.name == selectedClass)
+		if (scriptClass.assetId == selectedAssetId &&
+			scriptClass.name == selectedClass)
 		{
 			preview = scriptClass.displayName;
 			break;
@@ -1159,7 +1161,7 @@ void PanelProperties::DrawScriptComponent(ComponentScript* component)
 	ImGui::SetNextItemWidth(-1.0f);
 	if (ImGui::BeginCombo("##ScriptClass", preview.c_str()))
 	{
-		const bool noClass = selectedClass.empty();
+		const bool noClass = selectedClass.empty() && selectedAssetId.empty();
 		if (ImGui::Selectable("None", noClass))
 			component->SetScriptClass({});
 		if (noClass)
@@ -1167,11 +1169,13 @@ void PanelProperties::DrawScriptComponent(ComponentScript* component)
 
 		for (const EGE::ScriptClassInfo& scriptClass : classes)
 		{
-			const bool selected = scriptClass.name == selectedClass;
+			const bool selected = scriptClass.name == selectedClass &&
+				scriptClass.assetId == selectedAssetId;
 			if (ImGui::Selectable(
 					scriptClass.displayName.c_str(), selected))
 			{
-				component->SetScriptClass(scriptClass.name);
+				component->SetScriptReference(
+					scriptClass.assetId, scriptClass.name);
 			}
 			if (selected)
 				ImGui::SetItemDefaultFocus();
@@ -1350,7 +1354,7 @@ bool PanelProperties::InitComponentDraw(Component* component, const char * name,
 		if(ImGui::Checkbox("Active", &active))
 			component->SetActive(active);
 		ImGui::SameLine();
-		if (ImGui::SmallButton("Delete Component"))
+		if (ImGui::Button("Delete Component"))
 			component->flag_for_removal = true;
 		ret = true;
 	}
@@ -1546,6 +1550,7 @@ void PanelProperties::DrawAudioSourceComponent(ComponentAudioSource * component)
 	ImGui::SameLine();
 	ImGui::TextColored(IMGUI_YELLOW, (file) ? file : "No file loaded");
 
+	ImGui::AlignTextToFramePadding();
 	ImGui::Text("Format: ");
 	ImGui::SameLine();
 	ImGui::TextColored(IMGUI_YELLOW, (res) ? res->GetFormatStr() : "???");
@@ -1941,7 +1946,7 @@ UID PanelProperties::TextureButton(ResourceTexture* texture, ResourceMesh* mesh,
         ImGui::PopID();
 
         ImGui::PushID(name);
-        if(ImGui::SmallButton("Delete"))
+        if(ImGui::Button("Delete"))
         {
             res = 0;
         }
@@ -1949,7 +1954,7 @@ UID PanelProperties::TextureButton(ResourceTexture* texture, ResourceMesh* mesh,
 
         ImGui::SameLine();
         ImGui::PushID(name);
-        if(ImGui::SmallButton("Select texture"))
+        if(ImGui::Button("Select texture"))
         {
             ImGui::PopID();
             selectTexture.Open(Resource::texture, name, uniqueId);
@@ -1964,7 +1969,7 @@ UID PanelProperties::TextureButton(ResourceTexture* texture, ResourceMesh* mesh,
     else
     {
         ImGui::PushID(name);
-        if(ImGui::SmallButton("Select texture"))
+        if(ImGui::Button("Select texture"))
         {
             ImGui::PopID();
             selectTexture.Open(Resource::texture, name, uniqueId);
@@ -2418,7 +2423,7 @@ void DrawLineComponent(ComponentLine* component)
                 info->LoadInMemory();
             }
 
-            if(ImGui::SmallButton("Delete"))
+            if(ImGui::Button("Delete"))
             {
                 component->SetTexture(0);
             }
@@ -2478,11 +2483,11 @@ void DrawLineComponent(ComponentLine* component)
             component->SetSizeOverTimePoints(sizePoints);
         }
 
-        if (ImGui::Button("EaseIn", ImVec2(55, 20))) component->SetSizeOverTimePoints(float4(0.0f, 0.0f, 1.0f, 0.0f));
+        if (ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight()))) component->SetSizeOverTimePoints(float4(0.0f, 0.0f, 1.0f, 0.0f));
         ImGui::SameLine();
-        if (ImGui::Button("EaseOut", ImVec2(60, 20))) component->SetSizeOverTimePoints(float4(0.0f, 0.0f, 0.0f, 1.f));
+        if (ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight()))) component->SetSizeOverTimePoints(float4(0.0f, 0.0f, 0.0f, 1.f));
         ImGui::SameLine();
-        if (ImGui::Button("EaseInOut", ImVec2(70, 20))) component->SetSizeOverTimePoints(float4(0.0, 1.0f, 1.0f, 0.0f));
+        if (ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight()))) component->SetSizeOverTimePoints(float4(0.0, 1.0f, 1.0f, 0.0f));
 
         float2 sizeRange = component->GetSizeOverTimeRange();
         if (ImGui::DragFloat("init", &sizeRange.x, 0.01f, 0.0f, 100.0f)) component->SetSizeOverTimeRange(sizeRange);
@@ -2576,7 +2581,7 @@ void DrawTrailComponent(ComponentTrail* component)
                 info->SetColorSpace(linear ? ColorSpace_linear : ColorSpace_gamma);
             }
 
-            if(ImGui::SmallButton("Delete"))
+            if(ImGui::Button("Delete"))
             {
                 component->SetTexture(0);
             }
@@ -2612,11 +2617,11 @@ void DrawTrailComponent(ComponentTrail* component)
 
     ImGui::Bezier("Size", (float*)&component->size_over_time.bezier);
 
-    if(ImGui::Button("EaseIn", ImVec2(55, 20))) component->size_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
+    if(ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight()))) component->size_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
     ImGui::SameLine();
-    if(ImGui::Button("EaseOut", ImVec2(60, 20))) component->size_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
+    if(ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight()))) component->size_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
     ImGui::SameLine();
-    if(ImGui::Button("EaseInOut", ImVec2(70, 20))) component->size_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
+    if(ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight()))) component->size_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
 
 
         ImGui::DragFloat("init", &component->size_over_time.init);
@@ -2692,7 +2697,7 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
                 info->SetColorSpace(linear ? ColorSpace_gamma : ColorSpace_linear);
             }
 
-            if(ImGui::SmallButton("Delete"))
+            if(ImGui::Button("Delete"))
             {
                 component->SetTexture(0);
             }
@@ -2779,11 +2784,11 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
         ImGui::Bezier("Speed", (float*)&component->speed_over_time.bezier);
         ImGui::PopID();
 
-        if(ImGui::Button("EaseIn", ImVec2(55, 20))) component->speed_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
+        if(ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight()))) component->speed_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
         ImGui::SameLine();
-        if(ImGui::Button("EaseOut", ImVec2(60, 20))) component->speed_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
+        if(ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight()))) component->speed_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
         ImGui::SameLine();
-        if(ImGui::Button("EaseInOut", ImVec2(70, 20))) component->speed_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
+        if(ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight()))) component->speed_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
 
         ImGui::DragFloat3("init", (float*)&component->speed_over_time.init);
         ImGui::DragFloat3("end", (float*)&component->speed_over_time.end);
@@ -2795,11 +2800,11 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
     {
         ImGui::Bezier("Size", (float*)&component->size_over_time.bezier);
 
-        if(ImGui::Button("EaseIn", ImVec2(55, 20))) component->size_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
+        if(ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight()))) component->size_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
         ImGui::SameLine();
-        if(ImGui::Button("EaseOut", ImVec2(60, 20))) component->size_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
+        if(ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight()))) component->size_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
         ImGui::SameLine();
-        if(ImGui::Button("EaseInOut", ImVec2(70, 20))) component->size_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
+        if(ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight()))) component->size_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
 
 
         ImGui::DragFloat("init", &component->size_over_time.init);
@@ -2818,11 +2823,11 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
         {
             ImGui::Bezier("sheet frame over time", (float*)&component->texture_info.frame_over_time.bezier);
 
-            if(ImGui::Button("EaseIn", ImVec2(55, 20))) component->texture_info.frame_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
+            if(ImGui::Button("EaseIn", ImVec2(55, ImGui::GetFrameHeight()))) component->texture_info.frame_over_time.bezier = float4(0.0f, 0.0f, 1.0f, 0.0f);
             ImGui::SameLine();
-            if(ImGui::Button("EaseOut", ImVec2(60, 20))) component->texture_info.frame_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
+            if(ImGui::Button("EaseOut", ImVec2(60, ImGui::GetFrameHeight()))) component->texture_info.frame_over_time.bezier = float4(0.0f, 0.0f, 0.0f, 1.f);
             ImGui::SameLine();
-            if(ImGui::Button("EaseInOut", ImVec2(70, 20))) component->texture_info.frame_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
+            if(ImGui::Button("EaseInOut", ImVec2(70, ImGui::GetFrameHeight()))) component->texture_info.frame_over_time.bezier = float4(0.0, 1.0f, 1.0f, 0.0f);
         }
 
         ImGui::DragFloat("init", (float*)&component->texture_info.frame_over_time.init);

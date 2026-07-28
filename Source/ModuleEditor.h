@@ -19,8 +19,8 @@ class PanelConsole;
 class PanelGOTree;
 class PanelProperties;
 class PanelConfiguration;
-class PanelAbout;
 class PanelAssets;
+class PanelScriptDiagnostics;
 class PanelQuickBar;
 class GameObject;
 class DirLight;
@@ -42,9 +42,9 @@ public:
 	PanelConsole* console = nullptr;
 	PanelGOTree* tree = nullptr;
 	PanelProperties* props = nullptr;
-	PanelAbout* about = nullptr;
 	PanelConfiguration* conf = nullptr;
 	PanelAssets* assets = nullptr;
+	PanelScriptDiagnostics* scriptDiagnostics = nullptr;
 
     enum SelectionType
     {
@@ -130,6 +130,7 @@ private:
 	void BuildDefaultDockLayout(
 		ImGuiID dockspaceId,
 		const ImVec2& dockspaceSize);
+	void OpenActiveProjectInVsCode();
 	void NotifySelectionChanged();
 
 private:

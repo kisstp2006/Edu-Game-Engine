@@ -384,17 +384,24 @@ void SceneViewport::GenerateFBOs(unsigned w, unsigned h)
 void SceneViewport::DrawQuickBar(ComponentCamera* camera)
 {
     Application::State state = App->GetState();
+	const float controlHeight = ImGui::GetFrameHeight();
+	const float toolbarHeight =
+		controlHeight + ImGui::GetStyle().WindowPadding.y * 2.0f;
 
-    if (ImGui::BeginChild("ToolCanvas", ImVec2(405, 38), true, ImGuiWindowFlags_NoMove))
+    if (ImGui::BeginChild(
+			"ToolCanvas",
+			ImVec2(405.0f, toolbarHeight),
+			true,
+			ImGuiWindowFlags_NoMove))
     {
         if (state != Application::play && state != Application::pause)
         {
-            if (ImGui::Button("PLAY", ImVec2(60, 22)) || App->input->GetKey(SDL_SCANCODE_F5) == KEY_DOWN)
+            if (ImGui::Button("PLAY", ImVec2(60.0f, controlHeight)) || App->input->GetKey(SDL_SCANCODE_F5) == KEY_DOWN)
                 App->Play();
         }
         else
         {
-            if (ImGui::Button("STOP", ImVec2(60, 22)) || App->input->GetKey(SDL_SCANCODE_F5) == KEY_DOWN)
+            if (ImGui::Button("STOP", ImVec2(60.0f, controlHeight)) || App->input->GetKey(SDL_SCANCODE_F5) == KEY_DOWN)
                 App->Stop();
         }
 
@@ -402,12 +409,12 @@ void SceneViewport::DrawQuickBar(ComponentCamera* camera)
 
         if (state == Application::play)
         {
-            if (ImGui::Button("PAUSE", ImVec2(60, 22)) || App->input->GetKey(SDL_SCANCODE_F6) == KEY_DOWN)
+            if (ImGui::Button("PAUSE", ImVec2(60.0f, controlHeight)) || App->input->GetKey(SDL_SCANCODE_F6) == KEY_DOWN)
                 App->Pause();
         }
         else if (state == Application::pause)
         {
-            if (ImGui::Button("CONTINUE", ImVec2(60, 22)) || App->input->GetKey(SDL_SCANCODE_F6) == KEY_DOWN)
+            if (ImGui::Button("CONTINUE", ImVec2(60.0f, controlHeight)) || App->input->GetKey(SDL_SCANCODE_F6) == KEY_DOWN)
                 App->UnPause();
         }
 
@@ -421,7 +428,11 @@ void SceneViewport::DrawQuickBar(ComponentCamera* camera)
         ImGui::EndChild();
 
         ImGui::SameLine();
-        if (ImGui::BeginChild("ScaleCanvas", ImVec2(145, 38), true, ImGuiWindowFlags_NoMove))
+        if (ImGui::BeginChild(
+				"ScaleCanvas",
+				ImVec2(145.0f, toolbarHeight),
+				true,
+				ImGuiWindowFlags_NoMove))
         {
             float metric_proportion = App->hints->GetFloatValue(ModuleHints::METRIC_PROPORTION);
             float prev = metric_proportion;

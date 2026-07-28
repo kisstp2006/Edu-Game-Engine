@@ -70,7 +70,8 @@ bool ModuleLevelManager::Start(Config * config)
 
 update_status ModuleLevelManager::PreUpdate(float dt)
 {
-
+	if (App->IsPlay())
+		RecursiveFixedUpdate(root, dt);
 	return UPDATE_CONTINUE;
 }
 
@@ -119,7 +120,9 @@ update_status ModuleLevelManager::Update(float dt)
 
 update_status ModuleLevelManager::PostUpdate(float dt)
 {
-    return UPDATE_CONTINUE;
+	if (App->IsPlay())
+		RecursiveLateUpdate(root, dt);
+	return UPDATE_CONTINUE;
 }
 
 // Called before quitting
@@ -360,6 +363,20 @@ void ModuleLevelManager::RecursiveUpdate(GameObject * go, float dt) const
 
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
 		RecursiveUpdate(*it, dt);
+}
+
+void ModuleLevelManager::RecursiveFixedUpdate(GameObject* go, float dt) const
+{
+	go->OnFixedUpdate(dt);
+	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
+		RecursiveFixedUpdate(*it, dt);
+}
+
+void ModuleLevelManager::RecursiveLateUpdate(GameObject* go, float dt) const
+{
+	go->OnLateUpdate(dt);
+	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
+		RecursiveLateUpdate(*it, dt);
 }
 
 GameObject* ModuleLevelManager::RecursiveFind(uint uid, GameObject * go) const

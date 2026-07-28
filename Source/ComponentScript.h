@@ -20,18 +20,26 @@ public:
 	void OnActivate() override;
 	void OnDeActivate() override;
 	void OnPlay() override;
+	void OnFixedUpdate(float deltaTime) override;
 	void OnUpdate(float deltaTime) override;
+	void OnLateUpdate(float deltaTime) override;
 	void OnStop() override;
 
 	[[nodiscard]] const std::string& GetScriptClass() const;
+	[[nodiscard]] const std::string& GetScriptAssetId() const;
 	void SetScriptClass(const std::string& className);
+	void SetScriptReference(
+		const std::string& assetId,
+		const std::string& className);
 	[[nodiscard]] EGE::ScriptInstanceHandle GetInstanceHandle() const;
 	[[nodiscard]] bool IsBound() const;
 
 private:
 	[[nodiscard]] EGE::ScriptRuntime* GetRuntime() const;
+	void ResolveScriptReference();
 	void EnsureInstance();
 
+	std::string assetId_;
 	std::string className_;
 	EGE::PropertyBag storedState_;
 	EGE::ScriptInstanceHandle instanceHandle_ = 0;
