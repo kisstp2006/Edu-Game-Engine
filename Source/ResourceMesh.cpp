@@ -446,12 +446,20 @@ bool ResourceMesh::Save(std::string& output) const
 }
 
 // ---------------------------------------------------------
-UID ResourceMesh::Import(const tinygltf::Model& model, const tinygltf::Mesh& mesh, const tinygltf::Primitive& primitive, uint32_t& weightCount, const char* source_file, float scale)
+UID ResourceMesh::Import(
+	const tinygltf::Model& model,
+	const tinygltf::Mesh& mesh,
+	const tinygltf::Primitive& primitive,
+	uint32_t& weightCount,
+	const char* source_file,
+	const float3& scale,
+	bool flipUVs)
 {    
     ResourceMesh* m = static_cast<ResourceMesh*>(App->resources->CreateNewResource(Resource::mesh));
 
     m->name = mesh.name;
-    m->GenerateCPUBuffers(model, mesh, primitive, weightCount, scale);
+    m->GenerateCPUBuffers(
+		model, mesh, primitive, weightCount, scale, flipUVs);
     
     // TODO: Bones
     m->GenerateAttribInfo();
@@ -473,13 +481,17 @@ UID ResourceMesh::Import(const tinygltf::Model& model, const tinygltf::Mesh& mes
 }
 
 // ---------------------------------------------------------
-UID ResourceMesh::Import(const aiMesh* mesh, const char* source_file, float scale)
+UID ResourceMesh::Import(
+	const aiMesh* mesh,
+	const char* source_file,
+	const float3& scale,
+	bool flipUVs)
 {
     ResourceMesh* m = static_cast<ResourceMesh*>(App->resources->CreateNewResource(Resource::mesh));
 
     m->name = mesh->mName.C_Str();
 
-    m->GenerateCPUBuffers(mesh, scale);
+    m->GenerateCPUBuffers(mesh, scale, flipUVs);
 
 #if 0
     if(mesh->HasBones())
@@ -597,7 +609,13 @@ void ResourceMesh::GenerateAttribInfo()
     }
 }
 
-void ResourceMesh::GenerateCPUBuffers(const tinygltf::Model& model, const tinygltf::Mesh& mesh, const tinygltf::Primitive& primitive, uint32_t& weightCount, float scale)
+void ResourceMesh::GenerateCPUBuffers(
+	const tinygltf::Model& model,
+	const tinygltf::Mesh& mesh,
+	const tinygltf::Primitive& primitive,
+	uint32_t& weightCount,
+	const float3& scale,
+	bool flipUVs)
 {
     const auto& itPos = primitive.attributes.find("POSITION");
 
@@ -605,18 +623,37 @@ void ResourceMesh::GenerateCPUBuffers(const tinygltf::Model& model, const tinygl
     {        
         loadAccessor(src_vertices, num_vertices, model, itPos->second);
        
-        if (scale != 1.0f)
+        for (uint i = 0; i < num_vertices; ++i)
         {
-            std::for_each_n(src_vertices.get(), num_vertices, [=](float3& vtx) {vtx *= scale;  });
+			float3& vertex = src_vertices[i];
+			vertex = float3(
+				vertex.x * scale.x,
+				vertex.y * scale.y,
+				vertex.z * scale.z);
         }
 
         uint numTexCoord = 0;
         loadAccessor(src_texcoord0, numTexCoord, model, primitive.attributes, "TEXCOORD_0");
         SDL_assert(numTexCoord == 0 || numTexCoord == num_vertices);
+		if (flipUVs && src_texcoord0)
+		{
+			for (uint i = 0; i < numTexCoord; ++i)
+				src_texcoord0[i].y = 1.0f - src_texcoord0[i].y;
+		}
 
         uint numNormals = 0;
         loadAccessor(src_normals, numNormals, model, primitive.attributes, "NORMAL");
         SDL_assert(numNormals == 0 || numNormals == num_vertices);
+		if (src_normals)
+		{
+			for (uint i = 0; i < numNormals; ++i)
+			{
+				src_normals[i] = float3(
+					src_normals[i].x / scale.x,
+					src_normals[i].y / scale.y,
+					src_normals[i].z / scale.z).Normalized();
+			}
+		}
 
         uint numTangents = 0;
         loadAccessor(src_tangents, numTangents, model, primitive.attributes, "TANGENT");
@@ -650,6 +687,13 @@ void ResourceMesh::GenerateCPUBuffers(const tinygltf::Model& model, const tinygl
             uint numMorphVert;
             loadAccessor(data.src_vertices, numMorphVert, model, itPos->second);
             SDL_assert(numMorphVert == num_vertices);
+			for (uint i = 0; i < numMorphVert; ++i)
+			{
+				data.src_vertices[i] = float3(
+					data.src_vertices[i].x * scale.x,
+					data.src_vertices[i].y * scale.y,
+					data.src_vertices[i].z * scale.z);
+			}
 
             uint numNormals = 0;
             loadAccessor(data.src_normals, numNormals, model, target, "NORMAL");
@@ -671,14 +715,22 @@ void ResourceMesh::GenerateCPUBuffers(const tinygltf::Model& model, const tinygl
     }
 }
 
-void ResourceMesh::GenerateCPUBuffers(const aiMesh* mesh, float scale)
+void ResourceMesh::GenerateCPUBuffers(
+	const aiMesh* mesh,
+	const float3& scale,
+	bool flipUVs)
 {
     num_vertices = mesh->mNumVertices;
     src_vertices = std::make_unique<float3[]>(mesh->mNumVertices);
 
     for(unsigned i=0; i< mesh->mNumVertices; ++i)
     {
-        src_vertices[i] = (*((float3*)&mesh->mVertices[i]))*scale;
+		const float3& source =
+			*reinterpret_cast<const float3*>(&mesh->mVertices[i]);
+        src_vertices[i] = float3(
+			source.x * scale.x,
+			source.y * scale.y,
+			source.z * scale.z);
 	}
 
     if(mesh->HasTextureCoords(0))
@@ -688,6 +740,8 @@ void ResourceMesh::GenerateCPUBuffers(const aiMesh* mesh, float scale)
         for(unsigned i=0; i < mesh->mNumVertices; ++i) 
         {
             src_texcoord0[i] = float2(mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y);
+			if (flipUVs)
+				src_texcoord0[i].y = 1.0f - src_texcoord0[i].y;
         }
     }
 
@@ -698,13 +752,23 @@ void ResourceMesh::GenerateCPUBuffers(const aiMesh* mesh, float scale)
         for (unsigned i = 0; i < mesh->mNumVertices; ++i)
         {
             src_texcoord1[i] = float2(mesh->mTextureCoords[1][i].x, mesh->mTextureCoords[1][i].y);
+			if (flipUVs)
+				src_texcoord1[i].y = 1.0f - src_texcoord1[i].y;
         }
     }
 
     if(mesh->HasNormals())
     {
         src_normals = std::make_unique<float3[]>(mesh->mNumVertices);
-        memcpy(src_normals.get(), mesh->mNormals, sizeof(float3)*mesh->mNumVertices);
+		for (uint i = 0; i < mesh->mNumVertices; ++i)
+		{
+			const float3& source =
+				*reinterpret_cast<const float3*>(&mesh->mNormals[i]);
+			src_normals[i] = float3(
+				source.x / scale.x,
+				source.y / scale.y,
+				source.z / scale.z).Normalized();
+		}
     }
 
     src_indices = std::make_unique<unsigned[]>(mesh->mNumFaces*3);
@@ -757,7 +821,12 @@ void ResourceMesh::GenerateCPUBuffers(const aiMesh* mesh, float scale)
 
             for(uint j=0; j < num_vertices; ++j)
             {
-                data.src_vertices[j] = (*reinterpret_cast<float3*>(&mesh->mAnimMeshes[i]->mVertices[j]))*scale-src_vertices[j];
+				const float3& source = *reinterpret_cast<float3*>(
+					&mesh->mAnimMeshes[i]->mVertices[j]);
+                data.src_vertices[j] = float3(
+					source.x * scale.x,
+					source.y * scale.y,
+					source.z * scale.z) - src_vertices[j];
                 if(fabs(data.src_vertices[j].LengthSq()) > 0.0001f)
                 {
                     tmp_indices.push_back(j);

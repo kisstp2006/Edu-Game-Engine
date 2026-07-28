@@ -5,6 +5,7 @@
 #include "Reflection/TypeRegistry.h"
 #include "Scripting/ScriptRuntime.h"
 
+#include <map>
 #include <string>
 
 class ComponentScript final : public Component
@@ -24,6 +25,9 @@ public:
 	void OnUpdate(float deltaTime) override;
 	void OnLateUpdate(float deltaTime) override;
 	void OnStop() override;
+	void RemapSerializedReferences(
+		const std::map<uint, uint>& gameObjectIds,
+		const std::map<uint, uint>& componentIds) override;
 
 	[[nodiscard]] const std::string& GetScriptClass() const;
 	[[nodiscard]] const std::string& GetScriptAssetId() const;
@@ -31,6 +35,7 @@ public:
 	void SetScriptReference(
 		const std::string& assetId,
 		const std::string& className);
+	void RefreshScriptReference();
 	[[nodiscard]] EGE::ScriptInstanceHandle GetInstanceHandle() const;
 	[[nodiscard]] bool IsBound() const;
 

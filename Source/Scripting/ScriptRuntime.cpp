@@ -602,6 +602,8 @@ shared class EGEBehaviour
 
 	struct ScriptRuntime::Impl
 	{
+		static constexpr std::size_t MaximumDiagnostics = 2000;
+
 		struct FileStamp
 		{
 			std::filesystem::file_time_type modified;
@@ -691,6 +693,61 @@ shared class EGEBehaviour
 		bool hasPendingSnapshot = false;
 		bool lastReloadSuccessful = true;
 
+		void AddDiagnostic(ScriptDiagnostic diagnostic)
+		{
+			if (!diagnostics.empty())
+			{
+				const ScriptDiagnostic& previous = diagnostics.back();
+				if (previous.file == diagnostic.file &&
+					previous.line == diagnostic.line &&
+					previous.column == diagnostic.column &&
+					previous.severity == diagnostic.severity &&
+					previous.message == diagnostic.message)
+				{
+					return;
+				}
+			}
+			if (diagnostics.size() >= MaximumDiagnostics)
+				diagnostics.erase(diagnostics.begin());
+			diagnostics.push_back(std::move(diagnostic));
+		}
+
+		static std::string ResolveClassReference(
+			const std::unordered_map<std::string, ClassBinding>&
+				availableClasses,
+			const std::string& assetId,
+			const std::string& classNameFallback)
+		{
+			if (!assetId.empty())
+			{
+				std::string uniqueAssetClass;
+				bool assetIsAmbiguous = false;
+				for (const auto& [className, binding] :
+					availableClasses)
+				{
+					if (binding.assetId != assetId)
+						continue;
+
+					if (!classNameFallback.empty() &&
+						className == classNameFallback)
+					{
+						return className;
+					}
+
+					if (uniqueAssetClass.empty())
+						uniqueAssetClass = className;
+					else
+						assetIsAmbiguous = true;
+				}
+				if (!uniqueAssetClass.empty() && !assetIsAmbiguous)
+					return uniqueAssetClass;
+			}
+
+			return availableClasses.contains(classNameFallback)
+				? classNameFallback
+				: std::string();
+		}
+
 		static void MessageCallback(
 			const asSMessageInfo* message, void* userData)
 		{
@@ -705,7 +762,7 @@ shared class EGEBehaviour
 			diagnostic.message = message->message
 				? message->message
 				: "Unknown compiler message";
-			runtime.diagnostics.push_back(diagnostic);
+			runtime.AddDiagnostic(diagnostic);
 
 			LOG(
 				"[AngelScript] %s(%d, %d): %s: %s",
@@ -889,7 +946,7 @@ shared class EGEBehaviour
 			diagnostic.message = error.function.empty()
 				? error.message
 				: error.function + ": " + error.message;
-			diagnostics.push_back(std::move(diagnostic));
+			AddDiagnostic(std::move(diagnostic));
 		}
 
 		bool Invoke(
@@ -1143,12 +1200,43 @@ shared class EGEBehaviour
 			descriptor.attributes.visible =
 				descriptor.attributes.serialized &&
 				!HasMetadata(metadata, "HideInInspector");
-			descriptor.attributes.readOnly = isConst;
+			descriptor.attributes.readOnly =
+				isConst || HasMetadata(metadata, "ReadOnly");
 			descriptor.attributes.range = ParseRange(metadata);
 			if (const auto header =
 				FindMetadataArguments(metadata, "Header"))
 			{
 				descriptor.attributes.header = Unquote(*header);
+			}
+			if (const auto tooltip =
+				FindMetadataArguments(metadata, "Tooltip"))
+			{
+				descriptor.attributes.tooltip = Unquote(*tooltip);
+			}
+
+			if (descriptor.kind == PropertyKind::Enumeration)
+			{
+				if (asITypeInfo* enumType =
+						engine->GetTypeInfoById(typeId))
+				{
+					descriptor.enumValues.reserve(
+						enumType->GetEnumValueCount());
+					for (asUINT valueIndex = 0;
+						valueIndex < enumType->GetEnumValueCount();
+						++valueIndex)
+					{
+						int enumValue = 0;
+						const char* enumName =
+							enumType->GetEnumValueByIndex(
+								valueIndex, &enumValue);
+						const std::string name =
+							enumName ? enumName : "Value";
+						descriptor.enumValues.push_back({
+							name,
+							HumanizeIdentifier(name),
+							enumValue});
+					}
+				}
 			}
 
 			if (descriptor.kind != PropertyKind::Unsupported)
@@ -1311,7 +1399,7 @@ shared class EGEBehaviour
 					resource.assetId, path);
 				if (!inserted && existing->second != path)
 				{
-					diagnostics.push_back({
+					AddDiagnostic({
 						path,
 						0,
 						0,
@@ -1423,12 +1511,15 @@ shared class EGEBehaviour
 			}
 
 			std::unordered_map<ScriptInstanceHandle, bool> wasBound;
+			std::unordered_map<ScriptInstanceHandle, std::string>
+				instanceAssetIds;
 			for (auto& [handle, instance] : instances)
 			{
 				wasBound[handle] = instance.object != nullptr;
 				const auto binding = classes.find(instance.className);
 				if (instance.object && binding != classes.end())
 				{
+					instanceAssetIds[handle] = binding->second.assetId;
 					InvokeInstance(instance, binding->second.beforeReload);
 					CaptureInstance(instance, false);
 				}
@@ -1456,6 +1547,17 @@ shared class EGEBehaviour
 			for (auto& [handle, instance] : instances)
 			{
 				const bool reloaded = wasBound[handle];
+				const auto assetId = instanceAssetIds.find(handle);
+				if (assetId != instanceAssetIds.end())
+				{
+					const std::string resolved =
+						ResolveClassReference(
+							classes,
+							assetId->second,
+							instance.className);
+					if (!resolved.empty())
+						instance.className = resolved;
+				}
 				Instantiate(instance, reloaded, !reloaded);
 			}
 
@@ -2120,20 +2222,8 @@ shared class EGEBehaviour
 		const std::string& assetId,
 		const std::string& classNameFallback) const
 	{
-		if (!assetId.empty())
-		{
-			for (const auto& [className, binding] : impl_->classes)
-			{
-				if (binding.assetId == assetId &&
-					(classNameFallback.empty() || className == classNameFallback))
-				{
-					return className;
-				}
-			}
-		}
-		return impl_->classes.contains(classNameFallback)
-			? classNameFallback
-			: std::string();
+		return Impl::ResolveClassReference(
+			impl_->classes, assetId, classNameFallback);
 	}
 
 	ScriptInstanceHandle ScriptRuntime::CreateInstance(
@@ -2394,6 +2484,15 @@ shared class EGEBehaviour
 		const auto iterator = impl_->instances.find(handle);
 		return iterator != impl_->instances.end() &&
 			iterator->second.object != nullptr;
+	}
+
+	std::string ScriptRuntime::GetInstanceClassName(
+		ScriptInstanceHandle handle) const
+	{
+		const auto iterator = impl_->instances.find(handle);
+		return iterator != impl_->instances.end()
+			? iterator->second.className
+			: std::string();
 	}
 
 	bool ScriptRuntime::HasLoadedScripts() const

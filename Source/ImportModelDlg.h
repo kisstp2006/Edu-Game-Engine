@@ -1,30 +1,27 @@
-#ifndef __IMPORT_MODEL_DLG_H__
-#define __IMPORT_MODEL_DLG_H__
+#pragma once
+
+#include "AssetImportOptions.h"
+#include "ImportSettings.h"
 
 #include <string>
 
-class ImportModelDlg
+class ImportModelDlg final
 {
-    std::string file;
-    std::string open_name;
-    std::string user_name;
-    float       scale      = 1.0f;
-    bool        selection  = false;
-    bool        open_flag  = false;
-    
 public:
+	ImportModelDlg();
 
-    ImportModelDlg();
+	void Open(const std::string& file);
+	void Display();
+	void ClearSelection();
 
-    void Open           (const std::string& _file);
-    void Display        ();
-    void ClearSelection ();
+	[[nodiscard]] bool HasSelection() const;
+	[[nodiscard]] const std::string& GetFile() const;
+	[[nodiscard]] EGE::ModelImportOptions GetOptions() const;
 
-    bool               HasSelection () const { return selection; }
-    const std::string& GetFile      () const { return file; }
-    const std::string& GetAssetName () const { return user_name; }
-    float              GetScale     () const { return scale; }
-
+private:
+	std::string file_;
+	std::string popupName_;
+	EGE::ImportSettings settings_;
+	bool selection_ = false;
+	bool openRequested_ = false;
 };
-
-#endif /* __IMPORT_MODEL_DLG_H__ */

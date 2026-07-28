@@ -1,5 +1,6 @@
 #include "Globals.h"
 #include "Application.h"
+#include "EditorDialog.h"
 #include "ModuleEditor.h"
 #include "ModuleWindow.h"
 #include "ModuleFileSystem.h"
@@ -8,6 +9,7 @@
 #include "ModuleRenderer3D.h"
 #include "ModuleInput.h"
 #include "ModuleResources.h"
+#include "ModuleScripting.h"
 #include "GameObject.h"
 #include "DebugDraw.h"
 #include "Config.h"
@@ -277,32 +279,32 @@ update_status ModuleEditor::Update(float dt)
 					App->GetActiveProject() != nullptr &&
 					App->IsStop();
 				if (ImGui::MenuItem(
-						"New Scene", nullptr, false,
+						"New Scene", "Ctrl+N", false,
 						can_edit_scene))
 				{
 					App->level->CreateNewEmpty("Untitled");
 					ClearSelected();
 				}
 				if (ImGui::MenuItem(
-						"Open Scene...", nullptr, false,
+						"Open Scene...", "Ctrl+O", false,
 						can_edit_scene))
 				{
 					RequestOpenScene();
 				}
 				if (ImGui::MenuItem(
-						"Save Scene", nullptr, false,
+						"Save Scene", "Ctrl+S", false,
 						can_edit_scene))
 				{
 					RequestSaveScene();
 				}
 				if (ImGui::MenuItem(
-						"Save Scene As...", nullptr, false,
+						"Save Scene As...", "Ctrl+Shift+S", false,
 						can_edit_scene))
 				{
 					RequestSaveScene(true);
 				}
 
-				if (ImGui::MenuItem("Quit", "ESC"))
+				if (ImGui::MenuItem("Quit"))
 					ret = UPDATE_STOP;
 
 				ImGui::EndMenu();
@@ -316,6 +318,29 @@ update_status ModuleEditor::Update(float dt)
 					show_project_settings = true;
 				if (ImGui::MenuItem("Editor Settings..."))
 					show_editor_settings = true;
+				ImGui::EndMenu();
+			}
+
+			if (ImGui::BeginMenu("Scripting"))
+			{
+				const bool hasProject =
+					App->GetActiveProject() != nullptr &&
+					App->scripting != nullptr;
+				if (ImGui::MenuItem(
+						"Reload Scripts", "Ctrl+R", false, hasProject))
+				{
+					App->scripting->Reload();
+				}
+				if (hasProject)
+				{
+					ImGui::Separator();
+					ImGui::TextDisabled(
+						"Hot reload: %s",
+						App->scripting->GetRuntime().
+							IsHotReloadEnabled()
+							? "On"
+							: "Off");
+				}
 				ImGui::EndMenu();
 			}
 
@@ -339,6 +364,7 @@ update_status ModuleEditor::Update(float dt)
 		}
 	}
 
+	HandleEditorShortcuts();
 	DrawProjectDialogs();
 	DrawSceneDialogs();
 	DrawSettingsWindow(show_project_settings, false);
@@ -368,6 +394,48 @@ update_status ModuleEditor::Update(float dt)
     }
 
 	return ret;
+}
+
+void ModuleEditor::HandleEditorShortcuts()
+{
+	const ImGuiIO& io = ImGui::GetIO();
+	if (!io.KeyCtrl ||
+		io.WantTextInput ||
+		ImGui::IsAnyItemActive() ||
+		show_project_selector ||
+		ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup))
+	{
+		return;
+	}
+
+	const bool canEditScene =
+		App->GetActiveProject() != nullptr && App->IsStop();
+	if (canEditScene &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_S, false))
+	{
+		RequestSaveScene(io.KeyShift);
+		return;
+	}
+	if (canEditScene && !io.KeyShift &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_O, false))
+	{
+		RequestOpenScene();
+		return;
+	}
+	if (canEditScene && !io.KeyShift &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_N, false))
+	{
+		App->level->CreateNewEmpty("Untitled");
+		ClearSelected();
+		return;
+	}
+	if (App->GetActiveProject() &&
+		App->scripting &&
+		!io.KeyShift &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_R, false))
+	{
+		App->scripting->Reload();
+	}
 }
 
 void ModuleEditor::DrawPanelGroup(TabPanelEnum group)
@@ -484,7 +552,9 @@ bool ModuleEditor::DrawProjectSelector()
 	ImGuiViewport* viewport = ImGui::GetMainViewport();
 	const ImVec2 workPosition = viewport->GetWorkPos();
 	const ImVec2 workSize = viewport->GetWorkSize();
-	const ImVec2 windowSize(720.0f, 520.0f);
+	const ImVec2 windowSize(
+		std::min(720.0f, std::max(320.0f, workSize.x - 32.0f)),
+		std::min(520.0f, std::max(320.0f, workSize.y - 32.0f)));
 	ImGui::SetNextWindowPos(
 		ImVec2(
 			workPosition.x +
@@ -543,8 +613,17 @@ bool ModuleEditor::DrawProjectSelector()
 			std::filesystem::is_regular_file(
 				App->GetFallbackProjectFile(), fallbackError);
 		ImGui::SameLine();
-		if (ImGui::Button(
-				"Open Fallback", ImVec2(130.0f, 0.0f)))
+		if (!fallbackAvailable)
+		{
+			ImGui::PushStyleVar(
+				ImGuiStyleVar_Alpha,
+				ImGui::GetStyle().Alpha * 0.45f);
+		}
+		const bool openFallback = ImGui::Button(
+			"Open Fallback", ImVec2(130.0f, 0.0f));
+		if (!fallbackAvailable)
+			ImGui::PopStyleVar();
+		if (openFallback)
 		{
 			if (fallbackAvailable)
 			{
@@ -565,14 +644,23 @@ bool ModuleEditor::DrawProjectSelector()
 	ImGui::Separator();
 
 	std::filesystem::path removeProject;
+	const float recentProjectsHeight = std::max(
+		150.0f,
+		ImGui::GetContentRegionAvail().y -
+			ImGui::GetFrameHeightWithSpacing() -
+			ImGui::GetStyle().ItemSpacing.y);
 	if (ImGui::BeginChild(
 			"##RecentProjects",
-			ImVec2(0.0f, 330.0f),
+			ImVec2(0.0f, recentProjectsHeight),
 			true))
 	{
 		bool drewEntry = false;
 		if (recentProjects)
 		{
+			const float recentProjectHeight =
+				ImGui::GetFrameHeightWithSpacing() * 2.0f +
+				ImGui::GetTextLineHeightWithSpacing() +
+				ImGui::GetStyle().WindowPadding.y * 2.0f;
 			for (const EGE::RecentProject& recent :
 				recentProjects->GetEntries())
 			{
@@ -587,10 +675,18 @@ bool ModuleEditor::DrawProjectSelector()
 					recent.projectFile.string().c_str());
 				if (ImGui::BeginChild(
 						"##RecentProject",
-						ImVec2(0.0f, 74.0f),
-						true))
+						ImVec2(0.0f, recentProjectHeight),
+						true,
+						ImGuiWindowFlags_NoScrollbar |
+							ImGuiWindowFlags_NoScrollWithMouse))
 				{
-					ImGui::TextUnformatted(recent.name.c_str());
+					const bool activateRecent =
+						ImGui::Selectable(
+							recent.name.c_str(),
+							false,
+							ImGuiSelectableFlags_AllowDoubleClick) &&
+						ImGui::IsMouseDoubleClicked(
+							ImGuiMouseButton_Left);
 					ImGui::TextDisabled(
 						"%s", recent.projectFile.string().c_str());
 
@@ -605,9 +701,18 @@ bool ModuleEditor::DrawProjectSelector()
 							"Project file is missing");
 						ImGui::SameLine();
 					}
-					if (ImGui::Button("Open") &&
-						available &&
-						!project_selection_pending)
+					const bool canOpen =
+						available && !project_selection_pending;
+					if (!canOpen)
+					{
+						ImGui::PushStyleVar(
+							ImGuiStyleVar_Alpha,
+							ImGui::GetStyle().Alpha * 0.45f);
+					}
+					const bool openPressed = ImGui::Button("Open");
+					if (!canOpen)
+						ImGui::PopStyleVar();
+					if ((openPressed || activateRecent) && canOpen)
 					{
 						RequestProjectFromSelector(
 							recent.projectFile);
@@ -672,6 +777,7 @@ bool ModuleEditor::RequestProjectFromSelector(
 
 void ModuleEditor::DrawProjectDialogs()
 {
+	bool focusProjectName = false;
 	if (open_new_project_popup)
 	{
 		open_new_project_popup = false;
@@ -707,16 +813,33 @@ void ModuleEditor::DrawProjectDialogs()
 				new_project_location, sizeof(new_project_location),
 				location_text.c_str(), _TRUNCATE);
 		}
-		ImGui::OpenPopup("New Project");
+		EGE::EditorDialog::Open("New Project");
+		focusProjectName = true;
 	}
 
-	if (ImGui::BeginPopupModal(
-			"New Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	if (EGE::EditorDialog::Begin(
+			"New Project",
+			ImVec2(560.0f, 0.0f),
+			ImGuiWindowFlags_AlwaysAutoResize))
 	{
+		ImGui::TextDisabled("Project name");
+		if (focusProjectName)
+			ImGui::SetKeyboardFocusHere();
+		ImGui::SetNextItemWidth(-1.0f);
 		ImGui::InputTextWithHint(
 			"##ProjectName", "Project name",
 			new_project_name, sizeof(new_project_name));
 
+		ImGui::TextDisabled("Location");
+		const float browseWidth =
+			ImGui::CalcTextSize("Browse...").x +
+			ImGui::GetStyle().FramePadding.x * 2.0f;
+		ImGui::SetNextItemWidth(
+			std::max(
+				120.0f,
+				ImGui::GetContentRegionAvail().x -
+					browseWidth -
+					ImGui::GetStyle().ItemSpacing.x));
 		ImGui::InputText(
 			"##ProjectLocation", new_project_location,
 			sizeof(new_project_location), ImGuiInputTextFlags_ReadOnly);
@@ -730,7 +853,16 @@ void ModuleEditor::DrawProjectDialogs()
 		const bool can_create =
 			new_project_name[0] != '\0' &&
 			new_project_location[0] != '\0';
-		if (ImGui::Button("Create") && can_create)
+		if (!can_create)
+		{
+			ImGui::PushStyleVar(
+				ImGuiStyleVar_Alpha,
+				ImGui::GetStyle().Alpha * 0.45f);
+		}
+		const bool createProject = ImGui::Button("Create");
+		if (!can_create)
+			ImGui::PopStyleVar();
+		if (createProject && can_create)
 		{
 			const std::filesystem::path project_directory =
 				std::filesystem::path(new_project_location) /
@@ -753,6 +885,11 @@ void ModuleEditor::DrawProjectDialogs()
 		ImGui::SameLine();
 		if (ImGui::Button("Cancel"))
 			ImGui::CloseCurrentPopup();
+		if (ImGui::IsKeyPressed(
+				ImGui::GetKeyIndex(ImGuiKey_Escape), false))
+		{
+			ImGui::CloseCurrentPopup();
+		}
 
 		project_location_dialog.Display();
 		if (project_location_dialog.HasSelected())
@@ -767,7 +904,7 @@ void ModuleEditor::DrawProjectDialogs()
 			project_location_dialog.ClearSelected();
 		}
 
-		ImGui::EndPopup();
+		EGE::EditorDialog::End();
 	}
 
 	open_project_dialog.Display();
@@ -789,19 +926,26 @@ void ModuleEditor::DrawProjectDialogs()
 	if (open_project_status_popup)
 	{
 		open_project_status_popup = false;
-		ImGui::OpenPopup("Project Status");
+		EGE::EditorDialog::Open("Project Status");
 	}
 
-	if (ImGui::BeginPopupModal(
-			"Project Status", nullptr,
+	if (EGE::EditorDialog::Begin(
+			"Project Status",
+			ImVec2(420.0f, 0.0f),
 			ImGuiWindowFlags_AlwaysAutoResize))
 	{
 		ImGui::TextColored(
 			ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "Error");
 		ImGui::TextWrapped("%s", project_status_message.c_str());
-		if (ImGui::Button("OK"))
+		if (ImGui::Button("OK") ||
+			ImGui::IsKeyPressed(
+				ImGui::GetKeyIndex(ImGuiKey_Enter), false) ||
+			ImGui::IsKeyPressed(
+				ImGui::GetKeyIndex(ImGuiKey_Escape), false))
+		{
 			ImGui::CloseCurrentPopup();
-		ImGui::EndPopup();
+		}
+		EGE::EditorDialog::End();
 	}
 }
 
@@ -822,6 +966,10 @@ void ModuleEditor::DrawSettingsWindow(
 
 	EGE::SettingsStore& store =
 		editorSettings ? service->Editor() : service->Project();
+	std::string& feedback =
+		editorSettings
+			? editor_settings_feedback
+			: project_settings_feedback;
 	ImGui::SetNextWindowSize(ImVec2(620.0f, 620.0f), ImGuiCond_FirstUseEver);
 	if (!ImGui::Begin(store.GetTitle().c_str(), &open))
 	{
@@ -982,6 +1130,7 @@ void ModuleEditor::DrawSettingsWindow(
 			if (changed && store.SetValue(
 					definition.id, std::move(value)))
 			{
+				feedback.clear();
 				App->ApplySettings();
 			}
 			ImGui::Spacing();
@@ -1003,7 +1152,7 @@ void ModuleEditor::DrawSettingsWindow(
 		if (!store.Save(error))
 			SetProjectStatus(false, error);
 		else
-			SetProjectStatus(true, store.GetTitle() + " saved.");
+			feedback = "Saved.";
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Reload"))
@@ -1012,13 +1161,25 @@ void ModuleEditor::DrawSettingsWindow(
 		if (!store.ReloadValues(error))
 			SetProjectStatus(false, error);
 		else
+		{
 			App->ApplySettings();
+			feedback = "Reloaded from disk.";
+		}
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Reset to Defaults"))
 	{
 		store.ResetToDefaults();
 		App->ApplySettings();
+		feedback = "Defaults restored; save to keep these values.";
+	}
+	if (!feedback.empty())
+	{
+		ImGui::Spacing();
+		ImGui::TextColored(
+			ImVec4(0.40f, 0.78f, 0.62f, 1.0f),
+			"%s",
+			feedback.c_str());
 	}
 
 	ImGui::End();
@@ -1066,9 +1227,14 @@ void ModuleEditor::PrepareForProjectChange()
 		assetEditorManager->CloseAll();
 	ClearSelected();
 	if (tree)
+	{
 		tree->drag = nullptr;
+		tree->drag_candidate = nullptr;
+	}
 	if (props)
 		props->ResetProjectState();
+	if (tree)
+		tree->ResetProjectState();
 	if (assets)
 		assets->ResetProjectState();
 
@@ -1096,6 +1262,63 @@ bool ModuleEditor::OpenAssetEditor(
 
 	SetProjectStatus(false, error);
 	return false;
+}
+
+bool ModuleEditor::OpenSceneAsset(
+	const std::filesystem::path& scenePath)
+{
+	if (!App->IsStop())
+	{
+		SetProjectStatus(
+			false, "Stop the game before opening another scene.");
+		return false;
+	}
+
+	const std::shared_ptr<const EGE::Project> project =
+		App->GetActiveProject();
+	if (!project)
+	{
+		SetProjectStatus(
+			false, "There is no active project to open the scene from.");
+		return false;
+	}
+
+	const std::filesystem::path projectDirectory =
+		project->GetProjectDirectory().lexically_normal();
+	const std::filesystem::path assetDirectory =
+		project->GetAssetDirectory().lexically_normal();
+	const std::filesystem::path absolutePath =
+		(scenePath.is_absolute()
+			? scenePath
+			: projectDirectory / scenePath)
+			.lexically_normal();
+	const std::string extension =
+		Lowercase(absolutePath.extension().string());
+
+	std::error_code fileError;
+	if (!IsPathInside(absolutePath, assetDirectory) ||
+		(extension != ".eduscene" && extension != ".scene") ||
+		!std::filesystem::is_regular_file(absolutePath, fileError))
+	{
+		SetProjectStatus(
+			false,
+			"Choose an existing .eduscene file inside the active "
+			"project's asset directory.");
+		return false;
+	}
+
+	const std::filesystem::path relativePath =
+		absolutePath.lexically_relative(projectDirectory);
+	if (!EGE::IsSafeProjectRelativePath(relativePath) ||
+		!App->level->Load(relativePath.generic_string().c_str()))
+	{
+		SetProjectStatus(
+			false, "The selected scene could not be loaded.");
+		return false;
+	}
+
+	ClearSelected();
+	return true;
 }
 
 void ModuleEditor::RequestOpenScene()
@@ -1161,37 +1384,7 @@ void ModuleEditor::DrawSceneDialogs()
 		}
 		else
 		{
-			const std::filesystem::path projectDirectory =
-				project->GetProjectDirectory().lexically_normal();
-			const std::filesystem::path assetDirectory =
-				project->GetAssetDirectory().lexically_normal();
-			const std::filesystem::path absolutePath =
-				std::filesystem::absolute(selected).lexically_normal();
-			const std::string extension =
-				Lowercase(absolutePath.extension().string());
-			if (!IsPathInside(absolutePath, assetDirectory) ||
-				(extension != ".eduscene" && extension != ".scene"))
-			{
-				SetProjectStatus(
-					false,
-					"Choose an .eduscene file inside the active "
-					"project's asset directory.");
-			}
-			else
-			{
-				const std::filesystem::path relativePath =
-					absolutePath.lexically_relative(projectDirectory);
-				if (App->level->Load(
-						relativePath.generic_string().c_str()))
-				{
-					ClearSelected();
-				}
-				else
-				{
-					SetProjectStatus(
-						false, "The selected scene could not be loaded.");
-				}
-			}
+			OpenSceneAsset(selected);
 		}
 	}
 
@@ -1327,6 +1520,8 @@ void ModuleEditor::ReceiveEvent(const Event& event)
 				selected = App->level->Validate(*go);
 			}
 			tree->drag = App->level->Validate(tree->drag);
+			tree->drag_candidate =
+				App->level->Validate(tree->drag_candidate);
 		}
 		break;
 		case Event::window_resize:
@@ -1458,8 +1653,11 @@ void ModuleEditor::SetSelected(GameObject * selected, bool focus)
 
 void ModuleEditor::LoadFile(const char* filter_extension, const char* from_dir)
 {
-	ImGui::OpenPopup("Load File");
-	if (ImGui::BeginPopupModal("Load File", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	EGE::EditorDialog::Open("Load File");
+	if (EGE::EditorDialog::Begin(
+			"Load File",
+			ImVec2(520.0f, 0.0f),
+			ImGuiWindowFlags_AlwaysAutoResize))
 	{
 		in_modal = true;
 
@@ -1487,7 +1685,7 @@ void ModuleEditor::LoadFile(const char* filter_extension, const char* from_dir)
 			selected_file[0] = '\0';
 		}
 
-		ImGui::EndPopup();
+		EGE::EditorDialog::End();
 	}
 	else
     {

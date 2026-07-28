@@ -2,6 +2,7 @@
 #define __MODULERESOURCES_H__
 
 #include "Globals.h"
+#include "AssetImportOptions.h"
 #include "Module.h"
 #include "Resource.h"
 #include <map>
@@ -80,8 +81,23 @@ public:
 	UID ImportFile(const char* new_file_in_assets, Resource::Type type, bool force = false);
 	UID ImportBuffer(const void* buffer, uint size, Resource::Type type, const char* source_file = nullptr);
 	UID ImportTexture(const char* file_name, bool mipmaps, bool srgb, bool toCubemap);
+	UID ImportTexture(
+		const char* fileName,
+		const EGE::TextureImportOptions& options);
+	UID ImportAudio(
+		const char* fileName,
+		const EGE::AudioImportOptions& options);
 	UID ImportAnimation(const char* file_name, uint first, uint last, const char* user_name, float scale);
+	UID ImportAnimation(
+		const char* fileName,
+		uint first,
+		uint last,
+		const char* userName,
+		const EGE::AnimationImportOptions& options);
     UID ImportModel(const char* file_name, float scale, const char* user_name);
+	UID ImportModel(
+		const char* fileName,
+		const EGE::ModelImportOptions& options);
 	AssetCreationResult CreateMaterialAsset(
 		const char* sourceFile,
 		const char* name,
@@ -114,6 +130,9 @@ public:
 
 	Resource*   CreateNewResource (Resource::Type type, UID force_uid = 0);
 	void        GatherResourceType(std::vector<const Resource*>& resources, Resource::Type type) const;
+	const Resource* FindResourceBySourceFile(
+		Resource::Type type,
+		const std::string& sourceFile) const;
 
 	void ReleaseFromMemory(UID uid);
     void RemoveResource(UID uid);
@@ -151,6 +170,7 @@ private:
     bool LoadDefaultLUT();
     bool LoadCubeLUT(const char* file_path, float*& lut_data, uint& size);
 	bool SaveSourceAsset(const char* sourceFile, const Config& document) const;
+	void MakeResourceSourcePathsPortable();
 
 private:
 	std::string asset_folder;

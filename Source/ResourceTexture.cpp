@@ -11,8 +11,11 @@
 
 #include "../Game/Assets/Shaders/LocationsAndBindings.h"
 
-#include <memory>
+#include <algorithm>
 #include <assert.h>
+#include <cmath>
+#include <cstdint>
+#include <memory>
 
 #ifdef max
 #undef max
@@ -189,6 +192,14 @@ void ResourceTexture::Save(Config & config) const
     {
         config.AddInt("ColorSpace", colorSpace.value());
     }
+	Config import = config.AddSection("Import Settings");
+	import.AddBool("Generate Mipmaps", importOptions.generateMipmaps);
+	import.AddBool("sRGB", importOptions.sRgb);
+	import.AddBool("Convert To Cubemap", importOptions.convertToCubemap);
+	import.AddUInt("Cubemap Face Size", importOptions.cubemapFaceSize);
+	import.AddFloat2("Maximum Size", importOptions.maximumSize);
+	import.AddFloat4(
+		"Color Multiplier", importOptions.colorMultiplier);
 }
 
 // ---------------------------------------------------------
@@ -200,17 +211,42 @@ void ResourceTexture::Load(const Config & config)
     {
         colorSpace = (ColorSpace)config.GetInt("ColorSpace", formatColorSpace);
     }
+	Config import = config.GetSection("Import Settings");
+	importOptions.generateMipmaps =
+		import.GetBool("Generate Mipmaps", true);
+	importOptions.sRgb = import.GetBool("sRGB", true);
+	importOptions.convertToCubemap =
+		import.GetBool("Convert To Cubemap", false);
+	importOptions.cubemapFaceSize =
+		import.GetUInt("Cubemap Face Size", 512);
+	importOptions.maximumSize =
+		import.GetFloat2("Maximum Size", float2::zero);
+	importOptions.colorMultiplier =
+		import.GetFloat4("Color Multiplier", float4::one);
 
 }
 
 bool ResourceTexture::Import(const char* file, std::string& output_file, bool generateCubemap, bool generateMipmaps)
+{
+	EGE::TextureImportOptions options;
+	options.convertToCubemap = generateCubemap;
+	options.generateMipmaps = generateMipmaps;
+	return Import(file, output_file, options);
+}
+
+bool ResourceTexture::Import(
+	const char* file,
+	std::string& outputFile,
+	const EGE::TextureImportOptions& options)
 {
 	std::string sFile(file);
 
 	char* buffer = nullptr;
 	uint size = App->fs->Load(file, &buffer);
 
-    bool ret = Import(buffer, size, output_file, generateCubemap, generateMipmaps);
+    bool ret = options.convertToCubemap
+		? ImportToCubemap(buffer, size, outputFile, options)
+		: ImportNoConvert(buffer, size, outputFile, options);
 
     if (ret == false)
     {
@@ -222,10 +258,19 @@ bool ResourceTexture::Import(const char* file, std::string& output_file, bool ge
 
 bool ResourceTexture::Import(const void * buffer, uint size, std::string& output_file, bool generateCubemap, bool generateMipmaps)
 {
-    return generateCubemap ? ImportToCubemap(buffer, size, output_file, generateMipmaps) : ImportNoConvert(buffer, size, output_file, generateMipmaps);
+	EGE::TextureImportOptions options;
+	options.convertToCubemap = generateCubemap;
+	options.generateMipmaps = generateMipmaps;
+    return generateCubemap
+		? ImportToCubemap(buffer, size, output_file, options)
+		: ImportNoConvert(buffer, size, output_file, options);
 }
 
-bool ResourceTexture::ImportNoConvert(const void * buffer, uint size, std::string& output_file, bool generateMipmaps)
+bool ResourceTexture::ImportNoConvert(
+	const void* buffer,
+	uint size,
+	std::string& output_file,
+	const EGE::TextureImportOptions& options)
 {   
 	bool ret = buffer != nullptr;
 
@@ -236,14 +281,82 @@ bool ResourceTexture::ImportNoConvert(const void * buffer, uint size, std::strin
     if (ret)
     {
 
-        DirectX::ScratchImage image, imageMips;
+        DirectX::ScratchImage image, resized, tinted, imageMips;
         DirectX::ScratchImage* result = &image;
         HRESULT res = DirectX::LoadFromDDSMemory(buffer, size, DirectX::DDS_FLAGS_NONE, nullptr, image);
         if (res != S_OK) res = DirectX::LoadFromHDRMemory(buffer, size, nullptr, image);
         if (res != S_OK) res = DirectX::LoadFromTGAMemory(buffer, size, DirectX::TGA_FLAGS_NONE, nullptr, image);
         if (res != S_OK) res = DirectX::LoadFromWICMemory(buffer, size, DirectX::WIC_FLAGS_NONE, nullptr, image);
 
-        if (res == S_OK && generateMipmaps)
+		if (res == S_OK &&
+			(options.maximumSize.x > 0.0f ||
+			 options.maximumSize.y > 0.0f))
+		{
+			const DirectX::TexMetadata& metadata =
+				result->GetMetadata();
+			double resizeScale = 1.0;
+			if (options.maximumSize.x > 0.0f)
+				resizeScale = std::min(
+					resizeScale,
+					static_cast<double>(options.maximumSize.x) /
+						static_cast<double>(metadata.width));
+			if (options.maximumSize.y > 0.0f)
+				resizeScale = std::min(
+					resizeScale,
+					static_cast<double>(options.maximumSize.y) /
+						static_cast<double>(metadata.height));
+			if (resizeScale < 1.0)
+			{
+				const std::size_t width = std::max<std::size_t>(
+					1, static_cast<std::size_t>(
+						std::round(metadata.width * resizeScale)));
+				const std::size_t height = std::max<std::size_t>(
+					1, static_cast<std::size_t>(
+						std::round(metadata.height * resizeScale)));
+				res = DirectX::Resize(
+					result->GetImages(),
+					result->GetImageCount(),
+					metadata,
+					width,
+					height,
+					DirectX::TEX_FILTER_DEFAULT,
+					resized);
+				if (res == S_OK)
+					result = &resized;
+			}
+		}
+
+		const float4& multiplier = options.colorMultiplier;
+		const bool multiplyColor =
+			multiplier.x != 1.0f || multiplier.y != 1.0f ||
+			multiplier.z != 1.0f || multiplier.w != 1.0f;
+		if (res == S_OK && multiplyColor)
+		{
+			const DirectX::XMVECTOR color = DirectX::XMVectorSet(
+				multiplier.x,
+				multiplier.y,
+				multiplier.z,
+				multiplier.w);
+			res = DirectX::TransformImage(
+				result->GetImages(),
+				result->GetImageCount(),
+				result->GetMetadata(),
+				[color](
+					DirectX::XMVECTOR* output,
+					const DirectX::XMVECTOR* input,
+					std::size_t width,
+					std::size_t)
+				{
+					for (std::size_t x = 0; x < width; ++x)
+						output[x] =
+							DirectX::XMVectorMultiply(input[x], color);
+				},
+				tinted);
+			if (res == S_OK)
+				result = &tinted;
+		}
+
+        if (res == S_OK && options.generateMipmaps)
         {
             uint32_t levels = uint32_t(std::log2(std::max(result->GetMetadata().width, result->GetMetadata().height)));
             res = DirectX::GenerateMipMaps(result->GetImages(), result->GetImageCount(), result->GetMetadata(), DirectX::TEX_FILTER_DEFAULT, levels, imageMips);
@@ -278,7 +391,11 @@ bool ResourceTexture::ImportNoConvert(const void * buffer, uint size, std::strin
 	return ret;
 }
 
-bool ResourceTexture::ImportToCubemap(const void* buffer, uint size, std::string& output_file, bool generateMipmaps)
+bool ResourceTexture::ImportToCubemap(
+	const void* buffer,
+	uint size,
+	std::string& output_file,
+	const EGE::TextureImportOptions& options)
 {
 	bool ret = buffer  != nullptr;
     uint8_t* output_buffer = nullptr;
@@ -291,28 +408,49 @@ bool ResourceTexture::ImportToCubemap(const void* buffer, uint size, std::string
     if(metadata.texType == TextureType_2D)
     {
         CubemapUtils cubeUtils;
-        std::unique_ptr<TextureCube> cubeMap(cubeUtils.ConvertToCubemap(static_cast<Texture2D *>(texture), 512, 512));
+		const uint faceSize = std::clamp<std::uint32_t>(
+			options.cubemapFaceSize, 16, 4096);
+        std::unique_ptr<TextureCube> cubeMap(
+			cubeUtils.ConvertToCubemap(
+				static_cast<Texture2D*>(texture),
+				faceSize,
+				faceSize));
 
         output_size = sizeof(uint32_t);
 
         std::vector<float> tmpBuffer;
 
-        tmpBuffer.resize(512 * 512 * 4);
+        tmpBuffer.resize(
+			static_cast<std::size_t>(faceSize) * faceSize * 4);
 
         DirectX::ScratchImage image, imageMips;
         DirectX::ScratchImage* result = &image;
 
-        image.InitializeCube(DXGI_FORMAT_R32G32B32A32_FLOAT, 512, 512, 1, 1);
+        image.InitializeCube(
+			DXGI_FORMAT_R32G32B32A32_FLOAT,
+			faceSize,
+			faceSize,
+			1,
+			1);
 
         for (uint i = 0; i < 6; ++i)
         {
             cubeMap->GetData(i, 0, GL_RGBA, GL_FLOAT, &tmpBuffer[0]);
+			for (std::size_t pixel = 0;
+				pixel + 3 < tmpBuffer.size();
+				pixel += 4)
+			{
+				tmpBuffer[pixel] *= options.colorMultiplier.x;
+				tmpBuffer[pixel + 1] *= options.colorMultiplier.y;
+				tmpBuffer[pixel + 2] *= options.colorMultiplier.z;
+				tmpBuffer[pixel + 3] *= options.colorMultiplier.w;
+			}
 
             const DirectX::Image* face = image.GetImage(0, i, 0);
             memcpy(face->pixels, &tmpBuffer[0], tmpBuffer.size() * sizeof(float));
         }
 
-        if (generateMipmaps)
+        if (options.generateMipmaps)
         {
             uint32_t levels = uint32_t(std::log2(std::max(result->GetMetadata().width, result->GetMetadata().height)));
             DirectX::GenerateMipMaps(result->GetImages(), result->GetImageCount(), result->GetMetadata(), DirectX::TEX_FILTER_DEFAULT, levels, imageMips);

@@ -158,31 +158,43 @@ bool ModuleAudio::Load(ResourceAudio * resource)
 		App->fs->SplitFilePath(resource->GetExportedFile(), nullptr, nullptr, &extension);
 
 		ma_sound_group* group = nullptr;
-		bool should_loop = false;
-
-		if (extension == "ogg")
+		ResourceAudio::Format format = resource->format;
+		if (format == ResourceAudio::unknown)
 		{
-			// OGG files will be streams
-			resource->format = ResourceAudio::stream;
-			group = &music_group;
-			should_loop = true;
+			format = extension == "ogg"
+				? ResourceAudio::stream
+				: ResourceAudio::sample;
+			resource->format = format;
 		}
-		else if (extension == "wav")
+
+		if (format == ResourceAudio::stream)
 		{
-			// WAV for samples
-			resource->format = ResourceAudio::sample;
+			group = &music_group;
+		}
+		else if (format == ResourceAudio::sample)
+		{
 			group = &fx_group;
-			should_loop = false;
 		}
 
 		if (group != nullptr)
 		{
-			ma_uint32 flags = (resource->format == ResourceAudio::stream) ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
+			ma_uint32 flags = format == ResourceAudio::stream
+				? MA_SOUND_FLAG_STREAM
+				: MA_SOUND_FLAG_DECODE;
 			ma_sound* sound = new ma_sound;
 
 			if (ma_sound_init_from_file(&engine, resource->GetExportedFile(), flags, group, nullptr, sound) == MA_SUCCESS)
 			{
-				ma_sound_set_looping(sound, should_loop ? MA_TRUE : MA_FALSE);
+				ma_sound_set_looping(
+					sound, resource->loop ? MA_TRUE : MA_FALSE);
+				ma_sound_set_volume(sound, resource->volume);
+				ma_sound_set_pitch(sound, resource->pitch);
+				ma_sound_set_spatialization_enabled(
+					sound, resource->spatial ? MA_TRUE : MA_FALSE);
+				ma_sound_set_min_distance(
+					sound, resource->minimumDistance);
+				ma_sound_set_max_distance(
+					sound, resource->maximumDistance);
 				resource->sound = sound;
 				ret = true;
 			}

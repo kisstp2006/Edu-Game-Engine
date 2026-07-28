@@ -333,6 +333,109 @@ int main()
 	helpersRuntime.DestroyInstance(helpersInstance);
 	helpersRuntime.Shutdown();
 
+	TemporaryProject reflectionPolishProject;
+	reflectionPolishProject.WriteScript(
+		"enum MovementMode\n"
+		"{\n"
+		"    Idle = 0,\n"
+		"    Run = 2\n"
+		"}\n"
+		"\n"
+		"[ScriptComponent]\n"
+		"class ReflectionPolishProbe : EGEBehaviour\n"
+		"{\n"
+		"    [Tooltip(\"Current movement mode\")]\n"
+		"    MovementMode mode = Run;\n"
+		"\n"
+		"    [ReadOnly]\n"
+		"    int buildNumber = 7;\n"
+		"}\n");
+
+	EGE::ScriptRuntime reflectionPolishRuntime;
+	if (!Check(
+			reflectionPolishRuntime.Initialize(),
+			"Reflection polish runtime initialization failed") ||
+		!Check(
+			reflectionPolishRuntime.SetProjectRoot(
+				reflectionPolishProject.Root()),
+			"Reflection polish script did not compile"))
+	{
+		return 1;
+	}
+
+	const std::vector<EGE::ScriptClassInfo> reflectionPolishClasses =
+		reflectionPolishRuntime.GetAvailableClasses();
+	if (!Check(
+			reflectionPolishClasses.size() == 1,
+			"Reflection polish class discovery failed"))
+	{
+		return 1;
+	}
+	const std::string reflectionPolishAssetId =
+		reflectionPolishClasses.front().assetId;
+	const EGE::ScriptInstanceHandle reflectionPolishInstance =
+		reflectionPolishRuntime.CreateInstance("ReflectionPolishProbe");
+	const EGE::ReflectedScriptObject reflectionPolishObject =
+		reflectionPolishRuntime.GetReflectedInstance(
+			reflectionPolishInstance);
+	const EGE::PropertyDescriptor* modeProperty =
+		FindProperty(reflectionPolishObject, "mode");
+	const EGE::PropertyDescriptor* buildNumberProperty =
+		FindProperty(reflectionPolishObject, "buildNumber");
+	if (!Check(
+			modeProperty &&
+				modeProperty->kind == EGE::PropertyKind::Enumeration &&
+				modeProperty->attributes.tooltip ==
+					"Current movement mode" &&
+				modeProperty->enumValues.size() == 2 &&
+				modeProperty->enumValues[1].name == "Run" &&
+				modeProperty->enumValues[1].value == 2,
+			"Enum choices or Tooltip metadata were not reflected") ||
+		!Check(
+			buildNumberProperty &&
+				buildNumberProperty->attributes.readOnly,
+			"ReadOnly metadata was not reflected"))
+	{
+		return 1;
+	}
+
+	reflectionPolishProject.WriteScript(
+		"// EGE-ScriptId: " + reflectionPolishAssetId + "\n"
+		"enum MovementMode { Idle = 0, Run = 2 }\n"
+		"[ScriptComponent]\n"
+		"class RenamedReflectionProbe : EGEBehaviour\n"
+		"{\n"
+		"    MovementMode mode = Idle;\n"
+		"    int buildNumber = 0;\n"
+		"}\n");
+	if (!Check(
+			reflectionPolishRuntime.ForceReload(),
+			"Renamed script class did not hot reload") ||
+		!Check(
+			reflectionPolishRuntime.ResolveClass(
+				reflectionPolishAssetId,
+				"ReflectionPolishProbe") ==
+				"RenamedReflectionProbe",
+			"Script UUID did not resolve the renamed class") ||
+		!Check(
+			reflectionPolishRuntime.GetInstanceClassName(
+				reflectionPolishInstance) ==
+				"RenamedReflectionProbe",
+			"Live script instance did not follow the renamed class") ||
+		!Check(
+			reflectionPolishRuntime.GetReflectedInstance(
+				reflectionPolishInstance) &&
+				ReadNumber(
+					reflectionPolishRuntime.GetReflectedInstance(
+						reflectionPolishInstance),
+					"mode") == 2.0,
+			"Renamed live script instance was not recreated with its state"))
+	{
+		return 1;
+	}
+	reflectionPolishRuntime.DestroyInstance(reflectionPolishInstance);
+	reflectionPolishRuntime.Shutdown();
+
 	EGE::TimeService engineTime;
 	engineTime.BeginPlay();
 	if (!Check(

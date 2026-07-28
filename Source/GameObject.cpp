@@ -60,11 +60,25 @@ GameObject::~GameObject()
 // ---------------------------------------------------------
 bool GameObject::Save(Config& parent_config, map<uint,uint>* duplicate) const
 {
+	return SaveInternal(parent_config, duplicate, nullptr);
+}
+
+bool GameObject::SaveSubtree(Config& parent_config) const
+{
+	return SaveInternal(parent_config, nullptr, this);
+}
+
+bool GameObject::SaveInternal(
+	Config& parent_config,
+	map<uint, uint>* duplicate,
+	const GameObject* subtreeRoot) const
+{
 	Config config;
 
 	// This is only useful when we are duplicating already existing gameobjects
 	uint uid_to_save = uid;
-	uint parent_uid = (parent) ? parent->GetUID() : 0;
+	uint parent_uid =
+		this == subtreeRoot ? 0 : (parent ? parent->GetUID() : 0);
 
 	if (duplicate != nullptr)
 	{
@@ -104,7 +118,7 @@ bool GameObject::Save(Config& parent_config, map<uint,uint>* duplicate) const
 	// Recursively all children
 	for (list<GameObject*>::const_iterator it = childs.begin(); it != childs.end(); ++it)
 	{
-		(*it)->Save(parent_config, duplicate);
+		(*it)->SaveInternal(parent_config, duplicate, subtreeRoot);
 	}
 
 	return true;
@@ -140,7 +154,9 @@ void GameObject::Load(Config * config, map<GameObject*, uint>& relations)
 
 }
 
-void GameObject::LoadComponents(Config* config)
+void GameObject::LoadComponents(
+	Config* config,
+	map<uint, uint>* regeneratedComponentIds)
 {
     // Now Load all my components
     int count = config->GetArrayCount("Components");
@@ -152,9 +168,13 @@ void GameObject::LoadComponents(Config* config)
         if (type != Component::Types::Unknown)
         {
             Component* component = CreateComponent(type);
-			component->SetUID(
-				component_conf.GetUInt(
-					"ComponentUID", component->GetUID()));
+			const uint serializedUid = component_conf.GetUInt(
+				"ComponentUID", component->GetUID());
+			if (regeneratedComponentIds)
+				(*regeneratedComponentIds)[serializedUid] =
+					component->GetUID();
+			else
+				component->SetUID(serializedUid);
             component->OnLoad(&component_conf);
         }
         else

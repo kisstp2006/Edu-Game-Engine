@@ -20,8 +20,11 @@ public:
 	virtual ~GameObject();
 
 	bool Save(Config& config, std::map<uint,uint>* duplicate = nullptr) const;
+	bool SaveSubtree(Config& config) const;
 	void Load(Config* config, std::map<GameObject*, uint>& relations);
-    void LoadComponents(Config* config);
+    void LoadComponents(
+		Config* config,
+		std::map<uint, uint>* regeneratedComponentIds = nullptr);
 
 	void OnStart();
 	void OnFinish();
@@ -99,6 +102,10 @@ public:
 	float GetRadius() const;
 
 private:
+	bool SaveInternal(
+		Config& config,
+		std::map<uint, uint>* duplicate,
+		const GameObject* subtreeRoot) const;
 	void DestroyImmediate();
 	void SetPendingDestroyRecursively(bool pending);
 

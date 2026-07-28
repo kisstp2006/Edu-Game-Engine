@@ -1,6 +1,7 @@
 #include "PanelAssets.h"
 
 #include "Application.h"
+#include "EditorDialog.h"
 #include "EditorAssetSelection.h"
 #include "ModuleEditor.h"
 #include "ModuleFileSystem.h"
@@ -15,6 +16,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <SDL_scancode.h>
 
 namespace
 {
@@ -114,6 +116,7 @@ void PanelAssets::ResetProjectState()
 	fileDialog_.Close();
 	fileDialog_.ClearSelected();
 	textureDialog_.ClearSelection();
+	audioDialog_.ClearSelection();
 	animationDialog_.ClearSelection();
 	modelDialog_.ClearSelection();
 	texturePreview_.Clear();
@@ -147,24 +150,21 @@ void PanelAssets::DrawDialogs()
 	fileDialog_.Display();
 	if (fileDialog_.HasSelected())
 	{
-		std::error_code pathError;
-		const std::filesystem::path selected =
-			std::filesystem::weakly_canonical(
-				fileDialog_.GetSelected(), pathError);
-		const std::filesystem::path assetsRoot =
-			std::filesystem::weakly_canonical(
-				browser_.GetAssetsRoot(), pathError);
-
-		if (pathError || !IsPathInside(selected, assetsRoot))
+		std::string sourcePath;
+		bool copiedIntoProject = false;
+		if (PrepareImportSource(
+				fileDialog_.GetSelected(),
+				sourcePath,
+				copiedIntoProject))
 		{
-			errorMessage_ =
-				"Choose a source file inside the active project's Assets folder.";
-		}
-		else
-		{
-			const std::filesystem::path relative =
-				selected.lexically_relative(browser_.GetProjectRoot());
-			ImportResource(relative.generic_string(), waitingToImport_);
+			if (copiedIntoProject)
+			{
+				Refresh();
+				statusMessage_ =
+					std::filesystem::path(sourcePath).filename().string() +
+					" copied into the current Assets folder.";
+			}
+			ImportResource(sourcePath, waitingToImport_);
 		}
 
 		fileDialog_.ClearSelected();
@@ -176,9 +176,7 @@ void PanelAssets::DrawDialogs()
 	{
 		const UID uid = App->resources->ImportTexture(
 			textureDialog_.GetFile().c_str(),
-			textureDialog_.GetMipmaps(),
-			false,
-			textureDialog_.GetToCubemap());
+			textureDialog_.GetOptions());
 		statusMessage_ = uid != 0
 			? "Texture imported."
 			: "Texture import failed.";
@@ -186,19 +184,33 @@ void PanelAssets::DrawDialogs()
 		RebuildImportIndex();
 	}
 
+	audioDialog_.Display();
+	if (audioDialog_.HasSelection())
+	{
+		const UID uid = App->resources->ImportAudio(
+			audioDialog_.GetFile().c_str(),
+			audioDialog_.GetOptions());
+		statusMessage_ = uid != 0
+			? "Audio imported."
+			: "Audio import failed.";
+		audioDialog_.ClearSelection();
+		RebuildImportIndex();
+	}
+
 	animationDialog_.Display();
 	if (animationDialog_.HasSelection())
 	{
+		const EGE::AnimationImportOptions options =
+			animationDialog_.GetOptions();
 		std::size_t importedClips = 0;
-		for (const ImportAnimationDlg::Clip& clip :
-			animationDialog_.GetClips())
+		for (const EGE::AnimationClipImportRange& clip : options.clips)
 		{
 			if (App->resources->ImportAnimation(
 					animationDialog_.GetFile().c_str(),
-					clip.first,
-					clip.last,
-					clip.name,
-					animationDialog_.GetScale()) != 0)
+					clip.firstFrame,
+					clip.lastFrame,
+					clip.name.c_str(),
+					options) != 0)
 			{
 				++importedClips;
 			}
@@ -216,8 +228,7 @@ void PanelAssets::DrawDialogs()
 	{
 		const UID uid = App->resources->ImportModel(
 			modelDialog_.GetFile().c_str(),
-			modelDialog_.GetScale(),
-			modelDialog_.GetAssetName().c_str());
+			modelDialog_.GetOptions());
 		statusMessage_ = uid != 0
 			? "Model imported."
 			: "Model import failed.";
@@ -230,6 +241,40 @@ void PanelAssets::DrawDialogs()
 
 void PanelAssets::DrawToolbar()
 {
+	const ImGuiIO& io = ImGui::GetIO();
+	const bool toolbarFocused =
+		ImGui::IsWindowFocused(
+			ImGuiFocusedFlags_RootAndChildWindows);
+	const bool acceptsShortcut =
+		toolbarFocused &&
+		!io.WantTextInput &&
+		!ImGui::IsAnyItemActive();
+	if (acceptsShortcut &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_F5, false))
+	{
+		Refresh();
+	}
+	if (acceptsShortcut && io.KeyAlt &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_LEFT, false))
+	{
+		NavigateBackward();
+	}
+	if (acceptsShortcut && io.KeyAlt &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_RIGHT, false))
+	{
+		NavigateForward();
+	}
+	if (acceptsShortcut && !io.KeyAlt && !io.KeyCtrl &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_BACKSPACE, false) &&
+		!browser_.GetCurrentPath().empty())
+	{
+		NavigateTo(browser_.GetCurrentPath().parent_path());
+	}
+	const bool focusSearch =
+		acceptsShortcut &&
+		io.KeyCtrl &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_F, false);
+
 	const bool hasPrevious = historyIndex_ > 0;
 	const bool hasNext =
 		!history_.empty() && historyIndex_ + 1 < history_.size();
@@ -241,6 +286,8 @@ void PanelAssets::DrawToolbar()
 			ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 	if (ImGui::Button("<", ImVec2(28.0f, 0.0f)) && hasPrevious)
 		NavigateBackward();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Back (Alt+Left)");
 	if (!hasPrevious)
 		ImGui::PopStyleColor();
 
@@ -250,6 +297,8 @@ void PanelAssets::DrawToolbar()
 			ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 	if (ImGui::Button(">", ImVec2(28.0f, 0.0f)) && hasNext)
 		NavigateForward();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Forward (Alt+Right)");
 	if (!hasNext)
 		ImGui::PopStyleColor();
 
@@ -259,6 +308,8 @@ void PanelAssets::DrawToolbar()
 			ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 	if (ImGui::Button("^", ImVec2(28.0f, 0.0f)) && hasParent)
 		NavigateTo(browser_.GetCurrentPath().parent_path());
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Parent folder (Backspace)");
 	if (!hasParent)
 		ImGui::PopStyleColor();
 
@@ -304,16 +355,32 @@ void PanelAssets::DrawToolbar()
 	ContinueControlLine(ButtonWidth("Refresh"));
 	if (ImGui::Button("Refresh"))
 		Refresh();
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Refresh assets (F5)");
 
+	const float clearSearchWidth = ButtonWidth("X");
+	const float availableSearchWidth =
+		ImGui::GetContentRegionAvail().x;
 	const float searchWidth = std::min(
 		250.0f,
-		std::max(1.0f, ImGui::GetContentRegionAvail().x));
+		std::max(
+			1.0f,
+			availableSearchWidth -
+				clearSearchWidth -
+				ImGui::GetStyle().ItemSpacing.x));
+	if (focusSearch)
+		ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(searchWidth);
 	ImGui::InputTextWithHint(
 		"##AssetSearch",
-		"Search all assets...",
+		"Search all assets... (Ctrl+F)",
 		search_,
 		sizeof(search_));
+	ImGui::SameLine();
+	if (ImGui::Button("X##ClearAssetSearch") && search_[0] != '\0')
+		search_[0] = '\0';
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Clear search");
 
 	const char* filterPreview = kindFilter_ == EGE::AssetKind::Unknown
 		? "All types"
@@ -361,6 +428,13 @@ void PanelAssets::DrawToolbar()
 		viewMode_ = viewMode_ == ViewMode::Grid
 			? ViewMode::List
 			: ViewMode::Grid;
+	}
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip(
+			viewMode_ == ViewMode::Grid
+				? "Switch to list view"
+				: "Switch to grid view");
 	}
 
 	if (viewMode_ == ViewMode::Grid)
@@ -557,11 +631,19 @@ void PanelAssets::DrawGrid(
 void PanelAssets::DrawList(
 	const std::vector<const EGE::AssetEntry*>& entries)
 {
+	const float availableWidth =
+		std::max(460.0f, ImGui::GetContentRegionAvail().x);
+	const float typeWidth = 115.0f;
+	const float statusWidth = 115.0f;
+	const float sizeWidth = 90.0f;
+	const float nameWidth = std::max(
+		160.0f,
+		availableWidth - typeWidth - statusWidth - sizeWidth);
 	ImGui::Columns(4, "AssetListColumns", false);
-	ImGui::SetColumnWidth(0, 360.0f);
-	ImGui::SetColumnWidth(1, 115.0f);
-	ImGui::SetColumnWidth(2, 105.0f);
-	ImGui::SetColumnWidth(3, 90.0f);
+	ImGui::SetColumnWidth(0, nameWidth);
+	ImGui::SetColumnWidth(1, typeWidth);
+	ImGui::SetColumnWidth(2, statusWidth);
+	ImGui::SetColumnWidth(3, sizeWidth);
 	ImGui::TextDisabled("Name");
 	ImGui::NextColumn();
 	ImGui::TextDisabled("Type");
@@ -777,6 +859,13 @@ void PanelAssets::DrawAssetContextMenu(
 	}
 	else
 	{
+		if (entry.kind == EGE::AssetKind::Scene)
+		{
+			if (ImGui::MenuItem("Open Scene"))
+				OpenScene(entry);
+			ImGui::Separator();
+		}
+
 		const Resource::Type resourceType = ResourceTypeFor(entry);
 		const ImportInfo* importInfo = FindImportInfo(entry);
 		if (resourceType != Resource::unknown && !importInfo)
@@ -866,16 +955,17 @@ void PanelAssets::DrawCreateMenu()
 
 void PanelAssets::DrawCreateDialog()
 {
+	bool focusName = false;
 	if (openCreateDialog_)
 	{
-		ImGui::OpenPopup("Create Asset");
+		EGE::EditorDialog::Open("Create Asset");
 		openCreateDialog_ = false;
+		focusName = true;
 	}
 
-	ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f));
-	if (!ImGui::BeginPopupModal(
+	if (!EGE::EditorDialog::Begin(
 			"Create Asset",
-			nullptr,
+			ImVec2(430.0f, 0.0f),
 			ImGuiWindowFlags_AlwaysAutoResize))
 	{
 		return;
@@ -887,18 +977,28 @@ void PanelAssets::DrawCreateDialog()
 		CreateTypeName(createKind_));
 	ImGui::Separator();
 	ImGui::Spacing();
+	ImGui::TextDisabled("Name");
+	if (focusName)
+		ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(-1.0f);
-	if (ImGui::InputText(
+	const bool submitName = ImGui::InputText(
 			"##CreateAssetName",
 			createName_,
 			sizeof(createName_),
-			ImGuiInputTextFlags_EnterReturnsTrue))
+			ImGuiInputTextFlags_EnterReturnsTrue);
+	const bool canCreate = IsValidAssetName(createName_);
+	if (submitName && canCreate)
 	{
 		CreatePendingAsset();
 		if (createKind_ == CreateAssetKind::None)
 			ImGui::CloseCurrentPopup();
 	}
-	ImGui::TextDisabled("Name");
+	if (!canCreate)
+	{
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.58f, 0.32f, 1.0f),
+			"Enter a valid file name.");
+	}
 
 	const std::filesystem::path destination =
 		browser_.GetAssetsRoot() / browser_.GetCurrentPath();
@@ -912,45 +1012,53 @@ void PanelAssets::DrawCreateDialog()
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::TextDisabled("GEOMETRY");
-		ImGui::InputFloat("Width", &meshCreation_.width, 0.1f);
-		ImGui::InputFloat("Height", &meshCreation_.height, 0.1f);
-		ImGui::InputInt("Slices", &meshCreation_.slices);
-		ImGui::InputInt("Stacks", &meshCreation_.stacks);
+		ImGui::DragFloat(
+			"Width", &meshCreation_.width, 0.1f, 0.01f, 10000.0f);
+		ImGui::DragFloat(
+			"Height", &meshCreation_.height, 0.1f, 0.01f, 10000.0f);
+		ImGui::DragInt("Slices", &meshCreation_.slices, 1.0f, 3, 256);
+		ImGui::DragInt("Stacks", &meshCreation_.stacks, 1.0f, 1, 256);
 		break;
 	case CreateAssetKind::MeshCube:
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::TextDisabled("GEOMETRY");
-		ImGui::InputFloat("Size", &meshCreation_.width, 0.1f);
+		ImGui::DragFloat(
+			"Size", &meshCreation_.width, 0.1f, 0.01f, 10000.0f);
 		break;
 	case CreateAssetKind::MeshSphere:
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::TextDisabled("GEOMETRY");
-		ImGui::InputFloat("Radius", &meshCreation_.radius, 0.1f);
-		ImGui::InputInt("Slices", &meshCreation_.slices);
-		ImGui::InputInt("Stacks", &meshCreation_.stacks);
+		ImGui::DragFloat(
+			"Radius", &meshCreation_.radius, 0.1f, 0.01f, 10000.0f);
+		ImGui::DragInt("Slices", &meshCreation_.slices, 1.0f, 3, 256);
+		ImGui::DragInt("Stacks", &meshCreation_.stacks, 1.0f, 1, 256);
 		break;
 	case CreateAssetKind::MeshCylinder:
 	case CreateAssetKind::MeshCone:
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::TextDisabled("GEOMETRY");
-		ImGui::InputFloat("Height", &meshCreation_.height, 0.1f);
-		ImGui::InputFloat("Radius", &meshCreation_.radius, 0.1f);
-		ImGui::InputInt("Slices", &meshCreation_.slices);
-		ImGui::InputInt("Stacks", &meshCreation_.stacks);
+		ImGui::DragFloat(
+			"Height", &meshCreation_.height, 0.1f, 0.01f, 10000.0f);
+		ImGui::DragFloat(
+			"Radius", &meshCreation_.radius, 0.1f, 0.01f, 10000.0f);
+		ImGui::DragInt("Slices", &meshCreation_.slices, 1.0f, 3, 256);
+		ImGui::DragInt("Stacks", &meshCreation_.stacks, 1.0f, 1, 256);
 		break;
 	case CreateAssetKind::MeshTorus:
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::TextDisabled("GEOMETRY");
-		ImGui::InputFloat(
-			"Inner radius", &meshCreation_.innerRadius, 0.05f);
-		ImGui::InputFloat(
-			"Outer radius", &meshCreation_.outerRadius, 0.1f);
-		ImGui::InputInt("Slices", &meshCreation_.slices);
-		ImGui::InputInt("Stacks", &meshCreation_.stacks);
+		ImGui::DragFloat(
+			"Inner radius", &meshCreation_.innerRadius,
+			0.05f, 0.01f, 10000.0f);
+		ImGui::DragFloat(
+			"Outer radius", &meshCreation_.outerRadius,
+			0.1f, 0.01f, 10000.0f);
+		ImGui::DragInt("Slices", &meshCreation_.slices, 1.0f, 3, 256);
+		ImGui::DragInt("Stacks", &meshCreation_.stacks, 1.0f, 1, 256);
 		break;
 	default:
 		break;
@@ -980,14 +1088,31 @@ void PanelAssets::DrawCreateDialog()
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Create", ImVec2(buttonWidth, 0.0f)))
+	if (!canCreate)
+	{
+		ImGui::PushStyleVar(
+			ImGuiStyleVar_Alpha,
+			ImGui::GetStyle().Alpha * 0.45f);
+	}
+	const bool createPressed =
+		ImGui::Button("Create", ImVec2(buttonWidth, 0.0f));
+	if (!canCreate)
+		ImGui::PopStyleVar();
+	if (createPressed && canCreate)
 	{
 		CreatePendingAsset();
 		if (createKind_ == CreateAssetKind::None)
 			ImGui::CloseCurrentPopup();
 	}
+	if (ImGui::IsKeyPressed(
+			ImGui::GetKeyIndex(ImGuiKey_Escape), false))
+	{
+		createKind_ = CreateAssetKind::None;
+		errorMessage_.clear();
+		ImGui::CloseCurrentPopup();
+	}
 
-	ImGui::EndPopup();
+	EGE::EditorDialog::End();
 }
 
 void PanelAssets::BeginCreate(CreateAssetKind kind)
@@ -1572,6 +1697,14 @@ void PanelAssets::SelectInInspector(const EGE::AssetEntry& entry)
 	App->editor->SetSelected(std::move(selection));
 }
 
+void PanelAssets::OpenScene(const EGE::AssetEntry& entry)
+{
+	const std::filesystem::path scenePath =
+		browser_.GetAssetsRoot() / entry.relativePath;
+	if (App->editor->OpenSceneAsset(scenePath))
+		statusMessage_ = entry.name + " opened.";
+}
+
 void PanelAssets::OpenAssetEditor(const EGE::AssetEntry& entry)
 {
 	const ImportInfo* info = FindImportInfo(entry);
@@ -1640,6 +1773,8 @@ void PanelAssets::HandleAssetInteractions(
 	{
 		if (entry.directory)
 			pendingNavigation_ = entry.relativePath;
+		else if (entry.kind == EGE::AssetKind::Scene)
+			OpenScene(entry);
 		else if (entry.kind == EGE::AssetKind::Script)
 			OpenScriptInVsCode(entry);
 		else
@@ -1716,6 +1851,118 @@ void PanelAssets::OpenImportDialog(Resource::Type type)
 	fileDialog_.Open();
 }
 
+bool PanelAssets::PrepareImportSource(
+	const std::filesystem::path& selectedPath,
+	std::string& projectSourcePath,
+	bool& copiedIntoProject)
+{
+	projectSourcePath.clear();
+	copiedIntoProject = false;
+	errorMessage_.clear();
+
+	std::error_code fileError;
+	const std::filesystem::path selected =
+		std::filesystem::weakly_canonical(selectedPath, fileError);
+	if (fileError ||
+		!std::filesystem::is_regular_file(selected, fileError))
+	{
+		errorMessage_ =
+			"The selected import source is not a readable file.";
+		return false;
+	}
+
+	fileError.clear();
+	const std::filesystem::path projectRoot =
+		std::filesystem::weakly_canonical(
+			browser_.GetProjectRoot(), fileError);
+	if (fileError)
+	{
+		errorMessage_ = "The active project directory is unavailable.";
+		return false;
+	}
+
+	fileError.clear();
+	const std::filesystem::path assetsRoot =
+		std::filesystem::weakly_canonical(
+			browser_.GetAssetsRoot(), fileError);
+	if (fileError)
+	{
+		errorMessage_ = "The active project's Assets folder is unavailable.";
+		return false;
+	}
+
+	std::filesystem::path projectAsset = selected;
+	if (!IsPathInside(selected, assetsRoot))
+	{
+		const std::filesystem::path destinationDirectory =
+			(assetsRoot / browser_.GetCurrentPath()).lexically_normal();
+		if (!IsPathInside(destinationDirectory, assetsRoot) ||
+			!std::filesystem::is_directory(destinationDirectory, fileError))
+		{
+			errorMessage_ =
+				"The current Assets folder is not available.";
+			return false;
+		}
+
+		projectAsset = destinationDirectory / selected.filename();
+		if (std::filesystem::exists(projectAsset, fileError))
+		{
+			const std::string stem = selected.stem().string();
+			const std::string extension = selected.extension().string();
+			for (std::uint32_t suffix = 1;; ++suffix)
+			{
+				projectAsset =
+					destinationDirectory /
+					(stem + " (" + std::to_string(suffix) + ")" +
+					 extension);
+				fileError.clear();
+				if (!std::filesystem::exists(projectAsset, fileError))
+					break;
+				if (fileError)
+				{
+					errorMessage_ =
+						"Could not choose a destination for the asset.";
+					return false;
+				}
+			}
+		}
+		else if (fileError)
+		{
+			errorMessage_ =
+				"Could not inspect the destination Assets folder.";
+			return false;
+		}
+
+		fileError.clear();
+		if (!std::filesystem::copy_file(
+				selected,
+				projectAsset,
+				std::filesystem::copy_options::none,
+				fileError))
+		{
+			errorMessage_ =
+				"Could not copy the asset into the project: " +
+				fileError.message();
+			return false;
+		}
+		copiedIntoProject = true;
+	}
+
+	const std::filesystem::path relativePath =
+		projectAsset.lexically_relative(projectRoot);
+	if (relativePath.empty() ||
+		relativePath.is_absolute() ||
+		!IsPathInside(projectAsset, assetsRoot))
+	{
+		errorMessage_ =
+			"The import source could not be resolved inside the project.";
+		return false;
+	}
+
+	projectSourcePath = relativePath.generic_string();
+	return true;
+}
+
 void PanelAssets::ImportResource(
 	const std::string& sourcePath,
 	Resource::Type type)
@@ -1737,15 +1984,8 @@ void PanelAssets::ImportResource(
 		break;
 	}
 	case Resource::audio:
-	{
-		const UID uid =
-			App->resources->ImportFile(sourcePath.c_str(), type, true);
-		statusMessage_ = uid != 0
-			? "Audio imported."
-			: "Audio import failed.";
-		RebuildImportIndex();
+		audioDialog_.Open(sourcePath);
 		break;
-	}
 	default:
 		errorMessage_ = "This asset type does not have an importer yet.";
 		break;

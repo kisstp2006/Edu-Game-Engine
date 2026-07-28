@@ -1,42 +1,29 @@
-#ifndef __IMPORT_ANIMATION_DLG_H__
-#define __IMPORT_ANIMATION_DLG_H__
+#pragma once
 
-#include <vector>
+#include "AssetImportOptions.h"
+#include "ImportSettings.h"
+
 #include <string>
 
-class ImportAnimationDlg
+class ImportAnimationDlg final
 {
 public:
+	ImportAnimationDlg();
 
-    struct Clip
-    {
-        char        name[128];
-        uint        first = 0;
-        uint        last  = uint(INT_MAX);
+	void Open(const std::string& file, const std::string& name);
+	void Display();
+	void ClearSelection();
 
-        Clip()
-        {
-            name[0] = 0;
-        }
-    };
+	[[nodiscard]] bool HasSelection() const;
+	[[nodiscard]] const std::string& GetFile() const;
+	[[nodiscard]] EGE::AnimationImportOptions GetOptions() const;
 
-    std::string         file;
-    std::string         clips_name;
-    std::vector<Clip>   clips;
-    bool                selection = false;
-    float               scale     = 1.0f;
+private:
+	static constexpr const char* ClipListType =
+		"EGE.AnimationClipImportList";
 
-public:
-
-    void Open           (const std::string& _file, const std::string& name);
-    void Display        ();
-    void ClearSelection ();
-
-    bool                     HasSelection   () const { return selection; }
-    const std::string&       GetFile        () const { return file; }
-    const std::vector<Clip>& GetClips       () const { return clips; }
-    float                    GetScale       () const { return scale; }
-
+	std::string file_;
+	EGE::ImportSettings settings_;
+	bool selection_ = false;
+	bool openRequested_ = false;
 };
-
-#endif /* __IMPORT_ANIMATION_DLG_H__ */

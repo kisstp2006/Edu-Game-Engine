@@ -1,5 +1,6 @@
 #include "PanelProperties.h"
 #include "Application.h"
+#include "EditorDialog.h"
 #include "EditorAssetSelection.h"
 #include <imgui.h>
 #include <ImGuizmo.h>
@@ -49,6 +50,7 @@
 #include "SkyboxRollout.h"
 #include "LightManager.h"
 #include "Reflection/PropertyEditor.h"
+#include "Project/VsCodeWorkspace.h"
 
 #include "DirLight.h"
 #include "PointLight.h"
@@ -1042,11 +1044,17 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
         ImGui::SameLine();
 
         // Text Input for the name
-        char name[50];
-        strcpy_s(name, 50, go->name.c_str());
-        if (ImGui::InputText("Name", name, 50,
-                    ImGuiInputTextFlags_AutoSelectAll |
-                    ImGuiInputTextFlags_EnterReturnsTrue))
+        char name[256] = {};
+		strncpy_s(
+			name,
+			sizeof(name),
+			go->name.c_str(),
+			_TRUNCATE);
+        if (ImGui::InputText(
+				"Name",
+				name,
+				sizeof(name),
+				ImGuiInputTextFlags_AutoSelectAll))
             go->name = name;
 
         // Transform section ============================================
@@ -1059,7 +1067,12 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
             if (go->global_bbox.IsFinite())
             {
                 float3 size = go->GetLocalBBox().Size();
-                ImGui::TextColored(IMGUI_YELLOW, "%.2f %.2f %.2f", size.x, size.y, size.x);
+                ImGui::TextColored(
+					IMGUI_YELLOW,
+					"%.2f %.2f %.2f",
+					size.x,
+					size.y,
+					size.z);
             }
             else
                 ImGui::TextColored(IMGUI_YELLOW, "- not generated -");
@@ -1067,7 +1080,13 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
             ImGui::Text("Velocity: ");
             ImGui::SameLine();
             float3 vel = go->GetVelocity();
-            ImGui::TextColored(IMGUI_YELLOW, "%.2f %.2f %.2f (%.2f m/s)", vel.x, vel.y, vel.x, vel.Length());
+            ImGui::TextColored(
+				IMGUI_YELLOW,
+				"%.2f %.2f %.2f (%.2f m/s)",
+				vel.x,
+				vel.y,
+				vel.z,
+				vel.Length());
         }
 
         // Iterate all components and draw
@@ -1149,18 +1168,21 @@ void PanelProperties::DrawScriptComponent(ComponentScript* component)
 	}
 
 	EGE::ScriptRuntime& runtime = App->scripting->GetRuntime();
+	component->RefreshScriptReference();
 	const std::vector<EGE::ScriptClassInfo> classes =
 		runtime.GetAvailableClasses();
 	const std::string& selectedClass = component->GetScriptClass();
 	const std::string& selectedAssetId = component->GetScriptAssetId();
 
 	std::string preview = "None";
+	const EGE::ScriptClassInfo* selectedInfo = nullptr;
 	for (const EGE::ScriptClassInfo& scriptClass : classes)
 	{
 		if (scriptClass.assetId == selectedAssetId &&
 			scriptClass.name == selectedClass)
 		{
 			preview = scriptClass.displayName;
+			selectedInfo = &scriptClass;
 			break;
 		}
 	}
@@ -1175,7 +1197,10 @@ void PanelProperties::DrawScriptComponent(ComponentScript* component)
 	{
 		const bool noClass = selectedClass.empty() && selectedAssetId.empty();
 		if (ImGui::Selectable("None", noClass))
+		{
 			component->SetScriptClass({});
+			selectedInfo = nullptr;
+		}
 		if (noClass)
 			ImGui::SetItemDefaultFocus();
 
@@ -1183,16 +1208,74 @@ void PanelProperties::DrawScriptComponent(ComponentScript* component)
 		{
 			const bool selected = scriptClass.name == selectedClass &&
 				scriptClass.assetId == selectedAssetId;
+			ImGui::PushID(scriptClass.assetId.c_str());
 			if (ImGui::Selectable(
 					scriptClass.displayName.c_str(), selected))
 			{
 				component->SetScriptReference(
 					scriptClass.assetId, scriptClass.name);
+				selectedInfo = &scriptClass;
 			}
 			if (selected)
 				ImGui::SetItemDefaultFocus();
+			if (ImGui::IsItemHovered() &&
+				!scriptClass.sourcePath.empty())
+			{
+				ImGui::SetTooltip(
+					"%s",
+					scriptClass.sourcePath.generic_string().c_str());
+			}
+			ImGui::PopID();
 		}
 		ImGui::EndCombo();
+	}
+
+	if (selectedInfo && !selectedInfo->sourcePath.empty())
+	{
+		ImGui::TextDisabled(
+			"%s",
+			selectedInfo->sourcePath.generic_string().c_str());
+	}
+
+	const bool canOpenScript =
+		selectedInfo && !selectedInfo->sourcePath.empty();
+	if (!canOpenScript)
+		ImGui::PushStyleVar(
+			ImGuiStyleVar_Alpha,
+			ImGui::GetStyle().Alpha * 0.45f);
+	const bool openScript = ImGui::Button("Open Script");
+	if (!canOpenScript)
+		ImGui::PopStyleVar();
+	if (openScript && canOpenScript)
+	{
+		const std::filesystem::path projectRoot =
+			App->fs->GetProjectRoot();
+		const std::filesystem::path sourcePath =
+			selectedInfo->sourcePath.is_absolute()
+				? selectedInfo->sourcePath
+				: projectRoot / selectedInfo->sourcePath;
+		std::string error;
+		if (!EGE::OpenVsCode(
+				projectRoot, sourcePath, error))
+		{
+			App->editor->SetProjectStatus(false, error);
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Reload Scripts"))
+		App->scripting->Reload();
+
+	if (runtime.WasLastReloadSuccessful())
+	{
+		ImGui::TextDisabled(
+			"Hot reload %s",
+			runtime.IsHotReloadEnabled() ? "on" : "off");
+	}
+	else
+	{
+		ImGui::TextColored(
+			ImVec4(0.95f, 0.55f, 0.30f, 1.0f),
+			"Reload failed - see Console");
 	}
 
 	if (selectedClass.empty())
@@ -1270,7 +1353,7 @@ UID PanelProperties::PickResourceModal(int type)
 
     if (ImGui::Button(tmp))
     {
-        ImGui::OpenPopup(tmp);
+        EGE::EditorDialog::Open(tmp);
     }
 
     return OpenResourceModal(type, tmp);
@@ -1280,8 +1363,10 @@ UID PanelProperties::OpenResourceModal(int type, const char* popup_name)
 {
 	UID new_res = 0;
 
-    ImGui::SetNextWindowSize(ImVec2(420,300));
-    if (ImGui::BeginPopupModal(popup_name, nullptr, ImGuiWindowFlags_NoResize))
+    if (EGE::EditorDialog::Begin(
+			popup_name,
+			ImVec2(420.0f, 300.0f),
+			ImGuiWindowFlags_NoResize))
     {
         if(ImGui::BeginChild("Canvas", ImVec2(400, 240), true, ImGuiWindowFlags_NoMove))
         {
@@ -1302,7 +1387,7 @@ UID PanelProperties::OpenResourceModal(int type, const char* popup_name)
             ImGui::CloseCurrentPopup();
         }
 
-        ImGui::EndPopup();
+        EGE::EditorDialog::End();
     }
 
     return new_res;
@@ -1424,10 +1509,13 @@ void PanelProperties::DrawBatchProperties(ComponentMeshRenderer* component)
 
         if(ImGui::Button("New batch"))
         {
-            ImGui::OpenPopup("Batch name");
+            EGE::EditorDialog::Open("Batch name");
         }
 
-        if (ImGui::BeginPopupModal("Batch name", nullptr, ImGuiWindowFlags_NoResize))
+        if (EGE::EditorDialog::Begin(
+				"Batch name",
+				ImVec2(285.0f, 145.0f),
+				ImGuiWindowFlags_NoResize))
         {
             static char tmp[256];
             static bool init = true;
@@ -1469,7 +1557,7 @@ void PanelProperties::DrawBatchProperties(ComponentMeshRenderer* component)
                 ImGui::CloseCurrentPopup();
             }
 
-            ImGui::EndPopup();
+            EGE::EditorDialog::End();
         }
     }
 }
@@ -1661,8 +1749,12 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
 {
     bool modified = false;
 
-    char tmp[256];
-    strcpy_s(tmp, 255, material->GetUserResName());
+    char tmp[256] = {};
+	strncpy_s(
+		tmp,
+		sizeof(tmp),
+		material->GetUserResName(),
+		_TRUNCATE);
     if(ImGui::InputText("Material name", tmp, 256))
     {
         material->SetUserResName(tmp);
@@ -1673,7 +1765,7 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
     {
         SpecularGlossData sgData = material->GetSpecularGlossData();
 
-        if (ImGui::CollapsingHeader("Ligthmap", ImGuiTreeNodeFlags_DefaultOpen))
+        if (ImGui::CollapsingHeader("Lightmap", ImGuiTreeNodeFlags_DefaultOpen))
         {
             modified = TextureButton(sgData.textures[SG_TextureLightmap], mesh, "Lightmap") || modified;
         }
@@ -1703,14 +1795,20 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
                 modified = true;
             }
 
-            if (ImGui::SliderFloat("Intensity", &sgData.specular_intensity, 1.0f, 50.0f))
+            if (ImGui::DragFloat(
+					"Intensity",
+					&sgData.specular_intensity,
+					0.05f,
+					0.0f,
+					100.0f))
             {
                 modified = true;
             }
 
             ImGui::PopID();
 
-            if (ImGui::SliderFloat("Smoothness", &sgData.smoothness, 0.0f, 10.0f))
+            if (ImGui::SliderFloat(
+					"Smoothness", &sgData.smoothness, 0.0f, 1.0f))
             {
                 modified = true;
             }
@@ -1744,7 +1842,12 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
 
             ImGui::PopID();
 
-            if (ImGui::SliderFloat("Intensity", &sgData.emissive_intensity, 1.0f, 50.0f))
+            if (ImGui::DragFloat(
+					"Intensity",
+					&sgData.emissive_intensity,
+					0.05f,
+					0.0f,
+					100.0f))
             {
                 modified = true;
             }
@@ -1763,7 +1866,8 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
         }
 
         float2 offset = material->GetUVOffset();
-        if (ImGui::DragFloat2("Offset", &offset.x, 0.01f, 0.0f, 1.0f))
+        if (ImGui::DragFloat2(
+				"Offset", &offset.x, 0.01f, -10.0f, 10.0f))
         {
             material->SetUVOffset(offset);
             modified = true;
@@ -1776,12 +1880,12 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
 
         if (ImGui::CollapsingHeader("Secondary Specular", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            modified = TextureButton(sgData.textures[SG_TextureScndDiffuse], mesh, "Secondary Specular") || modified;
+            modified = TextureButton(sgData.textures[SG_TextureScndSpecular], mesh, "Secondary Specular") || modified;
         }
 
         if (ImGui::CollapsingHeader("Secondary Normal", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            modified = TextureButton(sgData.textures[SG_TextureScndDiffuse], mesh, "Secondary Normal") || modified;
+            modified = TextureButton(sgData.textures[SG_TextureScndNormal], mesh, "Secondary Normal") || modified;
         }
 
         tiling = material->GetSecondUVTiling();
@@ -1792,7 +1896,8 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
         }
 
         offset = material->GetSecondUVOffset();
-        if (ImGui::DragFloat2("Secondary Offset", &offset.x, 0.01f, 0.0f, 1.0f))
+        if (ImGui::DragFloat2(
+				"Secondary Offset", &offset.x, 0.01f, -10.0f, 10.0f))
         {
             material->SetSecondUVOffset(offset);
             modified = true;
@@ -1800,7 +1905,7 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
 
         bool dsided = material->GetDoubleSided();
 
-        if (ImGui::Checkbox("Double side", &dsided))
+        if (ImGui::Checkbox("Double sided", &dsided))
         {
             material->SetDoubleSided(dsided);
             modified = true;
@@ -1808,7 +1913,7 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
 
         float atest = material->GetAlphaTest();
 
-        if (ImGui::SliderFloat("Alpha test", &atest, 0.0f, 1.0f))
+        if (ImGui::SliderFloat("Alpha cutoff", &atest, 0.0f, 1.0f))
         {
             material->SetAlphaTest(atest);
             modified = true;
@@ -1879,7 +1984,12 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
 
             ImGui::PopID();
 
-            if (ImGui::SliderFloat("Intensity", &mrData.emissive_intensity, 1.0f, 50.0f))
+            if (ImGui::DragFloat(
+					"Intensity",
+					&mrData.emissive_intensity,
+					0.05f,
+					0.0f,
+					100.0f))
             {
                 modified = true;
             }
@@ -1888,7 +1998,11 @@ void PanelProperties::DrawMaterialResource(ResourceMaterial* material, ResourceM
         if (ImGui::CollapsingHeader("Occlusion", ImGuiTreeNodeFlags_DefaultOpen))
         {
             modified = TextureButton(mrData.textures[MR_TextureOcclusion], mesh, "Occlusion") || modified;
-            if (ImGui::SliderFloat("Occlusion Strength", &mrData.occlusion_strength, 0.0f, 50.0f))
+            if (ImGui::SliderFloat(
+					"Occlusion Strength",
+					&mrData.occlusion_strength,
+					0.0f,
+					10.0f))
             {
                 modified = true;
             }
@@ -2078,7 +2192,7 @@ void PanelProperties::DrawAnimationComponent(ComponentAnimation* component)
             ImGui::SameLine();
             if(ImGui::ArrowButton("resource", ImGuiDir_Right))
             {
-                ImGui::OpenPopup("Select");
+                EGE::EditorDialog::Open("Select");
             }
 
             UID new_res = OpenResourceModal(Resource::animation, "Select");
@@ -2400,7 +2514,7 @@ void DrawLineComponent(ComponentLine* component)
         {
             if(ImGui::ImageButton((ImTextureID) (ImTextureID)size_t(info->GetID()), size, ImVec2(0,1), ImVec2(1,0), ImColor(255, 255, 255, 128), ImColor(255, 255, 255, 128)))
             {
-                ImGui::OpenPopup("texture");
+                EGE::EditorDialog::Open("texture");
             }
             else 
             {
@@ -2414,7 +2528,7 @@ void DrawLineComponent(ComponentLine* component)
         {
             if(ImGui::ImageButton((ImTextureID) 0, size, ImVec2(0,1), ImVec2(1,0), ImColor(255, 255, 255, 128)))
             {
-                ImGui::OpenPopup("texture");
+                EGE::EditorDialog::Open("texture");
             }
         }
 
@@ -2559,7 +2673,7 @@ void DrawTrailComponent(ComponentTrail* component)
         {
             if(ImGui::ImageButton((ImTextureID) (ImTextureID)size_t(info->GetID()), size, ImVec2(0,1), ImVec2(1,0), ImColor(255, 255, 255, 128), ImColor(255, 255, 255, 128)))
             {
-                ImGui::OpenPopup("texture");
+                EGE::EditorDialog::Open("texture");
             }
             else 
             {
@@ -2573,7 +2687,7 @@ void DrawTrailComponent(ComponentTrail* component)
         {
             if(ImGui::ImageButton((ImTextureID) 0, size, ImVec2(0,1), ImVec2(1,0), ImColor(255, 255, 255, 128)))
             {
-                ImGui::OpenPopup("texture");
+                EGE::EditorDialog::Open("texture");
             }
         }
 
@@ -2676,7 +2790,7 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
         {
             if(ImGui::ImageButton((ImTextureID) size_t(info->GetID()), size, ImVec2(0,1), ImVec2(1,0), ImColor(255, 255, 255, 128), ImColor(255, 255, 255, 128)))
             {
-                ImGui::OpenPopup("texture");
+                EGE::EditorDialog::Open("texture");
             }
             else 
             {
@@ -2690,7 +2804,7 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
         {
             if(ImGui::ImageButton((ImTextureID) 0, size, ImVec2(0,1), ImVec2(1,0), ImColor(255, 255, 255, 128)))
             {
-                ImGui::OpenPopup("texture");
+                EGE::EditorDialog::Open("texture");
             }
         }
 

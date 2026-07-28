@@ -165,6 +165,7 @@ namespace EGE
 			bool open = true;
 			bool requestFocus = true;
 			bool ownsResourceReference = false;
+			bool dirty = false;
 
 			std::unique_ptr<StateViewport> stateViewport;
 			ed::EditorContext* nodeContext = nullptr;
@@ -584,7 +585,10 @@ namespace EGE
 			}
 
 			if (modified)
+				editor.dirty = true;
+			if (editor.dirty && !ImGui::IsAnyItemActive())
 			{
+				editor.dirty = false;
 				if (material.Save())
 				{
 					editor.status = "Saved";

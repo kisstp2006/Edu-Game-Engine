@@ -93,6 +93,56 @@ void ComponentScript::OnStop()
 		runtime->StopInstance(instanceHandle_);
 }
 
+void ComponentScript::RemapSerializedReferences(
+	const std::map<uint, uint>& gameObjectIds,
+	const std::map<uint, uint>& componentIds)
+{
+	const auto remap = [](std::uint64_t id, const auto& ids)
+	{
+		if (id == 0)
+			return std::uint64_t{0};
+		const auto found = ids.find(static_cast<uint>(id));
+		return found == ids.end()
+			? std::uint64_t{0}
+			: static_cast<std::uint64_t>(found->second);
+	};
+
+	for (EGE::PropertyState& property : storedState_)
+	{
+		if (auto* reference =
+				std::get_if<EGE::GameObjectReferenceValue>(
+					&property.value))
+		{
+			reference->objectId =
+				remap(reference->objectId, gameObjectIds);
+		}
+		else if (auto* reference =
+				 std::get_if<EGE::ComponentReferenceValue>(
+					 &property.value))
+		{
+			reference->objectId =
+				remap(reference->objectId, gameObjectIds);
+			reference->componentId =
+				remap(reference->componentId, componentIds);
+			if (reference->objectId == 0 ||
+				reference->componentId == 0)
+			{
+				reference->objectId = 0;
+				reference->componentId = 0;
+			}
+		}
+	}
+
+	if (EGE::ScriptRuntime* runtime = GetRuntime();
+		runtime && instanceHandle_)
+	{
+		runtime->SetInstanceOwnerId(
+			instanceHandle_, game_object->GetUID());
+		runtime->SetInstanceClass(
+			instanceHandle_, className_, storedState_);
+	}
+}
+
 const std::string& ComponentScript::GetScriptClass() const
 {
 	return className_;
@@ -136,6 +186,11 @@ void ComponentScript::SetScriptReference(
 		runtime->SetInstanceClass(instanceHandle_, className_);
 }
 
+void ComponentScript::RefreshScriptReference()
+{
+	ResolveScriptReference();
+}
+
 EGE::ScriptInstanceHandle ComponentScript::GetInstanceHandle() const
 {
 	return instanceHandle_;
@@ -164,14 +219,22 @@ void ComponentScript::ResolveScriptReference()
 		return;
 
 	className_ = resolved;
-	if (instanceHandle_)
+	if (instanceHandle_ &&
+		runtime->GetInstanceClassName(instanceHandle_) != className_)
+	{
 		runtime->SetInstanceClass(instanceHandle_, className_, storedState_);
+	}
 }
 
 void ComponentScript::EnsureInstance()
 {
 	if (instanceHandle_)
+	{
+		if (EGE::ScriptRuntime* runtime = GetRuntime())
+			runtime->SetInstanceOwnerId(
+				instanceHandle_, game_object->GetUID());
 		return;
+	}
 	if (EGE::ScriptRuntime* runtime = GetRuntime())
 	{
 		instanceHandle_ = runtime->CreateInstance(className_, storedState_);

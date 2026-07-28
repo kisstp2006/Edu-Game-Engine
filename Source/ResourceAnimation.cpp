@@ -14,6 +14,88 @@
 
 #include "Leaks.h"
 
+#include <algorithm>
+#include <limits>
+
+namespace
+{
+	template<typename Value>
+	void CropKeyframes(
+		std::unique_ptr<float[]>& times,
+		std::unique_ptr<Value[]>& values,
+		uint& count,
+		uint first,
+		uint last)
+	{
+		if (count == 0 || !times || !values)
+			return;
+
+		const uint begin = std::min(first, count - 1);
+		const uint end = last == (std::numeric_limits<uint>::max)()
+			? count
+			: std::clamp(last, begin + 1, count);
+		const uint croppedCount = end - begin;
+		const float timeOrigin = times[begin];
+		auto croppedTimes = std::make_unique<float[]>(croppedCount);
+		auto croppedValues = std::make_unique<Value[]>(croppedCount);
+		for (uint index = 0; index < croppedCount; ++index)
+		{
+			croppedTimes[index] = times[begin + index] - timeOrigin;
+			croppedValues[index] = values[begin + index];
+		}
+		times = std::move(croppedTimes);
+		values = std::move(croppedValues);
+		count = croppedCount;
+	}
+
+	void CropMorphKeyframes(
+		ResourceAnimation::MorphChannel& channel,
+		uint first,
+		uint last)
+	{
+		if (channel.numTime == 0 || channel.numTargets == 0 ||
+			!channel.weightTime || !channel.weights)
+		{
+			return;
+		}
+
+		const uint begin = std::min(first, channel.numTime - 1);
+		const uint end = last == (std::numeric_limits<uint>::max)()
+			? channel.numTime
+			: std::clamp(last, begin + 1, channel.numTime);
+		const uint croppedTimeCount = end - begin;
+		const uint croppedWeightCount =
+			croppedTimeCount * channel.numTargets;
+		const float timeOrigin = channel.weightTime[begin];
+		auto croppedTimes =
+			std::make_unique<float[]>(croppedTimeCount);
+		auto croppedWeights =
+			std::make_unique<float[]>(croppedWeightCount);
+		for (uint timeIndex = 0;
+			timeIndex < croppedTimeCount;
+			++timeIndex)
+		{
+			croppedTimes[timeIndex] =
+				channel.weightTime[begin + timeIndex] - timeOrigin;
+			for (uint target = 0;
+				target < channel.numTargets;
+				++target)
+			{
+				croppedWeights[
+					timeIndex * channel.numTargets + target] =
+					channel.weights[
+						(begin + timeIndex) *
+							channel.numTargets +
+						target];
+			}
+		}
+		channel.weightTime = std::move(croppedTimes);
+		channel.weights = std::move(croppedWeights);
+		channel.numTime = croppedTimeCount;
+		channel.num_weights = croppedWeightCount;
+	}
+}
+
 // ---------------------------------------------------------
 ResourceAnimation::ResourceAnimation(UID uid) : Resource(uid, Resource::Type::animation)
 {}
@@ -21,6 +103,31 @@ ResourceAnimation::ResourceAnimation(UID uid) : Resource(uid, Resource::Type::an
 // ---------------------------------------------------------
 ResourceAnimation::~ResourceAnimation()
 {
+}
+
+void ResourceAnimation::Save(Config& config) const
+{
+	Resource::Save(config);
+	Config import = config.AddSection("Import Settings");
+	import.AddFloat3("Scale", importOptions.scale);
+	import.AddBool(
+		"Import Morph Targets", importOptions.importMorphTargets);
+	import.AddUInt("First Frame", firstFrame);
+	import.AddUInt("Last Frame", lastFrame);
+}
+
+void ResourceAnimation::Load(const Config& config)
+{
+	Resource::Load(config);
+	Config import = config.GetSection("Import Settings");
+	importOptions.scale =
+		import.GetFloat3("Scale", float3::one);
+	importOptions.importMorphTargets =
+		import.GetBool("Import Morph Targets", true);
+	firstFrame = import.GetUInt("First Frame", 0);
+	lastFrame = import.GetUInt(
+		"Last Frame",
+		(std::numeric_limits<unsigned>::max)());
 }
 
 // ---------------------------------------------------------
@@ -195,7 +302,12 @@ void ResourceAnimation::SaveToStream(simple::mem_ostream<std::true_type>& write_
     }
 }
 
-bool ResourceAnimation::ImportGLTF(const char* full_path, unsigned first, unsigned last, float scale, std::vector<std::string>& output)
+bool ResourceAnimation::ImportGLTF(
+	const char* full_path,
+	unsigned first,
+	unsigned last,
+	const EGE::AnimationImportOptions& options,
+	std::vector<std::string>& output)
 {
     tinygltf::TinyGLTF gltfContext;
     tinygltf::Model model;
@@ -230,13 +342,30 @@ bool ResourceAnimation::ImportGLTF(const char* full_path, unsigned first, unsign
                         loadAccessor(resChannel.posTime, numTime, model, sampler.input);
                         loadAccessor(resChannel.positions, resChannel.num_positions, model, sampler.output); 
                         SDL_assert(numTime == resChannel.num_positions);
-                        
-                        if (numTime > 0)
-                        {
-                            res.duration = std::max(res.duration, resChannel.posTime[numTime - 1]);
-                        }
-
-                        for (uint i = 0; i < resChannel.num_positions; ++i)  resChannel.positions[i] *= scale;
+                        for (uint i = 0;
+							i < resChannel.num_positions;
+							++i)
+						{
+							float3& position =
+								resChannel.positions[i];
+							position = float3(
+								position.x * options.scale.x,
+								position.y * options.scale.y,
+								position.z * options.scale.z);
+						}
+						CropKeyframes(
+							resChannel.posTime,
+							resChannel.positions,
+							resChannel.num_positions,
+							first,
+							last);
+						if (resChannel.num_positions > 0)
+						{
+							res.duration = std::max(
+								res.duration,
+								resChannel.posTime[
+									resChannel.num_positions - 1]);
+						}
                     }
                     else if (animChannel.target_path == rotation)
                     {
@@ -246,20 +375,39 @@ bool ResourceAnimation::ImportGLTF(const char* full_path, unsigned first, unsign
                         loadAccessor(resChannel.rotTime, numTime, model, sampler.input);
                         loadAccessor(resChannel.rotations, resChannel.num_rotations, model, sampler.output);
                         SDL_assert(numTime == resChannel.num_rotations);
-
-                        if (numTime > 0)
+						CropKeyframes(
+							resChannel.rotTime,
+							resChannel.rotations,
+							resChannel.num_rotations,
+							first,
+							last);
+                        if (resChannel.num_rotations > 0)
                         {
-                            res.duration = std::max(res.duration, resChannel.rotTime[numTime - 1]);
+                            res.duration = std::max(
+								res.duration,
+								resChannel.rotTime[
+									resChannel.num_rotations - 1]);
                         }
                     }
-                    else if (animChannel.target_path == weights)
+                    else if (
+						animChannel.target_path == weights &&
+						options.importMorphTargets)
                     {
                         MorphChannel& resChannel = res.morph_channels[channelName];
                         loadAccessor(resChannel.weightTime, resChannel.numTime, model, sampler.input);
                         loadAccessor(resChannel.weights, resChannel.num_weights, model, sampler.output);
-                        SDL_assert(resChannel.num_weights % resChannel.numTime == 0);
+						if (resChannel.numTime == 0)
+							continue;
+                        SDL_assert(
+							resChannel.num_weights %
+								resChannel.numTime ==
+							0);
 
-                        resChannel.numTargets = resChannel.num_weights / resChannel.numTime;
+                        resChannel.numTargets =
+							resChannel.num_weights /
+							resChannel.numTime;
+						CropMorphKeyframes(
+							resChannel, first, last);
 
                         if (resChannel.numTime > 0)
                         {
@@ -407,7 +555,20 @@ bool ResourceAnimation::ImportAssimp(const char* full_path, unsigned first, unsi
 // ---------------------------------------------------------
 bool ResourceAnimation::Import(const char* full_path, unsigned first, unsigned last, float scale, std::vector<std::string>& output)
 {
-    return ImportGLTF(full_path, first, last, scale, output); // || ImportAssimp(full_path, first, last, scale, output);
+	EGE::AnimationImportOptions options;
+	options.scale = float3(scale);
+    return Import(full_path, first, last, options, output);
+}
+
+bool ResourceAnimation::Import(
+	const char* fullPath,
+	unsigned first,
+	unsigned last,
+	const EGE::AnimationImportOptions& options,
+	std::vector<std::string>& output)
+{
+    return ImportGLTF(
+		fullPath, first, last, options, output);
 }
 
 // ---------------------------------------------------------

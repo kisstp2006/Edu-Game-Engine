@@ -103,6 +103,7 @@ public:
 	void RecordRecentProject(const EGE::Project& project);
 	void ApplyAppearance(const std::string& theme, bool compact);
 	bool OpenAssetEditor(const EGE::EditorAssetSelection& asset);
+	bool OpenSceneAsset(const std::filesystem::path& scenePath);
 	void RequestOpenScene();
 	void RequestSaveScene(bool saveAs = false);
 
@@ -134,6 +135,7 @@ private:
 	bool RequestProjectFromSelector(
 		const std::filesystem::path& projectFile);
 	void DrawSettingsWindow(bool& open, bool editorSettings);
+	void HandleEditorShortcuts();
 	void DrawPanelGroup(TabPanelEnum group);
 	void DrawStandalonePanels(TabPanelEnum group);
 	void BuildDefaultDockLayout(
@@ -184,6 +186,8 @@ private:
 	char new_project_location[512] = {};
 	std::string imgui_ini_path;
 	std::string project_status_message;
+	std::string project_settings_feedback;
+	std::string editor_settings_feedback;
 	ImGui::FileBrowser open_project_dialog;
 	ImGui::FileBrowser project_location_dialog{
 		ImGuiFileBrowserFlags_SelectDirectory |

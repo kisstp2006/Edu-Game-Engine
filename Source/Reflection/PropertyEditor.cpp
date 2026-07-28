@@ -274,6 +274,46 @@ namespace EGE
 				&maximum);
 		}
 
+		bool DrawEnumeration(
+			const PropertyDescriptor& property,
+			std::int64_t& value)
+		{
+			if (property.enumValues.empty())
+				return DrawSigned(property, value);
+
+			std::string preview = std::to_string(value);
+			for (const PropertyEnumValue& option : property.enumValues)
+			{
+				if (option.value == value)
+				{
+					preview = option.displayName;
+					break;
+				}
+			}
+
+			bool changed = false;
+			if (ImGui::BeginCombo("##Value", preview.c_str()))
+			{
+				for (const PropertyEnumValue& option :
+					property.enumValues)
+				{
+					const bool selected = option.value == value;
+					ImGui::PushID(option.name.c_str());
+					if (ImGui::Selectable(
+							option.displayName.c_str(), selected))
+					{
+						value = option.value;
+						changed = true;
+					}
+					if (selected)
+						ImGui::SetItemDefaultFocus();
+					ImGui::PopID();
+				}
+				ImGui::EndCombo();
+			}
+			return changed;
+		}
+
 		bool DrawVector3(
 			const PropertyDescriptor& property,
 			Vector3Value& value)
@@ -331,7 +371,20 @@ namespace EGE
 			ImGui::PushID(property.name.c_str());
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(property.displayName.c_str());
-			ImGui::SameLine(125.0f);
+			if (!property.attributes.tooltip.empty() &&
+				ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip(
+					"%s", property.attributes.tooltip.c_str());
+			}
+			const float labelColumnWidth = 125.0f;
+			const float labelWidth =
+				ImGui::CalcTextSize(property.displayName.c_str()).x;
+			if (labelWidth <=
+				labelColumnWidth - ImGui::GetStyle().ItemSpacing.x)
+			{
+				ImGui::SameLine(labelColumnWidth);
+			}
 			ImGui::SetNextItemWidth(-1.0f);
 
 			if (property.attributes.readOnly)
@@ -355,10 +408,16 @@ namespace EGE
 				case PropertyKind::Int16:
 				case PropertyKind::Int32:
 				case PropertyKind::Int64:
-				case PropertyKind::Enumeration:
 				{
 					std::int64_t current = std::get<std::int64_t>(value);
 					changed = DrawSigned(property, current);
+					value = current;
+					break;
+				}
+				case PropertyKind::Enumeration:
+				{
+					std::int64_t current = std::get<std::int64_t>(value);
+					changed = DrawEnumeration(property, current);
 					value = current;
 					break;
 				}
@@ -434,6 +493,7 @@ namespace EGE
 			return false;
 
 		bool changed = false;
+		bool drewProperty = false;
 		std::string currentHeader;
 		for (const PropertyDescriptor& property : type.properties)
 		{
@@ -451,8 +511,11 @@ namespace EGE
 				ImGui::Separator();
 				ImGui::TextDisabled("%s", currentHeader.c_str());
 			}
+			drewProperty = true;
 			changed |= DrawProperty(property, object);
 		}
+		if (!drewProperty)
+			ImGui::TextDisabled("No serialized properties.");
 		return changed;
 	}
 }

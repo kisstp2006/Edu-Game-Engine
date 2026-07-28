@@ -5,6 +5,7 @@
 #include "Resource.h"
 
 #include "ImportAnimationDlg.h"
+#include "ImportAudioDlg.h"
 #include "ImportModelDlg.h"
 #include "ImportTextureDlg.h"
 #include "ShowTextureDlg.h"
@@ -19,6 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
+class GameObject;
+
 class PanelAssets final : public Panel
 {
 public:
@@ -27,6 +30,7 @@ public:
 	void Draw() override;
 	void ResetProjectState();
 	void RefreshProjectAssets();
+	void BeginCreatePrefab(GameObject* source);
 
 private:
 	enum class ViewMode
@@ -40,6 +44,7 @@ private:
 		None,
 		Folder,
 		Scene,
+		Prefab,
 		AngelScript,
 		MaterialMetallicRoughness,
 		MaterialSpecularGlossiness,
@@ -119,6 +124,8 @@ private:
 		const std::vector<const EGE::AssetEntry*>& entries,
 		std::size_t preferredIndex);
 	void SelectInInspector(const EGE::AssetEntry& entry);
+	void OpenScene(const EGE::AssetEntry& entry);
+	void InstantiatePrefab(const EGE::AssetEntry& entry);
 	void OpenAssetEditor(const EGE::AssetEntry& entry);
 	void OpenScriptInVsCode(const EGE::AssetEntry& entry);
 	void HandleAssetInteractions(
@@ -127,6 +134,10 @@ private:
 		std::size_t index);
 
 	void OpenImportDialog(Resource::Type type);
+	bool PrepareImportSource(
+		const std::filesystem::path& selectedPath,
+		std::string& projectSourcePath,
+		bool& copiedIntoProject);
 	void BeginCreate(CreateAssetKind kind);
 	void CreatePendingAsset();
 	void CreateFolder();
@@ -183,10 +194,12 @@ private:
 	bool openCreateDialog_ = false;
 	char createName_[128] = {};
 	MeshCreationForm meshCreation_;
+	GameObject* prefabSource_ = nullptr;
 
 	ImGui::FileBrowser fileDialog_;
 	Resource::Type waitingToImport_ = Resource::unknown;
 	ImportTexturesDlg textureDialog_;
+	ImportAudioDlg audioDialog_;
 	ImportAnimationDlg animationDialog_;
 	ImportModelDlg modelDialog_;
 	ShowTextureDlg texturePreview_;

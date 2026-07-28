@@ -6,6 +6,7 @@
 #include "ResourceModel.h"
 
 #include "Application.h"
+#include "Config.h"
 #include "ModuleFileSystem.h"
 #include "ModuleResources.h"
 
@@ -32,11 +33,36 @@ ResourceModel::~ResourceModel()
 void ResourceModel::Save(Config& config) const 
 {
 	Resource::Save(config);
+	Config import = config.AddSection("Import Settings");
+	import.AddString("Asset Name", importOptions.assetName.c_str());
+	import.AddFloat3("Scale", importOptions.scale);
+	import.AddBool("Import Materials", importOptions.importMaterials);
+	import.AddBool("Generate Normals", importOptions.generateNormals);
+	import.AddBool("Generate Tangents", importOptions.generateTangents);
+	import.AddBool("Weld Vertices", importOptions.weldVertices);
+	import.AddBool("Optimize Meshes", importOptions.optimizeMeshes);
+	import.AddBool("Flip UVs", importOptions.flipUVs);
 }
 
 void ResourceModel::Load(const Config& config) 
 {
 	Resource::Load(config);
+	Config import = config.GetSection("Import Settings");
+	importOptions.assetName =
+		import.GetString("Asset Name", user_name.c_str());
+	importOptions.scale =
+		import.GetFloat3("Scale", float3::one);
+	importOptions.importMaterials =
+		import.GetBool("Import Materials", true);
+	importOptions.generateNormals =
+		import.GetBool("Generate Normals", true);
+	importOptions.generateTangents =
+		import.GetBool("Generate Tangents", true);
+	importOptions.weldVertices =
+		import.GetBool("Weld Vertices", true);
+	importOptions.optimizeMeshes =
+		import.GetBool("Optimize Meshes", true);
+	importOptions.flipUVs = import.GetBool("Flip UVs", false);
 }
 
 bool ResourceModel::LoadInMemory()
@@ -247,8 +273,12 @@ void ResourceModel::SaveToStream(simple::mem_ostream<std::true_type>& write_stre
 
 }
 
-void ResourceModel::GenerateMeshes(const tinygltf::Model& model, const char* full_path, const std::vector<UID>& materials, 
-                                   std::multimap<uint, MeshRenderer>& meshes, float scale)
+void ResourceModel::GenerateMeshes(
+	const tinygltf::Model& model,
+	const char* full_path,
+	const std::vector<UID>& materials,
+	std::multimap<uint, MeshRenderer>& meshes,
+	const EGE::ModelImportOptions& options)
 {
     for (size_t i=0, count = model.meshes.size(); i< count; ++i)
     {
@@ -256,15 +286,24 @@ void ResourceModel::GenerateMeshes(const tinygltf::Model& model, const char* ful
 
         for (const auto& primitive : srcMesh.primitives)
         {
-            if (primitive.material >= 0)
-            {
-                UID material = materials[primitive.material];
-
-                uint32_t weightCount = 0;
-                MeshRenderer renderer = { ResourceMesh::Import(model, srcMesh, primitive, weightCount, full_path, scale), material };
-
-                meshes.insert({ uint(i), renderer });
-            }
+			const UID material =
+				primitive.material >= 0 &&
+				static_cast<std::size_t>(primitive.material) <
+					materials.size()
+					? materials[primitive.material]
+					: 0;
+			uint32_t weightCount = 0;
+			MeshRenderer renderer = {
+				ResourceMesh::Import(
+					model,
+					srcMesh,
+					primitive,
+					weightCount,
+					full_path,
+					options.scale,
+					options.flipUVs),
+				material};
+			meshes.insert({uint(i), renderer});
         }
     }
 }
@@ -319,8 +358,14 @@ void ResourceModel::GenerateSkins(const tinygltf::Model& model, const std::vecto
     }
 }
 
-void ResourceModel::GenerateNodes(const tinygltf::Model& model, int nodeIndex, int parentIndex, const std::multimap<uint, MeshRenderer>& meshes, 
-                                  const std::vector<UID>& materials, std::vector<int>& nodeMapping, float modelScale)
+void ResourceModel::GenerateNodes(
+	const tinygltf::Model& model,
+	int nodeIndex,
+	int parentIndex,
+	const std::multimap<uint, MeshRenderer>& meshes,
+	const std::vector<UID>& materials,
+	std::vector<int>& nodeMapping,
+	const EGE::ModelImportOptions& options)
 {
     const tinygltf::Node& node = model.nodes[nodeIndex];
 
@@ -332,6 +377,11 @@ void ResourceModel::GenerateNodes(const tinygltf::Model& model, int nodeIndex, i
         for(uint i=0; i< 16; ++i) ptr[i] = float(node.matrix[i]);
 
         local.Transpose();
+		const float3 translation = local.TranslatePart();
+		local.SetTranslatePart(float3(
+			translation.x * options.scale.x,
+			translation.y * options.scale.y,
+			translation.z * options.scale.z));
     }
     else
     {
@@ -339,7 +389,13 @@ void ResourceModel::GenerateNodes(const tinygltf::Model& model, int nodeIndex, i
         float3 scale = float3::one;
         Quat rotation = Quat::identity;
 
-        if (node.translation.size() == 3) translation = float3(float(node.translation[0]), float(node.translation[1]), float(node.translation[2])) * modelScale;
+        if (node.translation.size() == 3)
+		{
+			translation = float3(
+				float(node.translation[0]) * options.scale.x,
+				float(node.translation[1]) * options.scale.y,
+				float(node.translation[2]) * options.scale.z);
+		}
         if (node.rotation.size() == 4) rotation = Quat(float(node.rotation[0]), float(node.rotation[1]), float(node.rotation[2]), float(node.rotation[3]));
         if (node.scale.size() == 3) scale = float3(float(node.scale[0]), float(node.scale[1]), float(node.scale[2])) ;
 
@@ -368,11 +424,21 @@ void ResourceModel::GenerateNodes(const tinygltf::Model& model, int nodeIndex, i
 
     for (int childIndex : node.children)
     {
-        GenerateNodes(model, childIndex, parentIndex, meshes, materials, nodeMapping, modelScale);
+        GenerateNodes(
+			model,
+			childIndex,
+			parentIndex,
+			meshes,
+			materials,
+			nodeMapping,
+			options);
     }
 }
 
-bool ResourceModel::ImportGLTF(const char* full_path, float scale, std::string& output)
+bool ResourceModel::ImportGLTF(
+	const char* full_path,
+	const EGE::ModelImportOptions& options,
+	std::string& output)
 {
     tinygltf::TinyGLTF gltfContext;
     tinygltf::Model model;
@@ -388,8 +454,11 @@ bool ResourceModel::ImportGLTF(const char* full_path, float scale, std::string& 
         std::vector<int> nodeMapping;
         nodeMapping.resize(model.nodes.size(), -1);
 
-        m.GenerateMaterials(model, full_path, materials);
-        m.GenerateMeshes(model, full_path, materials, meshes, scale);
+		if (options.importMaterials)
+			m.GenerateMaterials(model, full_path, materials);
+		else
+			materials.resize(model.materials.size(), 0);
+        m.GenerateMeshes(model, full_path, materials, meshes, options);
        
         m.nodes.reserve(model.nodes.size());
 
@@ -397,7 +466,14 @@ bool ResourceModel::ImportGLTF(const char* full_path, float scale, std::string& 
         {
             for (int root : scene.nodes)
             {
-                m.GenerateNodes(model, root, int(m.nodes.size()), meshes, materials, nodeMapping, scale);
+                m.GenerateNodes(
+					model,
+					root,
+					int(m.nodes.size()),
+					meshes,
+					materials,
+					nodeMapping,
+					options);
             }
         }
 
@@ -410,11 +486,12 @@ bool ResourceModel::ImportGLTF(const char* full_path, float scale, std::string& 
     return false;
 }
 
-bool ResourceModel::ImportAssimp(const char* full_path, float scale, std::string& output)
+bool ResourceModel::ImportAssimp(
+	const char* full_path,
+	const EGE::ModelImportOptions& options,
+	std::string& output)
 {
-    unsigned flags = aiProcess_CalcTangentSpace | \
-        aiProcess_GenSmoothNormals | \
-        aiProcess_JoinIdenticalVertices | \
+    unsigned flags =
         aiProcess_ImproveCacheLocality | \
         aiProcess_LimitBoneWeights | \
         aiProcess_SplitLargeMeshes | \
@@ -424,6 +501,16 @@ bool ResourceModel::ImportAssimp(const char* full_path, float scale, std::string
         aiProcess_FindDegenerates | \
         aiProcess_FindInvalidData |
         0;
+	if (options.generateTangents)
+		flags |= aiProcess_CalcTangentSpace;
+	if (options.generateNormals)
+		flags |= aiProcess_GenSmoothNormals;
+	if (options.weldVertices)
+		flags |= aiProcess_JoinIdenticalVertices;
+	if (options.optimizeMeshes)
+		flags |= aiProcess_OptimizeMeshes | aiProcess_OptimizeGraph;
+	if (options.flipUVs)
+		flags |= aiProcess_FlipUVs;
 
     aiString assimp_path;
     assimp_path.Append(full_path);
@@ -434,10 +521,17 @@ bool ResourceModel::ImportAssimp(const char* full_path, float scale, std::string
     {
         ResourceModel m(0);
 
-        std::vector<UID> materials, meshes;
-        m.GenerateMaterials(scene, full_path, materials);
-        m.GenerateMeshes(scene, full_path, meshes, scale);
-        m.GenerateNodes(scene, scene->mRootNode, 0, meshes, materials, scale);
+        std::vector<UID> materials(
+			scene->mNumMaterials, 0);
+		std::vector<UID> meshes;
+        m.GenerateMeshes(scene, full_path, meshes, options);
+        m.GenerateNodes(
+			scene,
+			scene->mRootNode,
+			0,
+			meshes,
+			materials,
+			options);
 
         aiReleaseImport(scene);
 
@@ -449,7 +543,18 @@ bool ResourceModel::ImportAssimp(const char* full_path, float scale, std::string
 
 bool ResourceModel::Import(const char* full_path, float scale, std::string& output)
 {
-    return ImportGLTF(full_path, scale, output) || ImportAssimp(full_path, scale, output);
+	EGE::ModelImportOptions options;
+	options.scale = float3(scale);
+	return Import(full_path, options, output);
+}
+
+bool ResourceModel::Import(
+	const char* fullPath,
+	const EGE::ModelImportOptions& options,
+	std::string& output)
+{
+    return ImportGLTF(fullPath, options, output) ||
+		ImportAssimp(fullPath, options, output);
 }
 
 void ResourceModel::GenerateMaterials(const aiScene* scene, const char* file, std::vector<UID>& materials)
@@ -464,23 +569,41 @@ void ResourceModel::GenerateMaterials(const aiScene* scene, const char* file, st
 	}
 }
 
-void ResourceModel::GenerateMeshes(const aiScene* scene, const char* file, std::vector<UID>& meshes, float scale)
+void ResourceModel::GenerateMeshes(
+	const aiScene* scene,
+	const char* file,
+	std::vector<UID>& meshes,
+	const EGE::ModelImportOptions& options)
 {
 	meshes.reserve(scene->mNumMeshes);
 
 	for(unsigned i=0; i < scene->mNumMeshes; ++i)
 	{
-        meshes.push_back(ResourceMesh::Import(scene->mMeshes[i], file, scale)); 
+        meshes.push_back(ResourceMesh::Import(
+			scene->mMeshes[i],
+			file,
+			options.scale,
+			false));
 
 		assert(meshes.back() != 0);
 	}
 }
 
-void ResourceModel::GenerateNodes(const aiScene* model, const aiNode* node, uint parent, const std::vector<UID>& meshes, const std::vector<UID>& materials, float scale)
+void ResourceModel::GenerateNodes(
+	const aiScene* model,
+	const aiNode* node,
+	uint parent,
+	const std::vector<UID>& meshes,
+	const std::vector<UID>& materials,
+	const EGE::ModelImportOptions& options)
 {
     Node dst;
     dst.transform = reinterpret_cast<const float4x4&>(node->mTransformation);
-    dst.transform.SetTranslatePart(dst.transform.TranslatePart() * scale);
+	const float3 translation = dst.transform.TranslatePart();
+    dst.transform.SetTranslatePart(float3(
+		translation.x * options.scale.x,
+		translation.y * options.scale.y,
+		translation.z * options.scale.z));
     dst.name      = node->mName.C_Str();
     dst.parent    = parent;
 
@@ -491,7 +614,11 @@ void ResourceModel::GenerateNodes(const aiScene* model, const aiNode* node, uint
         uint mesh_index   = node->mMeshes[i];
 
         renderer.mesh     = meshes[mesh_index];
-        renderer.material = materials[model->mMeshes[mesh_index]->mMaterialIndex];
+		const uint materialIndex =
+			model->mMeshes[mesh_index]->mMaterialIndex;
+        renderer.material = materialIndex < materials.size()
+			? materials[materialIndex]
+			: 0;
 
         dst.renderers.push_back(renderer);
     }
@@ -502,7 +629,13 @@ void ResourceModel::GenerateNodes(const aiScene* model, const aiNode* node, uint
 
     for(unsigned i=0; i < node->mNumChildren; ++i)
     {
-        GenerateNodes(model, node->mChildren[i], parent, meshes, materials, scale);
+        GenerateNodes(
+			model,
+			node->mChildren[i],
+			parent,
+			meshes,
+			materials,
+			options);
     }
 }
 

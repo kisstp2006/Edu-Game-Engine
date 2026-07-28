@@ -12,6 +12,7 @@ namespace EGE
 	{
 		Folder,
 		Scene,
+		Prefab,
 		Model,
 		Mesh,
 		Texture,
@@ -59,6 +60,8 @@ namespace EGE
 
 		std::vector<const AssetEntry*> Query(
 			std::string_view search,
+			AssetKind kindFilter) const;
+		std::vector<const AssetEntry*> QueryAll(
 			AssetKind kindFilter) const;
 
 		const std::filesystem::path& GetProjectRoot() const;

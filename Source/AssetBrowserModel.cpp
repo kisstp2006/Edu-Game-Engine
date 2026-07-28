@@ -179,6 +179,32 @@ namespace EGE
 		return results;
 	}
 
+	std::vector<const AssetEntry*> AssetBrowserModel::QueryAll(
+		AssetKind kindFilter) const
+	{
+		std::vector<const AssetEntry*> results;
+		results.reserve(entries_.size());
+
+		for (const AssetEntry& entry : entries_)
+		{
+			if (!entry.directory &&
+				(kindFilter == AssetKind::Unknown ||
+				 entry.kind == kindFilter))
+			{
+				results.push_back(&entry);
+			}
+		}
+
+		std::sort(
+			results.begin(), results.end(),
+			[](const AssetEntry* left, const AssetEntry* right)
+			{
+				return ToLower(left->relativePath.generic_string()) <
+					ToLower(right->relativePath.generic_string());
+			});
+		return results;
+	}
+
 	const std::filesystem::path& AssetBrowserModel::GetProjectRoot() const
 	{
 		return projectRoot_;
@@ -244,6 +270,8 @@ namespace EGE
 			return AssetKind::Mesh;
 		if (HasExtension(extension, {".eduscene", ".scene"}))
 			return AssetKind::Scene;
+		if (extension == ".egeprefab")
+			return AssetKind::Prefab;
 		if (HasExtension(
 				extension,
 				{".fbx", ".dae", ".gltf", ".glb", ".obj", ".3ds",
@@ -303,6 +331,7 @@ namespace EGE
 		{
 		case AssetKind::Folder: return "Folder";
 		case AssetKind::Scene: return "Scene";
+		case AssetKind::Prefab: return "Prefab";
 		case AssetKind::Model: return "Model";
 		case AssetKind::Mesh: return "Mesh";
 		case AssetKind::Texture: return "Texture";

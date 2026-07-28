@@ -50,7 +50,8 @@ void ComponentMeshRenderer::OnSave(Config& config) const
 {
 	config.AddUID("MeshResource", mesh_resource);
 	config.AddBool("Visible", visible);
-	config.AddUInt("Root", rootGO ? rootGO->GetUID(): 0);
+	config.AddUInt(
+		"Root", rootGO ? rootGO->GetUID() : root_go_uid);
 
 	config.AddUID("MaterialResource", material_resource);
 	config.AddBool("DebugDrawTangent", debug_draw_tangent);
@@ -64,7 +65,8 @@ void ComponentMeshRenderer::OnSave(Config& config) const
     {
         const Bone& bone = bones[i];
         Config boneCfg;
-        boneCfg.AddUID("go", bone.go->GetUID());
+        boneCfg.AddUID(
+			"go", bone.go ? bone.go->GetUID() : bone.go_uid);
         boneCfg.AddFloat4x4("bind", bone.bind);
         config.AddArrayEntry(boneCfg);
     }
@@ -75,7 +77,8 @@ void ComponentMeshRenderer::OnLoad(Config* config)
     ModuleLevelManager* level = App->level;
 
     visible            = config->GetBool("Visible", true);
-    rootGO             = level->Find(config->GetUInt("Root"));
+    root_go_uid        = config->GetUInt("Root");
+    rootGO             = level->Find(root_go_uid);
 
     debug_draw_tangent = config->GetBool("DebugDrawTangent", false);
     cast_shadows       = config->GetBool("CastShadows", true);
@@ -101,9 +104,31 @@ void ComponentMeshRenderer::OnLoad(Config* config)
 
         Config boneCfg = config->GetArray("SkinInfo", i);
 
-        bone.go   = level->Find(boneCfg.GetUInt("go"));
+        bone.go_uid = boneCfg.GetUInt("go");
+        bone.go   = level->Find(bone.go_uid);
         bone.bind = boneCfg.GetFloat4x4("bind");
     }
+}
+
+void ComponentMeshRenderer::RemapSerializedReferences(
+	const std::map<uint, uint>& gameObjectIds,
+	const std::map<uint, uint>&)
+{
+	const auto remap = [&gameObjectIds](uint id)
+	{
+		if (id == 0)
+			return uint{0};
+		const auto found = gameObjectIds.find(id);
+		return found == gameObjectIds.end() ? uint{0} : found->second;
+	};
+
+	root_go_uid = remap(root_go_uid);
+	rootGO = App->level->Find(root_go_uid);
+	for (uint index = 0; index < numBones; ++index)
+	{
+		bones[index].go_uid = remap(bones[index].go_uid);
+		bones[index].go = App->level->Find(bones[index].go_uid);
+	}
 }
 
 void ComponentMeshRenderer::GetBoundingBox (AABB& box) const 
@@ -224,7 +249,8 @@ bool ComponentMeshRenderer::SetMaterialRes(UID uid)
 
 bool ComponentMeshRenderer::SetSkinInfo(const ResourceModel::Skin& skin, GameObject** gos)
 {
-    rootGO = skin.rootNode >= 0 ? gos[skin.rootNode] : nullptr;    
+    rootGO = skin.rootNode >= 0 ? gos[skin.rootNode] : nullptr;
+	root_go_uid = rootGO ? rootGO->GetUID() : 0;
     numBones = uint32_t(skin.bones.size());
     bones = std::make_unique<Bone[]>(numBones);
 
@@ -233,6 +259,7 @@ bool ComponentMeshRenderer::SetSkinInfo(const ResourceModel::Skin& skin, GameObj
     {
         Bone& bone = bones[index++];
         bone.go = gos[srcBone.nodeIdx];
+		bone.go_uid = bone.go ? bone.go->GetUID() : 0;
         bone.bind = srcBone.bind;
     }
 

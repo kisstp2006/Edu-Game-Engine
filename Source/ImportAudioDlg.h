@@ -5,10 +5,10 @@
 
 #include <string>
 
-class ImportTexturesDlg final
+class ImportAudioDlg final
 {
 public:
-	ImportTexturesDlg();
+	ImportAudioDlg();
 
 	void Open(const std::string& file);
 	void Display();
@@ -16,7 +16,7 @@ public:
 
 	[[nodiscard]] bool HasSelection() const;
 	[[nodiscard]] const std::string& GetFile() const;
-	[[nodiscard]] EGE::TextureImportOptions GetOptions() const;
+	[[nodiscard]] EGE::AudioImportOptions GetOptions() const;
 
 private:
 	std::string file_;

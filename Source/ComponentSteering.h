@@ -46,6 +46,9 @@ public:
 	void OnStop() override;
 	void OnDebugDraw(bool selected) const override;
 	void OnGoDestroyed() override;
+	void RemapSerializedReferences(
+		const std::map<uint, uint>& gameObjectIds,
+		const std::map<uint, uint>& componentIds) override;
 
 	void SetBehaviour(Behaviour new_behaviour);
 	Behaviour GetBehaviour() const;

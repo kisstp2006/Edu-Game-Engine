@@ -110,6 +110,8 @@ namespace EGE
 			bool serializedOnly) const;
 		[[nodiscard]] bool IsInstanceBound(
 			ScriptInstanceHandle handle) const;
+		[[nodiscard]] std::string GetInstanceClassName(
+			ScriptInstanceHandle handle) const;
 
 		[[nodiscard]] bool HasLoadedScripts() const;
 		[[nodiscard]] bool WasLastReloadSuccessful() const;

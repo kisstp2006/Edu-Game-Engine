@@ -1,6 +1,7 @@
 #include "Globals.h"
 
 #include "ShowTextureDlg.h"
+#include "EditorDialog.h"
 #include "ResourceMesh.h"
 #include "ResourceTexture.h"
 
@@ -44,7 +45,7 @@ void ShowTextureDlg::Display()
 {
     if(open_flag)
     {
-        ImGui::OpenPopup(open_name.c_str());
+        EGE::EditorDialog::Open(open_name.c_str());
         open_flag = false;
 
         if(source->GetMetadata().texType == TextureType_2D)
@@ -55,8 +56,11 @@ void ShowTextureDlg::Display()
 
     bool generate = false;
 
-    ImGui::SetNextWindowSize(ImVec2(702, 748));
-    if (ImGui::BeginPopupModal(open_name.c_str(), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar))
+    if (EGE::EditorDialog::Begin(
+			open_name.c_str(),
+			ImVec2(702.0f, 748.0f),
+			ImGuiWindowFlags_NoResize |
+				ImGuiWindowFlags_NoScrollbar))
     {
         if(ImGui::BeginChild("Canvas", ImVec2(CANVAS_SIZE, CANVAS_SIZE), true, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_HorizontalScrollbar))
         {
@@ -106,7 +110,7 @@ void ShowTextureDlg::Display()
             generate = true;
         }
 
-        ImGui::EndPopup();
+        EGE::EditorDialog::End();
     }
 
     generate = generate && source->GetMetadata().texType == TextureType_2D;

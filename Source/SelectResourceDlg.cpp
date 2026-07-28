@@ -3,6 +3,7 @@
 #include "SelectResourceDlg.h"
 
 #include "Application.h"
+#include "EditorDialog.h"
 #include "ModuleResources.h"
 
 #include <imgui.h>
@@ -23,12 +24,14 @@ void SelectResourceDlg::Display()
 {
     if(open_flag)
     {
-        ImGui::OpenPopup(open_name.c_str());
+        EGE::EditorDialog::Open(open_name.c_str());
         open_flag = false;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(420,300));
-    if (ImGui::BeginPopupModal(open_name.c_str(), nullptr, ImGuiWindowFlags_NoResize))
+    if (EGE::EditorDialog::Begin(
+			open_name.c_str(),
+			ImVec2(420.0f, 300.0f),
+			ImGuiWindowFlags_NoResize))
     {
         if(ImGui::BeginChild("Canvas", ImVec2(400, 240), true, ImGuiWindowFlags_NoMove))
         {
@@ -50,7 +53,7 @@ void SelectResourceDlg::Display()
             ImGui::CloseCurrentPopup();
         }
 
-        ImGui::EndPopup();
+        EGE::EditorDialog::End();
     }
 }
 

@@ -17,6 +17,7 @@
 
 #include "ComponentCamera.h"
 #include "ComponentMeshRenderer.h"
+#include "ComponentScript.h"
 
 #include "Event.h"
 #include "ThreadPool.h"
@@ -111,6 +112,100 @@ namespace
 			relativePath.generic_string().c_str());
 		if (error)
 			*error = "The scene file could not be written.";
+		return false;
+	}
+
+	bool ResolveProjectPrefabPath(
+		const char* file,
+		std::filesystem::path& relativePath,
+		std::string& error)
+	{
+		if (!file || file[0] == '\0')
+		{
+			error = "No prefab file was selected.";
+			return false;
+		}
+
+		const std::filesystem::path projectRoot =
+			App->fs->GetProjectRoot().lexically_normal();
+		if (projectRoot.empty())
+		{
+			error = "No project is currently mounted.";
+			return false;
+		}
+
+		std::filesystem::path candidate(file);
+		if (candidate.is_absolute())
+		{
+			candidate =
+				candidate.lexically_normal().lexically_relative(projectRoot);
+		}
+		else
+		{
+			candidate = candidate.lexically_normal();
+		}
+
+		if (!EGE::IsSafeProjectRelativePath(candidate))
+		{
+			error = "The prefab must be inside the active project.";
+			return false;
+		}
+
+		const auto first = candidate.begin();
+		if (first == candidate.end())
+		{
+			error = "The prefab must be inside the project's Assets folder.";
+			return false;
+		}
+		std::string rootName = first->string();
+		std::transform(
+			rootName.begin(), rootName.end(), rootName.begin(),
+			[](unsigned char character)
+			{
+				return static_cast<char>(std::tolower(character));
+			});
+		if (rootName != "assets")
+		{
+			error = "The prefab must be inside the project's Assets folder.";
+			return false;
+		}
+
+		std::string extension = candidate.extension().string();
+		std::transform(
+			extension.begin(), extension.end(), extension.begin(),
+			[](unsigned char character)
+			{
+				return static_cast<char>(std::tolower(character));
+			});
+		if (extension != ".egeprefab")
+		{
+			error = "Prefab files must use the .egeprefab extension.";
+			return false;
+		}
+
+		relativePath = std::move(candidate);
+		return true;
+	}
+
+	bool WritePrefabConfig(
+		const Config& config,
+		const std::filesystem::path& relativePath,
+		std::string* error)
+	{
+		char* buffer = nullptr;
+		const uint size = static_cast<uint>(
+			config.Save(&buffer, "EDU Engine prefab"));
+		const uint written = App->fs->Save(
+			relativePath.generic_string().c_str(),
+			buffer,
+			size);
+		RELEASE_ARRAY(buffer);
+
+		if (written == size)
+			return true;
+
+		if (error)
+			*error = "The prefab file could not be written.";
 		return false;
 	}
 }
@@ -355,45 +450,51 @@ void ModuleLevelManager::FlushPendingDestructions()
 
 GameObject * ModuleLevelManager::Duplicate(const GameObject * original)
 {
-	GameObject* ret = nullptr;
+	if (!original || Validate(original) != original || original == root)
+		return nullptr;
 
-	if (original != nullptr)
-	{
-		Config save;
-		save.AddArray("Game Objects");
-		map<uint, uint> new_uids;
-		original->Save(save, &new_uids);
-	
-		LoadGameObjects(save);
-	}
-
-	return ret;
+	Config save;
+	save.AddArray("Game Objects");
+	original->SaveSubtree(save);
+	return LoadGameObjects(save, true);
 }
 
 
-void ModuleLevelManager::LoadGameObjects(const Config & config)
+GameObject* ModuleLevelManager::LoadGameObjects(
+	const Config& config,
+	bool regenerateIds)
 {
 	int count = config.GetArrayCount("Game Objects");
+	if (count <= 0)
+		return nullptr;
+
 	map<GameObject*, uint> relations;
-    std::vector<GameObject*> gos;
-    gos.resize(count);
+	map<uint, uint> gameObjectIds;
+	map<uint, uint> componentIds;
+	std::vector<GameObject*> gos(count);
 
 	for (int i = 0; i < count; ++i)
 	{
 		GameObject* go = CreateGameObject();
-        Config goCfg = config.GetArray("Game Objects", i);
+		const uint generatedUid = go->GetUID();
+		Config goCfg = config.GetArray("Game Objects", i);
 		go->Load(&goCfg, relations);
-        gos[i] = go;
+		if (regenerateIds)
+		{
+			gameObjectIds[go->GetUID()] = generatedUid;
+			go->uid = generatedUid;
+		}
+		gos[i] = go;
 	}
 
-    for (int i=0; i< count; ++i)
-    {
-        Config goCfg = config.GetArray("Game Objects", i);
-        gos[i]->LoadComponents(&goCfg);
-    }
+	for (int i = 0; i < count; ++i)
+	{
+		Config goCfg = config.GetArray("Game Objects", i);
+		gos[i]->LoadComponents(
+			&goCfg,
+			regenerateIds ? &componentIds : nullptr);
+	}
 
-
-	// Second pass to tide up the hierarchy
 	for (map<GameObject*, uint>::iterator it = relations.begin(); it != relations.end(); ++it)
 	{
 		uint parent_id = it->second;
@@ -401,19 +502,39 @@ void ModuleLevelManager::LoadGameObjects(const Config & config)
 
 		if (parent_id > 0)
 		{
-			GameObject* parent_go = Find(parent_id);
+			if (regenerateIds)
+			{
+				const auto remapped = gameObjectIds.find(parent_id);
+				parent_id = remapped == gameObjectIds.end()
+					? 0
+					: remapped->second;
+			}
+			GameObject* parent_go =
+				parent_id > 0 ? Find(parent_id) : nullptr;
 			if (parent_go != nullptr)
 				go->SetNewParent(parent_go);
 		}
 	}
 
-	// Reset all info about the level (this also fill in the quadtree)
+	if (regenerateIds)
+	{
+		for (GameObject* go : gos)
+		{
+			for (Component* component : go->components)
+			{
+				component->RemapSerializedReferences(
+					gameObjectIds, componentIds);
+			}
+		}
+	}
+
 	root->RecursiveCalcGlobalTransform(root->GetLocalTransform(), true);
 	root->RecursiveCalcBoundingBoxes();
 	
-	// Third pass: call OnStart on all new GameObjects
 	for (map<GameObject*, uint>::iterator it = relations.begin(); it != relations.end(); ++it)
 		it->first->OnStart();
+
+	return gos.front();
 }
 
 bool ModuleLevelManager::Load(const char * file)
@@ -546,6 +667,122 @@ bool ModuleLevelManager::CreateEmptySceneAsset(
 	skyboxConfig.AddFloat("intensity", 1.0f);
 
 	return WriteSceneConfig(scene, resolvedPath, error);
+}
+
+bool ModuleLevelManager::SavePrefab(
+	const GameObject* source,
+	const char* file,
+	std::string* error) const
+{
+	if (!source || source == root ||
+		Validate(source) != source ||
+		source->IsPendingDestroy())
+	{
+		if (error)
+			*error = "Select a valid GameObject to create a prefab.";
+		return false;
+	}
+
+	if (!App->IsStop())
+	{
+		if (error)
+			*error = "Prefabs can only be created while the game is stopped.";
+		return false;
+	}
+
+	std::filesystem::path resolvedPath;
+	std::string pathError;
+	if (!ResolveProjectPrefabPath(file, resolvedPath, pathError))
+	{
+		if (error)
+			*error = std::move(pathError);
+		return false;
+	}
+
+	if (App->fs->Exists(resolvedPath.generic_string().c_str()))
+	{
+		if (error)
+			*error = "A prefab with this name already exists.";
+		return false;
+	}
+
+	Config prefab;
+	Config description = prefab.AddSection("Prefab");
+	description.AddUInt("FormatVersion", 1);
+	description.AddString("Name", source->name.c_str());
+	description.AddUInt("RootUID", source->GetUID());
+	prefab.AddArray("Game Objects");
+	source->SaveSubtree(prefab);
+
+	return WritePrefabConfig(prefab, resolvedPath, error);
+}
+
+GameObject* ModuleLevelManager::InstantiatePrefab(
+	const char* file,
+	GameObject* parent,
+	std::string* error)
+{
+	if (!App->IsStop())
+	{
+		if (error)
+			*error = "Prefabs can only be instantiated while the game is stopped.";
+		return nullptr;
+	}
+
+	std::filesystem::path resolvedPath;
+	std::string pathError;
+	if (!ResolveProjectPrefabPath(file, resolvedPath, pathError))
+	{
+		if (error)
+			*error = std::move(pathError);
+		return nullptr;
+	}
+
+	char* buffer = nullptr;
+	const std::string sourcePath = resolvedPath.generic_string();
+	const uint size = App->fs->Load(sourcePath.c_str(), &buffer);
+	if (!buffer || size == 0)
+	{
+		RELEASE_ARRAY(buffer);
+		if (error)
+			*error = "The prefab file could not be read.";
+		return nullptr;
+	}
+
+	Config prefab(buffer);
+	RELEASE_ARRAY(buffer);
+	if (!prefab.IsValid())
+	{
+		if (error)
+			*error = "The prefab file is invalid.";
+		return nullptr;
+	}
+
+	Config description(prefab.GetSection("Prefab"));
+	if (description.GetUInt("FormatVersion", 0) != 1 ||
+		prefab.GetArrayCount("Game Objects") <= 0)
+	{
+		if (error)
+			*error = "The prefab format is not supported or contains no objects.";
+		return nullptr;
+	}
+
+	if (parent && Validate(parent) != parent)
+		parent = nullptr;
+
+	GameObject* instance = LoadGameObjects(prefab, true);
+	if (!instance)
+	{
+		if (error)
+			*error = "The prefab could not be instantiated.";
+		return nullptr;
+	}
+
+	if (parent)
+		instance->SetNewParent(parent);
+	root->RecursiveCalcGlobalTransform(root->GetLocalTransform(), true);
+	root->RecursiveCalcBoundingBoxes();
+	return instance;
 }
 
 bool ModuleLevelManager::HasScenePath() const
@@ -863,14 +1100,17 @@ void ModuleLevelManager::FindNear(const float3 & position, float radius, std::ve
 GameObject* ModuleLevelManager::AddModel(UID id)
 {
     Resource* res = App->resources->Get(id);
+	if (!res || res->GetType() != Resource::model)
+		return nullptr;
 
-    bool ok = res->GetType() == Resource::model;
+    bool ok = true;
     std::vector<GameObject*> gos;
 
     if(ok)
     {
         ResourceModel* model = static_cast<ResourceModel*>(res);
-        model->LoadToMemory();
+        if (!model->LoadToMemory())
+			return nullptr;
 
         gos.reserve(model->GetNumNodes());
 

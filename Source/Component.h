@@ -5,6 +5,7 @@
 
 #include "Config.h"
 #include "Math.h"
+#include <map>
 
 class GameObject;
 class Config;
@@ -68,6 +69,9 @@ public:
 	virtual void OnPause() {};
 	virtual void OnUnPause() {};
 	virtual void OnGoDestroyed() {};
+	virtual void RemapSerializedReferences(
+		const std::map<uint, uint>& gameObjectIds,
+		const std::map<uint, uint>& componentIds) {}
 
 	virtual void OnUpdateTransform() {};
 	virtual void OnDebugDraw(bool selected) const {};

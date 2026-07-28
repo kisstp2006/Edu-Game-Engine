@@ -2,6 +2,7 @@
 #define __RESOURCE_TEXTURE_H__
 
 #include "Resource.h"
+#include "AssetImportOptions.h"
 #include "OGL.h"
 #include "utils/SimpleBinStream.h"
 
@@ -97,9 +98,21 @@ public:
 	ColorSpace              GetColorSpace   () const { return colorSpace.value_or(formatColorSpace); }
     const TextureMetadata&  GetMetadata     () const {return metadata;}
 	
-    void                    SetColorSpace   (ColorSpace space) { colorSpace = space;}
+	void                    SetColorSpace   (ColorSpace space) { colorSpace = space;}
+	void SetImportOptions(const EGE::TextureImportOptions& options)
+	{
+		importOptions = options;
+	}
+	const EGE::TextureImportOptions& GetImportOptions() const
+	{
+		return importOptions;
+	}
     
 	static bool             Import(const char* file, std::string& output_file, bool generateCubemap, bool generateMipmaps);
+	static bool             Import(
+		const char* file,
+		std::string& outputFile,
+		const EGE::TextureImportOptions& options);
 	static bool             Import(const void* buffer, uint size, std::string& output_file, bool toCubemap, bool generateMipmaps);
 
     bool                    LoadFromBuffer(const void* buffer, uint size);
@@ -113,8 +126,16 @@ public:
 
 private:
 
-	static bool ImportNoConvert(const void* buffer, uint size, std::string& output_file, bool generateMipmaps);
-    static bool ImportToCubemap(const void* buffer, uint size, std::string& output_file, bool generateMipmaps);
+	static bool ImportNoConvert(
+		const void* buffer,
+		uint size,
+		std::string& outputFile,
+		const EGE::TextureImportOptions& options);
+    static bool ImportToCubemap(
+		const void* buffer,
+		uint size,
+		std::string& outputFile,
+		const EGE::TextureImportOptions& options);
 
     static Texture* TextureFromMemory(const void* buffer, uint size, TextureMetadata& metadata, ColorSpace& formatSpace, std::optional<ColorSpace> colorSpace);
 
@@ -123,6 +144,7 @@ private:
     TextureMetadata metadata;
     std::optional<ColorSpace> colorSpace;
     ColorSpace formatColorSpace;
+	EGE::TextureImportOptions importOptions;
 
     std::unique_ptr<Texture> glTexture;
 };

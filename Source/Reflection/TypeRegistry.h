@@ -95,7 +95,15 @@ namespace EGE
 		bool visible = true;
 		bool readOnly = false;
 		std::string header;
+		std::string tooltip;
 		std::optional<PropertyRange> range;
+	};
+
+	struct PropertyEnumValue
+	{
+		std::string name;
+		std::string displayName;
+		std::int64_t value = 0;
 	};
 
 	struct PropertyDescriptor
@@ -108,6 +116,7 @@ namespace EGE
 		std::string typeName;
 		PropertyKind kind = PropertyKind::Unsupported;
 		PropertyAttributes attributes;
+		std::vector<PropertyEnumValue> enumValues;
 		Reader reader;
 		Writer writer;
 

@@ -59,9 +59,13 @@ public:
     void                  ReleaseFromMemory   () override;
     bool                  Save                ();
     bool                  Save                (std::string& output) const;
-    static UID            Import              (const aiMesh* mesh, const char* source_file, float scale);
+    static UID            Import(
+		const aiMesh* mesh,
+		const char* sourceFile,
+		const float3& scale,
+		bool flipUVs);
     static UID            Import              (const tinygltf::Model& model, const tinygltf::Mesh& mesh, const tinygltf::Primitive& primitive, 
-                                               uint32_t& weightsCount, const char* source_file, float scale);
+                                               uint32_t& weightsCount, const char* sourceFile, const float3& scale, bool flipUVs);
 
     static UID            LoadSphere          (const char* sphere_name, float size, unsigned slices, unsigned stacks, UID uid = 0);
     static UID            LoadTorus           (const char* torus_name, float inner_r, float outer_r, unsigned slices, unsigned stacks, UID uid = 0);
@@ -117,8 +121,15 @@ private:
     bool                Regenerate          (par_shapes_mesh_s* shape);
     void                GenerateAttribInfo  ();
     void                GenerateCPUBuffers  (const Thekla::Atlas_Output_Mesh* atlas);
-    void                GenerateCPUBuffers  (const aiMesh* mesh, float scale);
-    void                GenerateCPUBuffers  (const tinygltf::Model& model, const tinygltf::Mesh& mesh, const tinygltf::Primitive& primitive, uint32_t& weightsCount, float scale);
+    void                GenerateCPUBuffers(
+		const aiMesh* mesh, const float3& scale, bool flipUVs);
+    void                GenerateCPUBuffers(
+		const tinygltf::Model& model,
+		const tinygltf::Mesh& mesh,
+		const tinygltf::Primitive& primitive,
+		uint32_t& weightsCount,
+		const float3& scale,
+		bool flipUVs);
 	void                GenerateCPUBuffers  (par_shapes_mesh_s* shape);
     void                GenerateVBO         ();
     void                GenerateBoneData    (const aiMesh* mesh, float scale);

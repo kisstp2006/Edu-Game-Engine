@@ -12,6 +12,8 @@
 #include "ResourceAnimation.h"
 #include "ResourceStateMachine.h"
 #include "Config.h"
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <sstream>
 #include <string>
@@ -24,6 +26,31 @@ using namespace std;
 
 namespace
 {
+	bool ResolveNativeImportSource(
+		const char* sourceFile,
+		std::string& nativePath)
+	{
+		if (!sourceFile || sourceFile[0] == '\0')
+			return false;
+
+		std::filesystem::path source =
+			std::filesystem::path(sourceFile).lexically_normal();
+		if (!source.is_absolute())
+		{
+			if (!App->GetActiveProject())
+				return false;
+			source = App->fs->GetProjectRoot() / source;
+		}
+
+		std::error_code error;
+		source = std::filesystem::absolute(source, error).lexically_normal();
+		if (error || !std::filesystem::is_regular_file(source, error))
+			return false;
+
+		nativePath = source.string();
+		return true;
+	}
+
 	bool PrepareSourceAssetPath(
 		const char* sourceFile,
 		std::string& normalizedPath,
@@ -560,22 +587,36 @@ UID ModuleResources::ImportFile(const char * new_file_in_assets, Resource::Type 
 
 UID ModuleResources::ImportTexture(const char* file_name, bool mipmaps, bool srgb, bool toCubemap)
 {
+	EGE::TextureImportOptions options;
+	options.generateMipmaps = mipmaps;
+	options.sRgb = srgb;
+	options.convertToCubemap = toCubemap;
+	return ImportTexture(file_name, options);
+}
+
+UID ModuleResources::ImportTexture(
+	const char* fileName,
+	const EGE::TextureImportOptions& options)
+{
 	UID ret = 0;
     bool import_ok = false;
     string written_file;
 
-    import_ok = ResourceTexture::Import(file_name, written_file, toCubemap, mipmaps);
+    import_ok = ResourceTexture::Import(
+		fileName, written_file, options);
 
 	// If export was successfull, create a new resource
 	if (import_ok == true)
 	{
-        ret = ImportSuccess(Resource::texture, file_name, "", written_file);
+        ret = ImportSuccess(Resource::texture, fileName, "", written_file);
         ResourceTexture* texture = static_cast<ResourceTexture*>(Get(ret));
-        texture->SetColorSpace(srgb ? ColorSpace_gamma : ColorSpace_linear);
+        texture->SetColorSpace(
+			options.sRgb ? ColorSpace_gamma : ColorSpace_linear);
+		texture->SetImportOptions(options);
 	}
 	else
     {
-		LOG("Importing of [%s] FAILED", file_name);
+		LOG("Importing of [%s] FAILED", fileName);
     }
 
 	SaveResources();
@@ -583,47 +624,151 @@ UID ModuleResources::ImportTexture(const char* file_name, bool mipmaps, bool srg
 	return ret;
 }
 
+UID ModuleResources::ImportAudio(
+	const char* fileName,
+	const EGE::AudioImportOptions& options)
+{
+	std::string writtenFile;
+	if (!App->audio->Import(fileName, writtenFile))
+		return 0;
+
+	const UID uid = ImportSuccess(
+		Resource::audio,
+		fileName,
+		options.assetName.c_str(),
+		writtenFile);
+	ResourceAudio* audio =
+		static_cast<ResourceAudio*>(Get(uid));
+	if (!audio)
+		return 0;
+
+	switch (options.mode)
+	{
+	case EGE::AudioImportMode::Sample:
+		audio->format = ResourceAudio::sample;
+		break;
+	case EGE::AudioImportMode::Stream:
+		audio->format = ResourceAudio::stream;
+		break;
+	default:
+		audio->format = ResourceAudio::unknown;
+		break;
+	}
+	audio->loop = options.loop;
+	audio->volume = options.volume;
+	audio->pitch = options.pitch;
+	audio->spatial = options.spatial;
+	audio->minimumDistance = options.distanceRange.x;
+	audio->maximumDistance = options.distanceRange.y;
+	SaveResources();
+	return uid;
+}
+
 UID ModuleResources::ImportAnimation(const char* file_name, uint first, uint last, const char* user_name, float scale)
+{
+	EGE::AnimationImportOptions options;
+	options.scale = float3(scale);
+	return ImportAnimation(
+		file_name, first, last, user_name, options);
+}
+
+UID ModuleResources::ImportAnimation(
+	const char* fileName,
+	uint first,
+	uint last,
+	const char* userName,
+	const EGE::AnimationImportOptions& options)
 {
 	UID ret = 0;
     bool import_ok = false;
     vector<string> written_files;
+	std::string nativePath;
+	if (!ResolveNativeImportSource(fileName, nativePath))
+	{
+		LOG("Animation import source [%s] is not available",
+			fileName ? fileName : "");
+		return 0;
+	}
 
-    import_ok = ResourceAnimation::Import(file_name, first, last, scale, written_files);
+    import_ok = ResourceAnimation::Import(
+		nativePath.c_str(), first, last, options, written_files);
 
 	// If export was successfull, create a new resource
 	if (import_ok == true)
 	{
         for (const string& written_file : written_files)
         {
-            ret = ImportSuccess(Resource::animation, file_name, user_name, written_file);
+            ret = ImportSuccess(
+				Resource::animation, fileName, userName, written_file);
+			if (ResourceAnimation* animation =
+					static_cast<ResourceAnimation*>(Get(ret)))
+			{
+				animation->SetImportOptions(options, first, last);
+			}
         }
 	}
-	else
+    else
     {
-		LOG("Importing of [%s] FAILED", file_name);
+		LOG("Importing of [%s] FAILED", fileName);
     }
 
+	if (ret != 0)
+	{
+		MakeResourceSourcePathsPortable();
+		SaveResources();
+	}
 	return ret;
 }
 
 UID ModuleResources::ImportModel(const char* file_name, float scale, const char* user_name)
 {
+	EGE::ModelImportOptions options;
+	options.assetName = user_name ? user_name : "";
+	options.scale = float3(scale);
+	return ImportModel(file_name, options);
+}
+
+UID ModuleResources::ImportModel(
+	const char* fileName,
+	const EGE::ModelImportOptions& options)
+{
 	UID ret = 0;
     bool import_ok = false;
     string written_file;
+	std::string nativePath;
+	if (!ResolveNativeImportSource(fileName, nativePath))
+	{
+		LOG("Model import source [%s] is not available",
+			fileName ? fileName : "");
+		return 0;
+	}
 
-    import_ok = ResourceModel::Import(file_name, scale, written_file);
+    import_ok = ResourceModel::Import(
+		nativePath.c_str(), options, written_file);
 
 	if (import_ok == true)
 	{
-        ret = ImportSuccess(Resource::model, file_name, user_name, written_file);
+        ret = ImportSuccess(
+			Resource::model,
+			fileName,
+			options.assetName.c_str(),
+			written_file);
+		if (ResourceModel* model =
+				static_cast<ResourceModel*>(Get(ret)))
+		{
+			model->SetImportOptions(options);
+		}
     }
-	else
+    else
     {
-		LOG("Importing of [%s] FAILED", file_name);
+		LOG("Importing of [%s] FAILED", fileName);
     }
 
+	if (ret != 0)
+	{
+		MakeResourceSourcePathsPortable();
+		SaveResources();
+	}
 	return ret;
 }
 
@@ -1102,6 +1247,71 @@ void ModuleResources::GatherResourceType(std::vector<const Resource*>& resources
 	{
 		if (it->second->type == type)
 			resources.push_back(it->second);
+	}
+}
+
+const Resource* ModuleResources::FindResourceBySourceFile(
+	Resource::Type type,
+	const std::string& sourceFile) const
+{
+	auto normalize = [](std::string path)
+	{
+		std::replace(path.begin(), path.end(), '\\', '/');
+		std::transform(
+			path.begin(),
+			path.end(),
+			path.begin(),
+			[](unsigned char character)
+			{
+				return static_cast<char>(std::tolower(character));
+			});
+		while (path.starts_with("./"))
+			path.erase(0, 2);
+		return path;
+	};
+
+	const std::string expected = normalize(sourceFile);
+	for (const auto& [uid, resource] : resources)
+	{
+		if (resource &&
+			resource->GetType() == type &&
+			normalize(resource->GetFile()) == expected)
+		{
+			return resource;
+		}
+	}
+	return nullptr;
+}
+
+void ModuleResources::MakeResourceSourcePathsPortable()
+{
+	if (!App->GetActiveProject())
+		return;
+
+	const std::filesystem::path projectRoot =
+		App->fs->GetProjectRoot().lexically_normal();
+	for (auto& [uid, resource] : resources)
+	{
+		if (!resource || resource->file.empty())
+			continue;
+
+		const std::filesystem::path source =
+			std::filesystem::path(resource->file).lexically_normal();
+		if (!source.is_absolute())
+			continue;
+
+		const std::filesystem::path relative =
+			source.lexically_relative(projectRoot);
+		const std::string relativeText = relative.generic_string();
+		if (!relative.empty() &&
+			!relative.is_absolute() &&
+			relativeText != ".." &&
+			!relativeText.starts_with("../") &&
+			(relativeText == "Assets" ||
+			 relativeText.starts_with("Assets/")))
+		{
+			resource->file = relativeText;
+		}
 	}
 }
 

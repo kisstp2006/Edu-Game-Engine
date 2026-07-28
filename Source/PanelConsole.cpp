@@ -7,6 +7,7 @@
 #include "Scripting/ScriptRuntime.h"
 
 #include <imgui.h>
+#include <SDL_scancode.h>
 
 #include <algorithm>
 #include <chrono>
@@ -127,6 +128,23 @@ namespace
 		return pressed;
 	}
 
+	void ContinueControlLine(const char* nextLabel)
+	{
+		const float nextWidth =
+			ImGui::CalcTextSize(nextLabel).x +
+			ImGui::GetStyle().FramePadding.x * 2.0f;
+		const float contentRight =
+			ImGui::GetWindowPos().x +
+			ImGui::GetWindowContentRegionMax().x;
+		if (ImGui::GetItemRectMax().x +
+				ImGui::GetStyle().ItemSpacing.x +
+				nextWidth <=
+			contentRight)
+		{
+			ImGui::SameLine();
+		}
+	}
+
 	std::string DiagnosticLocation(
 		const EGE::ScriptDiagnostic& diagnostic)
 	{
@@ -172,13 +190,11 @@ namespace
 		const EGE::ScriptDiagnostic* diagnostic = nullptr)
 	{
 		ImGui::PushID(id);
-		const float start = ImGui::GetCursorPosX();
-
 		ImGui::TextColored(
 			SeverityColor(severity),
 			"%s",
 			SeverityLabel(severity));
-		ImGui::SameLine(start + 58.0f);
+		ImGui::NextColumn();
 		if (std::string_view(source) == "SCRIPT")
 		{
 			ImGui::TextColored(
@@ -191,9 +207,9 @@ namespace
 			ImGui::TextDisabled("%s", source);
 		}
 
-		ImGui::SameLine(start + 118.0f);
+		ImGui::NextColumn();
 		ImGui::TextDisabled("%s", metadata.c_str());
-		ImGui::SameLine(start + 215.0f);
+		ImGui::NextColumn();
 
 		const bool selected = ImGui::Selectable(
 			message.c_str(),
@@ -240,6 +256,7 @@ namespace
 			}
 			ImGui::EndPopup();
 		}
+		ImGui::NextColumn();
 		ImGui::PopID();
 	}
 }
@@ -362,7 +379,7 @@ std::vector<PanelConsole::Entry> PanelConsole::CopyEntries(
 void PanelConsole::Draw()
 {
 	bool scrollRequested = false;
-	const std::vector<Entry> entries =
+	std::vector<Entry> entries =
 		CopyEntries(scrollRequested);
 	const std::vector<EGE::ScriptDiagnostic>* diagnostics = nullptr;
 	if (App && App->scripting)
@@ -407,30 +424,115 @@ void PanelConsole::Draw()
 		}
 	}
 
-	if (ImGui::Button("Clear"))
+	const bool consoleFocused =
+		ImGui::IsWindowFocused(
+			ImGuiFocusedFlags_RootAndChildWindows);
+	const ImGuiIO& io = ImGui::GetIO();
+	const bool clearShortcut =
+		consoleFocused &&
+		io.KeyCtrl &&
+		!io.WantTextInput &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_L, false);
+	if (ImGui::Button("Clear") || clearShortcut)
 	{
 		Clear();
+		entries.clear();
 		if (App && App->scripting)
 			App->scripting->GetRuntime().ClearDiagnostics();
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Reload Scripts") &&
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Clear Console (Ctrl+L)");
+	ContinueControlLine("Reload Scripts");
+	const bool canReload =
 		App &&
-		App->scripting)
+		App->scripting &&
+		!App->scripting->GetRuntime().GetScriptRoot().empty();
+	if (!canReload)
+	{
+		ImGui::PushStyleVar(
+			ImGuiStyleVar_Alpha,
+			ImGui::GetStyle().Alpha * 0.45f);
+	}
+	const bool reloadPressed = ImGui::Button("Reload Scripts");
+	if (!canReload)
+		ImGui::PopStyleVar();
+	if (reloadPressed && canReload)
 	{
 		App->scripting->Reload();
 	}
-	ImGui::SameLine();
+	if (ImGui::IsItemHovered())
+	{
+		ImGui::SetTooltip(
+			canReload
+				? "Compile and reload project scripts"
+				: "No active script project");
+	}
+	ContinueControlLine("Copy All");
+	const bool hasClipboardContent =
+		!entries.empty() || (diagnostics && !diagnostics->empty());
+	if (!hasClipboardContent)
+	{
+		ImGui::PushStyleVar(
+			ImGuiStyleVar_Alpha,
+			ImGui::GetStyle().Alpha * 0.45f);
+	}
+	const bool copyAllPressed = ImGui::Button("Copy All");
+	if (!hasClipboardContent)
+		ImGui::PopStyleVar();
+	if (copyAllPressed && hasClipboardContent)
+	{
+		std::string text;
+		for (const Entry& entry : entries)
+		{
+			if (entry.diagnosticMirror)
+				continue;
+			text += '[' + entry.timestamp + "] [";
+			text += entry.script ? "SCRIPT" : "ENGINE";
+			text += "] " + entry.message + '\n';
+		}
+		if (diagnostics)
+		{
+			for (const EGE::ScriptDiagnostic& diagnostic : *diagnostics)
+			{
+				text += "[SCRIPT] ";
+				text += DiagnosticLocation(diagnostic);
+				text += " ";
+				text += diagnostic.message;
+				text += '\n';
+			}
+		}
+		ImGui::SetClipboardText(text.c_str());
+	}
+	ContinueControlLine("Auto-scroll");
 	ImGui::Checkbox("Auto-scroll", &autoScroll_);
 
-	ImGui::SameLine();
+	const bool focusSearch =
+		consoleFocused &&
+		io.KeyCtrl &&
+		!io.WantTextInput &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_F, false);
+	const float clearSearchWidth =
+		ImGui::CalcTextSize("X").x +
+		ImGui::GetStyle().FramePadding.x * 2.0f;
+	ImGui::Spacing();
+	if (focusSearch)
+		ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(
-		std::max(160.0f, ImGui::GetContentRegionAvail().x));
+		std::max(
+			1.0f,
+			ImGui::GetContentRegionAvail().x -
+				clearSearchWidth -
+				ImGui::GetStyle().ItemSpacing.x));
 	ImGui::InputTextWithHint(
 		"##ConsoleSearch",
-		"Filter messages...",
+		"Filter messages... (Ctrl+F)",
 		search_,
 		sizeof(search_));
+	ImGui::SameLine();
+	if (ImGui::Button("X##ClearConsoleSearch") && search_[0] != '\0')
+		search_[0] = '\0';
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Clear search");
 
 	const std::string informationLabel =
 		"Info " + std::to_string(informationCount);
@@ -445,17 +547,17 @@ void PanelConsole::Draw()
 		informationLabel.c_str(),
 		showInformation_,
 		SeverityColor(Severity::Information));
-	ImGui::SameLine();
+	ContinueControlLine(warningLabel.c_str());
 	DrawFilterButton(
 		warningLabel.c_str(),
 		showWarnings_,
 		SeverityColor(Severity::Warning));
-	ImGui::SameLine();
+	ContinueControlLine(errorLabel.c_str());
 	DrawFilterButton(
 		errorLabel.c_str(),
 		showErrors_,
 		SeverityColor(Severity::Error));
-	ImGui::SameLine();
+	ContinueControlLine(scriptLabel.c_str());
 	DrawFilterButton(
 		scriptLabel.c_str(),
 		showScriptMessages_,
@@ -468,6 +570,24 @@ void PanelConsole::Draw()
 			false,
 			ImGuiWindowFlags_HorizontalScrollbar))
 	{
+		const float availableWidth =
+			std::max(360.0f, ImGui::GetContentRegionAvail().x);
+		ImGui::Columns(4, "##ConsoleColumns", false);
+		ImGui::SetColumnWidth(0, 64.0f);
+		ImGui::SetColumnWidth(1, 70.0f);
+		ImGui::SetColumnWidth(
+			2,
+			std::clamp(availableWidth * 0.22f, 100.0f, 190.0f));
+		ImGui::TextDisabled("LEVEL");
+		ImGui::NextColumn();
+		ImGui::TextDisabled("SOURCE");
+		ImGui::NextColumn();
+		ImGui::TextDisabled("TIME / LOCATION");
+		ImGui::NextColumn();
+		ImGui::TextDisabled("MESSAGE");
+		ImGui::NextColumn();
+		ImGui::Separator();
+
 		std::size_t visibleIndex = 0;
 		for (const Entry& entry : entries)
 		{
@@ -538,6 +658,7 @@ void PanelConsole::Draw()
 
 		if (autoScroll_ && scrollRequested)
 			ImGui::SetScrollHereY(1.0f);
+		ImGui::Columns(1);
 	}
 	ImGui::EndChild();
 }

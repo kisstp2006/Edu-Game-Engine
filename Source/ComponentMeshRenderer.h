@@ -37,6 +37,9 @@ public:
 
     virtual void            OnSave                  (Config& config) const override;
     virtual void            OnLoad                  (Config* config) override;
+	void RemapSerializedReferences(
+		const std::map<uint, uint>& gameObjectIds,
+		const std::map<uint, uint>& componentIds) override;
 
     // mesh
 
@@ -90,13 +93,15 @@ private:
 
     struct Bone
     {
-        GameObject* go;
+        GameObject* go = nullptr;
+		uint go_uid = 0;
         float4x4	bind = float4x4::identity;
     };
 
     std::unique_ptr<Bone[]> bones;
     uint32_t                numBones = 0;
     GameObject*             rootGO = nullptr;
+	uint                    root_go_uid = 0;
 
 
     HashString               batch_name;

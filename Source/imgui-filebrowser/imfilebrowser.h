@@ -13,6 +13,8 @@
 #   error "include imgui.h before this header"
 #endif
 
+#include "../EditorDialog.h"
+
 using ImGuiFileBrowserFlags = int;
 
 enum ImGuiFileBrowserFlags_
@@ -261,8 +263,15 @@ inline void ImGui::FileBrowser::Display()
         PopID();
     });
 
+    const bool modal =
+        (flags_ & ImGuiFileBrowserFlags_NoModal) == 0;
     if(openFlag_)
-        OpenPopup(openLabel_.c_str());
+    {
+        if(modal)
+            EGE::EditorDialog::Open(openLabel_.c_str());
+        else
+            OpenPopup(openLabel_.c_str());
+    }
     isOpened_ = false;
 
     // open the popup window
@@ -283,14 +292,22 @@ inline void ImGui::FileBrowser::Display()
         if(!BeginPopup(openLabel_.c_str()))
             return;
     }
-    else if(!BeginPopupModal(openLabel_.c_str(), nullptr,
-                             flags_ & ImGuiFileBrowserFlags_NoTitleBar ?
-                                ImGuiWindowFlags_NoTitleBar : 0))
+    else if(!EGE::EditorDialog::Begin(
+                openLabel_.c_str(),
+                ImVec2(0.0f, 0.0f),
+                flags_ & ImGuiFileBrowserFlags_NoTitleBar ?
+                    ImGuiWindowFlags_NoTitleBar : 0))
     {
         return;
     }
     isOpened_ = true;
-    ScopeGuard endPopup([] { EndPopup(); });
+    ScopeGuard endPopup([modal]
+    {
+        if(modal)
+            EGE::EditorDialog::End();
+        else
+            EndPopup();
+    });
 
     // display elements in pwd
 

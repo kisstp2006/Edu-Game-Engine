@@ -175,4 +175,21 @@ if(EGE_BUILD_TESTS)
     add_test(
         NAME ScriptingBackend
         COMMAND ScriptingBackendTests)
+
+	add_executable(ImportSettingsTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/ImportSettings.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ImportSettings.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ImportSettingsTests.cpp")
+	target_compile_features(ImportSettingsTests PRIVATE cxx_std_20)
+	target_link_libraries(ImportSettingsTests
+		PRIVATE
+			EGE::ImGui
+			EGE::MathGeoLib
+			opengl32)
+	set_target_properties(ImportSettingsTests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ImportSettings
+		COMMAND ImportSettingsTests)
 endif()

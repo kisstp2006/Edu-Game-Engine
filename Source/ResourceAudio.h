@@ -33,6 +33,12 @@ public:
 public:
 	ma_sound* sound = nullptr;
 	Format format = unknown;
+	bool loop = false;
+	float volume = 1.0f;
+	float pitch = 1.0f;
+	bool spatial = false;
+	float minimumDistance = 1.0f;
+	float maximumDistance = 100.0f;
 };
 
 #endif // __RESOURCE_AUDIO_H__

@@ -100,6 +100,24 @@ void ComponentSteering::OnStart()
 	}
 }
 
+void ComponentSteering::RemapSerializedReferences(
+	const std::map<uint, uint>& gameObjectIds,
+	const std::map<uint, uint>&)
+{
+	const auto remap = [&gameObjectIds](uint id)
+	{
+		if (id == 0)
+			return uint{0};
+		const auto found = gameObjectIds.find(id);
+		return found == gameObjectIds.end() ? uint{0} : found->second;
+	};
+
+	goal_uid = remap(goal_uid);
+	path_uid = remap(path_uid);
+	goal = nullptr;
+	path = nullptr;
+}
+
 // ---------------------------------------------------------
 void ComponentSteering::OnPlay()
 {

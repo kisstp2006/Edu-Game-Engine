@@ -2,6 +2,7 @@
 #define __RESOURCE_ANIMATION_H__
 
 #include "Resource.h"
+#include "AssetImportOptions.h"
 #include "Math.h"
 #include "HashString.h"
 #include "utils/SimpleBinStream.h"
@@ -49,6 +50,8 @@ public:
 
 	ResourceAnimation(UID id);
 	virtual ~ResourceAnimation();
+	void Save(Config& config) const override;
+	void Load(const Config& config) override;
 
 	bool            LoadInMemory        () override;
     void            ReleaseFromMemory   () override;
@@ -56,6 +59,21 @@ public:
 	bool			Save			    () ;
     bool            Save                (std::string& output) const;
 	static bool     Import              (const char* full_path, unsigned first, unsigned last, float scale, std::vector<std::string>& outputs);
+	static bool     Import(
+		const char* fullPath,
+		unsigned first,
+		unsigned last,
+		const EGE::AnimationImportOptions& options,
+		std::vector<std::string>& outputs);
+	void SetImportOptions(
+		const EGE::AnimationImportOptions& options,
+		unsigned first,
+		unsigned last)
+	{
+		importOptions = options;
+		firstFrame = first;
+		lastFrame = last;
+	}
 
 	float           GetDuration         () const { return duration; }
 
@@ -68,7 +86,12 @@ public:
 
 private:
 
-    static bool     ImportGLTF(const char* full_path, unsigned first, unsigned last, float scale, std::vector<std::string>& output);
+    static bool     ImportGLTF(
+		const char* fullPath,
+		unsigned first,
+		unsigned last,
+		const EGE::AnimationImportOptions& options,
+		std::vector<std::string>& output);
     static bool     ImportAssimp(const char* full_path, unsigned first, unsigned last, float scale, std::string& output);
     void            SaveToStream        (simple::mem_ostream<std::true_type>& write_stream) const;
 
@@ -78,6 +101,9 @@ private:
     float            duration = 0.0f;
     ChannelList      channels;
     MorphChannelList morph_channels;
+	EGE::AnimationImportOptions importOptions;
+	unsigned firstFrame = 0;
+	unsigned lastFrame = (std::numeric_limits<unsigned>::max)();
 };
 
 #endif // __RESOURCE_ANIMATION_H__

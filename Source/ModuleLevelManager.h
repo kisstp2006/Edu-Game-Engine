@@ -47,6 +47,14 @@ public:
 		const char* file,
 		const char* sceneName,
 		std::string* error = nullptr) const;
+	bool SavePrefab(
+		const GameObject* source,
+		const char* file,
+		std::string* error = nullptr) const;
+	GameObject* InstantiatePrefab(
+		const char* file,
+		GameObject* parent = nullptr,
+		std::string* error = nullptr);
 	bool HasScenePath() const;
 	const std::filesystem::path& GetScenePath() const;
 	void UnloadCurrent();
@@ -85,7 +93,9 @@ private:
 		uint uid, GameObject* go, bool includePending) const;
 	GameObject* RecursiveFind(const char* name, GameObject* go) const;
 
-	void LoadGameObjects(const Config& config);
+	GameObject* LoadGameObjects(
+		const Config& config,
+		bool regenerateIds = false);
 
 public:
 	Quadtree quadtree;

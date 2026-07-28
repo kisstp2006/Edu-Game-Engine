@@ -7,7 +7,9 @@
 #include "LightManager.h"
 #include "ModuleEditor.h"
 #include "ModuleEditorCamera.h"
+#include "ModuleFileSystem.h"
 #include "ModuleResources.h"
+#include "PanelAssets.h"
 #include "ResourceModel.h"
 #include "GameObject.h"
 
@@ -92,7 +94,12 @@ PanelGOTree::~PanelGOTree()
 // ---------------------------------------------------------
 void PanelGOTree::Draw()
 {
-	node = 0;
+	if (!drag &&
+		drag_candidate &&
+		ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f))
+	{
+		drag = drag_candidate;
+	}
 	//ImGui::SetNextWindowContentWidth((float) (width*2));
     //ImGui::Begin("GameObjects Hierarchy", &active, 
 		//ImGuiWindowFlags_NoResize | 
@@ -109,24 +116,7 @@ void PanelGOTree::Draw()
 
 		if (ImGui::BeginMenu("Load Prefab"))
 		{
-			if (ImGui::BeginMenu("Model"))
-			{
-				vector<const Resource*> resources;
-				App->resources->GatherResourceType(resources, Resource::model);
-
-				for (vector<const Resource*>::const_iterator it = resources.begin(); it != resources.end(); ++it)
-				{
-					const Resource* model = (*it);
-                    ImGui::PushID(model->GetExportedFile());
-					if (ImGui::MenuItem(model->GetUserResName()))
-					{
-                        App->level->AddModel(model->GetUID());
-					}
-                    ImGui::PopID();
-				}
-
-				ImGui::EndMenu();
-			}
+			DrawModelPrefabMenu();
             ImGui::EndMenu();
 		}
 
@@ -162,6 +152,8 @@ void PanelGOTree::Draw()
 		ImGui::EndMenu();
 	}
 
+	DrawModelImportDialog();
+
 	GameObject* root = App->level->GetRoot();
 	for (GameObject* gameObject : root->childs)
 	{
@@ -175,8 +167,11 @@ void PanelGOTree::Draw()
     DrawLights();
     DrawSkybox();
 
-	if (drag && ImGui::IsMouseReleased(0))
+	if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+	{
 		drag = nullptr;
+		drag_candidate = nullptr;
+	}
 
     //ImGui::End();
 }
@@ -258,12 +253,151 @@ void PanelGOTree::DrawLights()
 		[lights](uint index) { lights->RemoveLocalIBLLight(index); });
 }
 
+void PanelGOTree::ResetProjectState()
+{
+	modelAssetIndex_.Reset();
+	indexedProjectRoot_.clear();
+	modelAssetError_.clear();
+	modelImportDialog_.ClearSelection();
+	modelMenuWasOpen_ = false;
+}
+
+void PanelGOTree::EnsureModelAssetIndex()
+{
+	if (!App->GetActiveProject())
+	{
+		ResetProjectState();
+		return;
+	}
+
+	const std::filesystem::path projectRoot =
+		App->fs->GetProjectRoot().lexically_normal();
+	if (modelAssetIndex_.IsOpen() &&
+		indexedProjectRoot_ == projectRoot)
+	{
+		return;
+	}
+
+	modelAssetError_.clear();
+	if (modelAssetIndex_.OpenProject(projectRoot, modelAssetError_))
+		indexedProjectRoot_ = projectRoot;
+	else
+		indexedProjectRoot_.clear();
+}
+
+void PanelGOTree::DrawModelPrefabMenu()
+{
+	const bool menuOpen = ImGui::BeginMenu("Model");
+	if (!menuOpen)
+	{
+		modelMenuWasOpen_ = false;
+		return;
+	}
+
+	EnsureModelAssetIndex();
+	if (!modelMenuWasOpen_ && modelAssetIndex_.IsOpen())
+	{
+		modelAssetError_.clear();
+		modelAssetIndex_.Refresh(modelAssetError_);
+	}
+	modelMenuWasOpen_ = true;
+
+	const std::vector<const EGE::AssetEntry*> models =
+		modelAssetIndex_.QueryAll(EGE::AssetKind::Model);
+	if (models.empty())
+	{
+		ImGui::MenuItem(
+			modelAssetError_.empty()
+				? "No model assets in this project"
+				: "Model assets are unavailable",
+			nullptr,
+			false,
+			false);
+		if (!modelAssetError_.empty() && ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", modelAssetError_.c_str());
+	}
+
+	for (const EGE::AssetEntry* asset : models)
+	{
+		if (!asset)
+			continue;
+
+		const Resource* imported =
+			App->resources->FindResourceBySourceFile(
+				Resource::model,
+				asset->sourcePath);
+		const std::string label =
+			asset->relativePath.generic_string();
+
+		ImGui::PushID(asset->sourcePath.c_str());
+		if (ImGui::MenuItem(
+				label.c_str(),
+				imported ? nullptr : "Import"))
+		{
+			if (imported)
+			{
+				if (!App->level->AddModel(imported->GetUID()))
+					LOG("Could not add model [%s] to the scene",
+						asset->sourcePath.c_str());
+			}
+			else
+			{
+				modelImportDialog_.Open(asset->sourcePath);
+			}
+		}
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip(
+				imported
+					? "Add this imported model to the scene."
+					: "Import this model, then add it to the scene.");
+		}
+		ImGui::PopID();
+	}
+
+	ImGui::EndMenu();
+}
+
+void PanelGOTree::DrawModelImportDialog()
+{
+	modelImportDialog_.Display();
+	if (!modelImportDialog_.HasSelection())
+		return;
+
+	const std::string sourcePath = modelImportDialog_.GetFile();
+	const UID uid = App->resources->ImportModel(
+		sourcePath.c_str(),
+		modelImportDialog_.GetOptions());
+	modelImportDialog_.ClearSelection();
+
+	if (uid == 0)
+	{
+		LOG("Could not import model [%s]", sourcePath.c_str());
+		return;
+	}
+
+	if (!App->level->AddModel(uid))
+	{
+		LOG("Imported model [%s], but it could not be added to the scene",
+			sourcePath.c_str());
+		return;
+	}
+
+	if (App->editor->assets)
+		App->editor->assets->RefreshProjectAssets();
+}
+
 // ---------------------------------------------------------
 bool PanelGOTree::RecursiveDraw(GameObject* go)
 {
     bool stop = false;
-	sprintf_s(name, 80, "%s##node_%i", go->name.empty() ? "(empty)": go->name.c_str(), node++);
-	uint flags = 0;// ImGuiTreeNodeFlags_OpenOnArrow;
+	const std::string label =
+		(go->name.empty() ? "(empty)" : go->name) +
+		"##GameObject_" + std::to_string(go->GetUID());
+	uint flags =
+		ImGuiTreeNodeFlags_OpenOnArrow |
+		ImGuiTreeNodeFlags_OpenOnDoubleClick |
+		ImGuiTreeNodeFlags_SpanAvailWidth;
 
     const char* str = strstr(go->name.c_str(), "$AssimpFbx$");
     if (str != nullptr)
@@ -309,25 +443,33 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
         if (open_selected == true && selected_go && (*selected_go)->IsUnder(go) == true)
             ImGui::SetNextTreeNodeOpen(true);
 
-        if (ImGui::TreeNodeEx(name, flags))
+        if (ImGui::TreeNodeEx(label.c_str(), flags))
         {
             CheckHover(go);
 
-            if (ImGui::IsItemClicked(0)) {
-                App->editor->SetSelected(go);
-                drag = go;
-            }
+			if (ImGui::IsItemClicked(0)) {
+				App->editor->SetSelected(go);
+				drag_candidate = go;
+			}
 
             if (ImGui::BeginPopupContextItem())
             {
+				if (ImGui::MenuItem("Create Child"))
+				{
+					GameObject* child =
+						App->level->CreateGameObject(go);
+					if (child)
+						App->editor->SetSelected(child);
+				}
                 if (ImGui::MenuItem("Duplicate"))
                     App->level->Duplicate(go);
-                if (ImGui::MenuItem("Remove"))
-                {
-                    App->editor->ClearSelected();
-                    drag = nullptr;
-                    go->Remove();
-                    stop = true;
+				if (ImGui::MenuItem("Remove"))
+				{
+					App->editor->ClearSelected();
+					drag = nullptr;
+					drag_candidate = nullptr;
+					go->Remove();
+					stop = true;
                 }
 
                 ImGui::EndPopup();
@@ -364,7 +506,7 @@ void PanelGOTree::CheckHover(GameObject* go)
 
 		if (ImGui::IsMouseClicked(0)) {
             App->editor->SetSelected(go);
-			drag = go;
+			drag_candidate = go;
 		}
 
 		if (ImGui::IsMouseDoubleClicked(0))
@@ -373,10 +515,14 @@ void PanelGOTree::CheckHover(GameObject* go)
 			App->camera->CenterOn(go->GetGlobalPosition(), std::fmaxf(radius, 5.0f) * 2.0f);
 		}
 
-		if (drag && ImGui::IsMouseReleased(0) && drag != go)
+		if (drag &&
+			ImGui::IsMouseReleased(0) &&
+			drag != go &&
+			!go->IsUnder(drag))
 		{
 			drag->SetNewParent(go, true);
 			drag = nullptr;
+			drag_candidate = nullptr;
 		}
 	}
 }
