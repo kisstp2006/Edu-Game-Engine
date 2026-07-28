@@ -11,7 +11,11 @@ class InputTest
         Log("Editorban vagyok");
 #endif
 
+#if RUNTIME
+        Log("Runtimeban vagyok");
+#endif
     }
+    
 
     void OnUpdate(float deltaTime)
     {
