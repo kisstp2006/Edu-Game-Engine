@@ -937,13 +937,25 @@ GameObject* ModuleLevelManager::RecursiveFind(
 
 GameObject * ModuleLevelManager::Validate(const GameObject * pointer) const
 {
-	if (pointer == root)
-		return root;
+	return pointer
+		? RecursiveValidate(pointer, root)
+		: nullptr;
+}
 
-	for (list<GameObject*>::const_iterator it = root->childs.begin(); it != root->childs.end(); ++it)
-		if (pointer == *it)
-			return (GameObject *) pointer;
+GameObject* ModuleLevelManager::RecursiveValidate(
+	const GameObject* pointer,
+	GameObject* gameObject) const
+{
+	if (!gameObject || gameObject->IsPendingDestroy())
+		return nullptr;
+	if (pointer == gameObject)
+		return gameObject;
 
+	for (GameObject* child : gameObject->childs)
+	{
+		if (GameObject* found = RecursiveValidate(pointer, child))
+			return found;
+	}
 	return nullptr;
 }
 

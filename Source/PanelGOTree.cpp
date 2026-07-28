@@ -116,6 +116,7 @@ void PanelGOTree::Draw()
 
 		if (ImGui::BeginMenu("Load Prefab"))
 		{
+			DrawPrefabAssetMenu();
 			DrawModelPrefabMenu();
             ImGui::EndMenu();
 		}
@@ -358,6 +359,62 @@ void PanelGOTree::DrawModelPrefabMenu()
 	ImGui::EndMenu();
 }
 
+void PanelGOTree::DrawPrefabAssetMenu()
+{
+	if (!ImGui::BeginMenu("Prefab", App->IsStop()))
+		return;
+
+	EnsureModelAssetIndex();
+	modelAssetError_.clear();
+	if (modelAssetIndex_.IsOpen())
+		modelAssetIndex_.Refresh(modelAssetError_);
+
+	const std::vector<const EGE::AssetEntry*> prefabs =
+		modelAssetIndex_.QueryAll(EGE::AssetKind::Prefab);
+	if (prefabs.empty())
+	{
+		ImGui::MenuItem(
+			modelAssetError_.empty()
+				? "No prefab assets in this project"
+				: "Prefab assets are unavailable",
+			nullptr,
+			false,
+			false);
+		if (!modelAssetError_.empty() && ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", modelAssetError_.c_str());
+	}
+
+	for (const EGE::AssetEntry* asset : prefabs)
+	{
+		if (!asset)
+			continue;
+
+		ImGui::PushID(asset->sourcePath.c_str());
+		if (ImGui::MenuItem(asset->relativePath.generic_string().c_str()))
+		{
+			std::string error;
+			if (GameObject* instance = App->level->InstantiatePrefab(
+					asset->sourcePath.c_str(), nullptr, &error))
+			{
+				App->editor->SetSelected(instance);
+				App->editor->SetProjectStatus(
+					true, asset->name + " instantiated.");
+			}
+			else
+			{
+				App->editor->SetProjectStatus(
+					false,
+					error.empty()
+						? "The prefab could not be instantiated."
+						: error);
+			}
+		}
+		ImGui::PopID();
+	}
+
+	ImGui::EndMenu();
+}
+
 void PanelGOTree::DrawModelImportDialog()
 {
 	modelImportDialog_.Display();
@@ -461,8 +518,18 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
 					if (child)
 						App->editor->SetSelected(child);
 				}
-                if (ImGui::MenuItem("Duplicate"))
+				if (ImGui::MenuItem("Duplicate"))
                     App->level->Duplicate(go);
+				if (ImGui::MenuItem(
+						"Create Prefab...",
+						nullptr,
+						false,
+						App->IsStop() && App->editor->assets))
+				{
+					App->editor->assets->BeginCreatePrefab(go);
+					ImGui::SetWindowFocus(
+						App->editor->assets->GetName());
+				}
 				if (ImGui::MenuItem("Remove"))
 				{
 					App->editor->ClearSelected();

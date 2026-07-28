@@ -24,6 +24,7 @@ private:
 
     void DrawLights();
     void DrawSkybox();
+	void DrawPrefabAssetMenu();
 	void DrawModelPrefabMenu();
 	void DrawModelImportDialog();
 	void EnsureModelAssetIndex();

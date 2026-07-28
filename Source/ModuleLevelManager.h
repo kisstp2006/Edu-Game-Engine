@@ -92,6 +92,9 @@ private:
 	GameObject* RecursiveFind(
 		uint uid, GameObject* go, bool includePending) const;
 	GameObject* RecursiveFind(const char* name, GameObject* go) const;
+	GameObject* RecursiveValidate(
+		const GameObject* pointer,
+		GameObject* gameObject) const;
 
 	GameObject* LoadGameObjects(
 		const Config& config,

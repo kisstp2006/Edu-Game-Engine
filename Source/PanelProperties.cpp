@@ -132,6 +132,8 @@ namespace
 			return "Project asset directory";
 		case EGE::AssetKind::Scene:
 			return "Serialized scene source";
+		case EGE::AssetKind::Prefab:
+			return "Reusable GameObject hierarchy";
 		case EGE::AssetKind::Model:
 			return "3D model source";
 		case EGE::AssetKind::Mesh:

@@ -3,6 +3,7 @@
 #include "Application.h"
 #include "EditorDialog.h"
 #include "EditorAssetSelection.h"
+#include "GameObject.h"
 #include "ModuleEditor.h"
 #include "ModuleFileSystem.h"
 #include "ModuleLevelManager.h"
@@ -136,6 +137,7 @@ void PanelAssets::ResetProjectState()
 	openCreateDialog_ = false;
 	createName_[0] = '\0';
 	meshCreation_ = {};
+	prefabSource_ = nullptr;
 }
 
 void PanelAssets::RefreshProjectAssets()
@@ -390,9 +392,10 @@ void PanelAssets::DrawToolbar()
 	ImGui::SetNextItemWidth(filterWidth);
 	if (ImGui::BeginCombo("##AssetKindFilter", filterPreview))
 	{
-		constexpr std::array<EGE::AssetKind, 13> filters = {
+		constexpr std::array<EGE::AssetKind, 14> filters = {
 			EGE::AssetKind::Unknown,
 			EGE::AssetKind::Scene,
+			EGE::AssetKind::Prefab,
 			EGE::AssetKind::Model,
 			EGE::AssetKind::Mesh,
 			EGE::AssetKind::Texture,
@@ -865,6 +868,18 @@ void PanelAssets::DrawAssetContextMenu(
 				OpenScene(entry);
 			ImGui::Separator();
 		}
+		if (entry.kind == EGE::AssetKind::Prefab)
+		{
+			if (ImGui::MenuItem(
+					"Instantiate Prefab",
+					nullptr,
+					false,
+					App->IsStop()))
+			{
+				InstantiatePrefab(entry);
+			}
+			ImGui::Separator();
+		}
 
 		const Resource::Type resourceType = ResourceTypeFor(entry);
 		const ImportInfo* importInfo = FindImportInfo(entry);
@@ -918,6 +933,20 @@ void PanelAssets::DrawCreateMenu()
 		BeginCreate(CreateAssetKind::Folder);
 	if (ImGui::MenuItem("Scene"))
 		BeginCreate(CreateAssetKind::Scene);
+	GameObject* selectedGameObject = nullptr;
+	if (GameObject* const* selected =
+			std::get_if<GameObject*>(&App->editor->GetSelection()))
+	{
+		selectedGameObject = App->level->Validate(*selected);
+	}
+	if (ImGui::MenuItem(
+			"Prefab from Selected GameObject",
+			nullptr,
+			false,
+			selectedGameObject && App->IsStop()))
+	{
+		BeginCreatePrefab(selectedGameObject);
+	}
 	if (ImGui::MenuItem("AngelScript"))
 		BeginCreate(CreateAssetKind::AngelScript);
 
@@ -1084,6 +1113,7 @@ void PanelAssets::DrawCreateDialog()
 	if (ImGui::Button("Cancel", ImVec2(buttonWidth, 0.0f)))
 	{
 		createKind_ = CreateAssetKind::None;
+		prefabSource_ = nullptr;
 		errorMessage_.clear();
 		ImGui::CloseCurrentPopup();
 	}
@@ -1108,6 +1138,7 @@ void PanelAssets::DrawCreateDialog()
 			ImGui::GetKeyIndex(ImGuiKey_Escape), false))
 	{
 		createKind_ = CreateAssetKind::None;
+		prefabSource_ = nullptr;
 		errorMessage_.clear();
 		ImGui::CloseCurrentPopup();
 	}
@@ -1117,6 +1148,8 @@ void PanelAssets::DrawCreateDialog()
 
 void PanelAssets::BeginCreate(CreateAssetKind kind)
 {
+	if (kind != CreateAssetKind::Prefab)
+		prefabSource_ = nullptr;
 	createKind_ = kind;
 	openCreateDialog_ = true;
 	errorMessage_.clear();
@@ -1127,6 +1160,7 @@ void PanelAssets::BeginCreate(CreateAssetKind kind)
 	{
 	case CreateAssetKind::Folder: baseName = "New Folder"; break;
 	case CreateAssetKind::Scene: baseName = "New Scene"; break;
+	case CreateAssetKind::Prefab: baseName = "New Prefab"; break;
 	case CreateAssetKind::AngelScript: baseName = "New Script"; break;
 	case CreateAssetKind::MaterialMetallicRoughness:
 	case CreateAssetKind::MaterialSpecularGlossiness:
@@ -1151,6 +1185,30 @@ void PanelAssets::BeginCreate(CreateAssetKind kind)
 		sizeof(createName_),
 		"%s",
 		uniqueName.c_str());
+}
+
+void PanelAssets::BeginCreatePrefab(GameObject* source)
+{
+	prefabSource_ = App->level->Validate(source);
+	if (!prefabSource_ || prefabSource_ == App->level->GetRoot())
+	{
+		errorMessage_ = "Select a valid GameObject first.";
+		return;
+	}
+
+	BeginCreate(CreateAssetKind::Prefab);
+	prefabSource_ = source;
+	if (IsValidAssetName(source->name.c_str()))
+	{
+		const std::string uniqueName = MakeUniqueCreateName(
+			source->name.c_str(),
+			CreateExtension(CreateAssetKind::Prefab));
+		std::snprintf(
+			createName_,
+			sizeof(createName_),
+			"%s",
+			uniqueName.c_str());
+	}
 }
 
 void PanelAssets::CreatePendingAsset()
@@ -1182,6 +1240,24 @@ void PanelAssets::CreatePendingAsset()
 			return;
 		}
 		FinishAssetCreation(sourcePath, "Scene");
+		return;
+	}
+
+	if (createKind_ == CreateAssetKind::Prefab)
+	{
+		prefabSource_ = App->level->Validate(prefabSource_);
+		if (!prefabSource_ ||
+			!App->level->SavePrefab(
+				prefabSource_,
+				sourcePath.c_str(),
+				&errorMessage_))
+		{
+			if (errorMessage_.empty())
+				errorMessage_ = "The prefab could not be created.";
+			return;
+		}
+		FinishAssetCreation(sourcePath, "Prefab");
+		prefabSource_ = nullptr;
 		return;
 	}
 
@@ -1392,6 +1468,8 @@ const char* PanelAssets::CreateExtension(CreateAssetKind kind)
 	{
 	case CreateAssetKind::Scene:
 		return ".eduscene";
+	case CreateAssetKind::Prefab:
+		return ".egeprefab";
 	case CreateAssetKind::AngelScript:
 		return ".as";
 	case CreateAssetKind::MaterialMetallicRoughness:
@@ -1417,6 +1495,7 @@ const char* PanelAssets::CreateTypeName(CreateAssetKind kind)
 	{
 	case CreateAssetKind::Folder: return "Folder";
 	case CreateAssetKind::Scene: return "Scene";
+	case CreateAssetKind::Prefab: return "Prefab";
 	case CreateAssetKind::AngelScript: return "AngelScript";
 	case CreateAssetKind::MaterialMetallicRoughness:
 		return "Metallic / Roughness Material";
@@ -1705,6 +1784,31 @@ void PanelAssets::OpenScene(const EGE::AssetEntry& entry)
 		statusMessage_ = entry.name + " opened.";
 }
 
+void PanelAssets::InstantiatePrefab(const EGE::AssetEntry& entry)
+{
+	errorMessage_.clear();
+	GameObject* parent = nullptr;
+	if (GameObject* const* selected =
+			std::get_if<GameObject*>(&App->editor->GetSelection()))
+	{
+		parent = App->level->Validate(*selected);
+	}
+
+	GameObject* instance = App->level->InstantiatePrefab(
+		entry.sourcePath.c_str(),
+		parent,
+		&errorMessage_);
+	if (!instance)
+	{
+		if (errorMessage_.empty())
+			errorMessage_ = "The prefab could not be instantiated.";
+		return;
+	}
+
+	App->editor->SetSelected(instance);
+	statusMessage_ = entry.name + " instantiated.";
+}
+
 void PanelAssets::OpenAssetEditor(const EGE::AssetEntry& entry)
 {
 	const ImportInfo* info = FindImportInfo(entry);
@@ -1775,6 +1879,8 @@ void PanelAssets::HandleAssetInteractions(
 			pendingNavigation_ = entry.relativePath;
 		else if (entry.kind == EGE::AssetKind::Scene)
 			OpenScene(entry);
+		else if (entry.kind == EGE::AssetKind::Prefab)
+			InstantiatePrefab(entry);
 		else if (entry.kind == EGE::AssetKind::Script)
 			OpenScriptInVsCode(entry);
 		else
@@ -2115,6 +2221,8 @@ ImVec4 PanelAssets::KindColor(EGE::AssetKind kind)
 		return ImVec4(0.92f, 0.68f, 0.27f, 1.0f);
 	case EGE::AssetKind::Scene:
 		return ImVec4(0.36f, 0.82f, 0.55f, 1.0f);
+	case EGE::AssetKind::Prefab:
+		return ImVec4(0.25f, 0.67f, 0.96f, 1.0f);
 	case EGE::AssetKind::Model:
 		return ImVec4(0.66f, 0.48f, 0.95f, 1.0f);
 	case EGE::AssetKind::Mesh:
@@ -2148,6 +2256,7 @@ const char* PanelAssets::KindGlyph(EGE::AssetKind kind)
 	switch (kind)
 	{
 	case EGE::AssetKind::Scene: return "SCN";
+	case EGE::AssetKind::Prefab: return "PFB";
 	case EGE::AssetKind::Model: return "3D";
 	case EGE::AssetKind::Mesh: return "MESH";
 	case EGE::AssetKind::Texture: return "TEX";
