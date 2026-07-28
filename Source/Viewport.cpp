@@ -70,10 +70,13 @@ void Viewport::Draw(ComponentCamera* camera, ComponentCamera* culling)
             }
 
             ComponentAnimation* animation = nullptr;
-            GameObject* const* go_ptr = std::get_if<GameObject*>(&App->editor->GetSelection());
-            if(go_ptr != nullptr && *go_ptr)
+            GameObject* gameObject =
+				App->editor->GetPrimaryGameObject();
+            if(gameObject)
             {
-                animation = static_cast<ComponentAnimation*>((*go_ptr)->FindFirstComponent(Component::Animation));
+                animation = static_cast<ComponentAnimation*>(
+					gameObject->FindFirstComponent(
+						Component::Animation));
             }
             
             ResourceStateMachine* state_machine = nullptr;

@@ -26,6 +26,22 @@ using namespace std;
 
 namespace
 {
+	std::string NormalizeResourceSourcePath(std::string path)
+	{
+		std::replace(path.begin(), path.end(), '\\', '/');
+		std::transform(
+			path.begin(),
+			path.end(),
+			path.begin(),
+			[](unsigned char character)
+			{
+				return static_cast<char>(std::tolower(character));
+			});
+		while (path.starts_with("./"))
+			path.erase(0, 2);
+		return path;
+	}
+
 	bool ResolveNativeImportSource(
 		const char* sourceFile,
 		std::string& nativePath)
@@ -1254,33 +1270,70 @@ const Resource* ModuleResources::FindResourceBySourceFile(
 	Resource::Type type,
 	const std::string& sourceFile) const
 {
-	auto normalize = [](std::string path)
-	{
-		std::replace(path.begin(), path.end(), '\\', '/');
-		std::transform(
-			path.begin(),
-			path.end(),
-			path.begin(),
-			[](unsigned char character)
-			{
-				return static_cast<char>(std::tolower(character));
-			});
-		while (path.starts_with("./"))
-			path.erase(0, 2);
-		return path;
-	};
-
-	const std::string expected = normalize(sourceFile);
+	const std::string expected =
+		NormalizeResourceSourcePath(sourceFile);
 	for (const auto& [uid, resource] : resources)
 	{
 		if (resource &&
 			resource->GetType() == type &&
-			normalize(resource->GetFile()) == expected)
+			NormalizeResourceSourcePath(resource->GetFile()) ==
+				expected)
 		{
 			return resource;
 		}
 	}
 	return nullptr;
+}
+
+std::size_t ModuleResources::RemoveResourcesBySourcePath(
+	const std::string& sourcePath)
+{
+	const std::string expected =
+		NormalizeResourceSourcePath(sourcePath);
+	std::vector<UID> matches;
+	for (const auto& [uid, resource] : resources)
+	{
+		if (uid <= RESERVED_RESOURCES ||
+			!resource ||
+			!resource->GetFile())
+		{
+			continue;
+		}
+		if (NormalizeResourceSourcePath(resource->GetFile()) ==
+			expected)
+			matches.push_back(uid);
+	}
+
+	for (UID uid : matches)
+		RemoveResource(uid);
+	if (!matches.empty())
+		SaveResources();
+	return matches.size();
+}
+
+std::size_t ModuleResources::RenameResourceSourcePath(
+	const std::string& oldPath,
+	const std::string& newPath)
+{
+	const std::string expected =
+		NormalizeResourceSourcePath(oldPath);
+	std::size_t renamed = 0;
+	for (auto& [uid, resource] : resources)
+	{
+		if (uid <= RESERVED_RESOURCES ||
+			!resource ||
+			!resource->GetFile() ||
+			NormalizeResourceSourcePath(resource->GetFile()) !=
+				expected)
+		{
+			continue;
+		}
+		resource->file = newPath;
+		++renamed;
+	}
+	if (renamed > 0)
+		SaveResources();
+	return renamed;
 }
 
 void ModuleResources::MakeResourceSourcePathsPortable()

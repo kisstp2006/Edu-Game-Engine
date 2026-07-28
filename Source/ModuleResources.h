@@ -133,6 +133,11 @@ public:
 	const Resource* FindResourceBySourceFile(
 		Resource::Type type,
 		const std::string& sourceFile) const;
+	std::size_t RemoveResourcesBySourcePath(
+		const std::string& sourcePath);
+	std::size_t RenameResourceSourcePath(
+		const std::string& oldPath,
+		const std::string& newPath);
 
 	void ReleaseFromMemory(UID uid);
     void RemoveResource(UID uid);

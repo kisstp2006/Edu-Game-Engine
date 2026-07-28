@@ -8,6 +8,7 @@
 #include "ModuleFileSystem.h"
 #include "ModuleLevelManager.h"
 #include "ModuleResources.h"
+#include "ModuleScripting.h"
 #include "ResourceTexture.h"
 #include "Project/VsCodeWorkspace.h"
 #include "Scripting/ScriptAsset.h"
@@ -136,6 +137,11 @@ void PanelAssets::ResetProjectState()
 	createKind_ = CreateAssetKind::None;
 	openCreateDialog_ = false;
 	createName_[0] = '\0';
+	pendingDeletePaths_.clear();
+	pendingRenamePath_.clear();
+	openDeleteDialog_ = false;
+	openRenameDialog_ = false;
+	renameName_[0] = '\0';
 	meshCreation_ = {};
 	prefabSource_ = nullptr;
 }
@@ -148,6 +154,7 @@ void PanelAssets::RefreshProjectAssets()
 
 void PanelAssets::DrawDialogs()
 {
+	DrawActionDialogs();
 	DrawCreateDialog();
 	fileDialog_.Display();
 	if (fileDialog_.HasSelected())
@@ -272,6 +279,43 @@ void PanelAssets::DrawToolbar()
 	{
 		NavigateTo(browser_.GetCurrentPath().parent_path());
 	}
+	if (acceptsShortcut && io.KeyCtrl &&
+		io.KeyShift &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_N, false))
+	{
+		BeginCreate(CreateAssetKind::Folder);
+	}
+	if (acceptsShortcut && io.KeyCtrl &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_A, false))
+	{
+		SelectAllVisible();
+	}
+	if (acceptsShortcut && io.KeyCtrl &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_C, false))
+	{
+		CopySelectedPaths();
+	}
+	if (acceptsShortcut &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_DELETE, false))
+	{
+		RequestDeleteSelected();
+	}
+	if (acceptsShortcut &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_F2, false))
+	{
+		RequestRenameSelected();
+	}
+	if (acceptsShortcut &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_RETURN, false))
+	{
+		OpenSelectedAsset();
+	}
+	if (acceptsShortcut &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_ESCAPE, false))
+	{
+		selection_.clear();
+		SyncInspectorSelection({}, 0);
+	}
 	const bool focusSearch =
 		acceptsShortcut &&
 		io.KeyCtrl &&
@@ -359,6 +403,15 @@ void PanelAssets::DrawToolbar()
 		Refresh();
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Refresh assets (F5)");
+
+	ContinueControlLine(ButtonWidth("Actions"));
+	if (ImGui::Button("Actions"))
+		ImGui::OpenPopup("AssetActionsMenu");
+	if (ImGui::BeginPopup("AssetActionsMenu"))
+	{
+		DrawActionsMenu();
+		ImGui::EndPopup();
+	}
 
 	const float clearSearchWidth = ButtonWidth("X");
 	const float availableSearchWidth =
@@ -536,6 +589,11 @@ void PanelAssets::DrawContentPane(float height)
 			if (ImGui::BeginMenu("Import asset"))
 			{
 				DrawImportOptions();
+				ImGui::EndMenu();
+			}
+			if (ImGui::BeginMenu("Actions"))
+			{
+				DrawActionsMenu();
 				ImGui::EndMenu();
 			}
 			if (ImGui::MenuItem("Refresh"))
@@ -923,8 +981,178 @@ void PanelAssets::DrawAssetContextMenu(
 	}
 
 	ImGui::Separator();
-	if (ImGui::MenuItem("Copy asset path"))
-		ImGui::SetClipboardText(entry.sourcePath.c_str());
+	if (ImGui::MenuItem(
+			"Rename", "F2", false, selection_.size() == 1))
+	{
+		RequestRenameSelected();
+	}
+	if (ImGui::MenuItem("Copy asset path", "Ctrl+C"))
+		CopySelectedPaths();
+	if (ImGui::MenuItem("Delete", "Delete"))
+		RequestDeleteSelected();
+}
+
+void PanelAssets::DrawActionsMenu()
+{
+	const bool hasSelection = !selection_.empty();
+	const bool hasSingleSelection = selection_.size() == 1;
+	if (ImGui::MenuItem("New Folder", "Ctrl+Shift+N"))
+		BeginCreate(CreateAssetKind::Folder);
+	ImGui::Separator();
+	if (ImGui::MenuItem(
+			"Open", "Enter", false, hasSingleSelection))
+	{
+		OpenSelectedAsset();
+	}
+	if (ImGui::MenuItem(
+			"Select All", "Ctrl+A", false,
+			!browser_.Query(search_, kindFilter_).empty()))
+	{
+		SelectAllVisible();
+	}
+	if (ImGui::MenuItem(
+			"Rename", "F2", false, hasSingleSelection))
+	{
+		RequestRenameSelected();
+	}
+	if (ImGui::MenuItem(
+			"Copy asset paths", "Ctrl+C", false, hasSelection))
+	{
+		CopySelectedPaths();
+	}
+	if (ImGui::MenuItem(
+			"Delete", "Delete", false, hasSelection))
+	{
+		RequestDeleteSelected();
+	}
+	if (ImGui::MenuItem(
+			"Clear Selection", "Esc", false, hasSelection))
+	{
+		selection_.clear();
+		SyncInspectorSelection({}, 0);
+	}
+}
+
+void PanelAssets::DrawActionDialogs()
+{
+	if (openDeleteDialog_)
+	{
+		EGE::EditorDialog::Open("Delete Assets");
+		openDeleteDialog_ = false;
+	}
+	if (EGE::EditorDialog::Begin(
+			"Delete Assets",
+			ImVec2(470.0f, 0.0f),
+			ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::Text(
+			"Delete %zu selected item%s?",
+			pendingDeletePaths_.size(),
+			pendingDeletePaths_.size() == 1 ? "" : "s");
+		ImGui::Spacing();
+		const std::size_t previewCount =
+			std::min<std::size_t>(pendingDeletePaths_.size(), 5);
+		for (std::size_t index = 0; index < previewCount; ++index)
+			ImGui::BulletText("%s", pendingDeletePaths_[index].c_str());
+		if (pendingDeletePaths_.size() > previewCount)
+		{
+			ImGui::TextDisabled(
+				"...and %zu more",
+				pendingDeletePaths_.size() - previewCount);
+		}
+		ImGui::Spacing();
+		ImGui::TextColored(
+			ImVec4(0.96f, 0.55f, 0.35f, 1.0f),
+			"This operation cannot be undone.");
+		ImGui::Spacing();
+		if (ImGui::Button("Cancel"))
+		{
+			pendingDeletePaths_.clear();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Delete"))
+		{
+			DeletePendingAssets();
+			ImGui::CloseCurrentPopup();
+		}
+		EGE::EditorDialog::End();
+	}
+
+	bool focusRename = false;
+	if (openRenameDialog_)
+	{
+		EGE::EditorDialog::Open("Rename Asset");
+		openRenameDialog_ = false;
+		focusRename = true;
+	}
+	if (EGE::EditorDialog::Begin(
+			"Rename Asset",
+			ImVec2(470.0f, 0.0f),
+			ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::TextDisabled("Name, including the file extension");
+		if (focusRename)
+			ImGui::SetKeyboardFocusHere();
+		ImGui::SetNextItemWidth(-1.0f);
+		const bool submit = ImGui::InputText(
+			"##RenameAssetName",
+			renameName_,
+			sizeof(renameName_),
+			ImGuiInputTextFlags_EnterReturnsTrue);
+
+		const EGE::AssetEntry* entry =
+			browser_.FindBySourcePath(pendingRenamePath_);
+		bool valid = entry && IsValidAssetName(renameName_);
+		std::string validationMessage;
+		if (valid && entry->name == renameName_)
+		{
+			valid = false;
+			validationMessage = "Enter a different name.";
+		}
+		if (valid)
+		{
+			const std::filesystem::path target =
+				browser_.GetAssetsRoot() /
+				entry->parentPath /
+				renameName_;
+			std::error_code error;
+			if (std::filesystem::exists(target, error))
+			{
+				valid = false;
+				validationMessage =
+					"An item with this name already exists.";
+			}
+			else if (!entry->directory &&
+				EGE::AssetBrowserModel::Classify(target) != entry->kind)
+			{
+				valid = false;
+				validationMessage =
+					"The extension must keep the same asset type.";
+			}
+		}
+		if (!valid)
+		{
+			ImGui::TextDisabled(
+				"%s",
+				validationMessage.empty()
+					? "Enter a valid asset name."
+					: validationMessage.c_str());
+		}
+
+		if (ImGui::Button("Cancel"))
+		{
+			pendingRenamePath_.clear();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if ((ImGui::Button("Rename") || submit) && valid)
+		{
+			RenamePendingAsset();
+			ImGui::CloseCurrentPopup();
+		}
+		EGE::EditorDialog::End();
+	}
 }
 
 void PanelAssets::DrawCreateMenu()
@@ -933,12 +1161,8 @@ void PanelAssets::DrawCreateMenu()
 		BeginCreate(CreateAssetKind::Folder);
 	if (ImGui::MenuItem("Scene"))
 		BeginCreate(CreateAssetKind::Scene);
-	GameObject* selectedGameObject = nullptr;
-	if (GameObject* const* selected =
-			std::get_if<GameObject*>(&App->editor->GetSelection()))
-	{
-		selectedGameObject = App->level->Validate(*selected);
-	}
+	GameObject* selectedGameObject =
+		App->editor->GetPrimaryGameObject();
 	if (ImGui::MenuItem(
 			"Prefab from Selected GameObject",
 			nullptr,
@@ -1568,6 +1792,14 @@ void PanelAssets::Refresh()
 	if (!browser_.Refresh(errorMessage_))
 		return;
 	RebuildImportIndex();
+	for (auto iterator = selection_.begin();
+		iterator != selection_.end();)
+	{
+		if (!browser_.FindBySourcePath(*iterator))
+			iterator = selection_.erase(iterator);
+		else
+			++iterator;
+	}
 	if (const EGE::EditorAssetSelection* selected =
 			std::get_if<EGE::EditorAssetSelection>(
 				&App->editor->GetSelection());
@@ -1637,9 +1869,16 @@ void PanelAssets::NavigateTo(
 	const std::filesystem::path& directory,
 	bool addToHistory)
 {
+	const std::filesystem::path previousPath =
+		browser_.GetCurrentPath();
 	if (!browser_.NavigateTo(directory))
 		return;
 
+	if (browser_.GetCurrentPath() != previousPath)
+	{
+		selection_.clear();
+		SyncInspectorSelection({}, 0);
+	}
 	if (addToHistory)
 	{
 		if (!history_.empty() &&
@@ -1787,12 +2026,8 @@ void PanelAssets::OpenScene(const EGE::AssetEntry& entry)
 void PanelAssets::InstantiatePrefab(const EGE::AssetEntry& entry)
 {
 	errorMessage_.clear();
-	GameObject* parent = nullptr;
-	if (GameObject* const* selected =
-			std::get_if<GameObject*>(&App->editor->GetSelection()))
-	{
-		parent = App->level->Validate(*selected);
-	}
+	GameObject* parent =
+		App->editor->GetPrimaryGameObject();
 
 	GameObject* instance = App->level->InstantiatePrefab(
 		entry.sourcePath.c_str(),
@@ -1862,6 +2097,359 @@ void PanelAssets::OpenScriptInVsCode(const EGE::AssetEntry& entry)
 		return;
 
 	statusMessage_ = entry.name + " opened in Visual Studio Code.";
+}
+
+void PanelAssets::OpenSelectedAsset()
+{
+	if (selection_.size() != 1)
+		return;
+
+	const EGE::AssetEntry* entry =
+		browser_.FindBySourcePath(*selection_.begin());
+	if (!entry)
+		return;
+
+	if (entry->directory)
+		pendingNavigation_ = entry->relativePath;
+	else if (entry->kind == EGE::AssetKind::Scene)
+		OpenScene(*entry);
+	else if (entry->kind == EGE::AssetKind::Prefab)
+		InstantiatePrefab(*entry);
+	else if (entry->kind == EGE::AssetKind::Script)
+		OpenScriptInVsCode(*entry);
+	else
+		OpenAssetEditor(*entry);
+}
+
+void PanelAssets::SelectAllVisible()
+{
+	const std::vector<const EGE::AssetEntry*> entries =
+		browser_.Query(search_, kindFilter_);
+	selection_.clear();
+	for (const EGE::AssetEntry* entry : entries)
+	{
+		if (entry)
+			selection_.insert(entry->sourcePath);
+	}
+	selectionAnchor_ = entries.empty()
+		? std::numeric_limits<std::size_t>::max()
+		: entries.size() - 1;
+	if (!entries.empty())
+		SyncInspectorSelection(entries, entries.size() - 1);
+}
+
+void PanelAssets::CopySelectedPaths() const
+{
+	const std::vector<std::string> paths = GetSelectedSourcePaths();
+	if (paths.empty())
+		return;
+
+	std::string clipboard;
+	for (const std::string& path : paths)
+	{
+		if (!clipboard.empty())
+			clipboard += '\n';
+		clipboard += path;
+	}
+	ImGui::SetClipboardText(clipboard.c_str());
+}
+
+std::vector<std::string> PanelAssets::GetSelectedSourcePaths() const
+{
+	std::vector<std::string> paths;
+	paths.reserve(selection_.size());
+	for (const std::string& path : selection_)
+	{
+		if (browser_.FindBySourcePath(path))
+			paths.push_back(path);
+	}
+	return paths;
+}
+
+void PanelAssets::RequestRenameSelected()
+{
+	const std::vector<std::string> paths = GetSelectedSourcePaths();
+	if (paths.size() != 1)
+		return;
+
+	const EGE::AssetEntry* entry =
+		browser_.FindBySourcePath(paths.front());
+	if (!entry)
+		return;
+
+	pendingRenamePath_ = entry->sourcePath;
+	std::snprintf(
+		renameName_,
+		sizeof(renameName_),
+		"%s",
+		entry->name.c_str());
+	openRenameDialog_ = true;
+}
+
+void PanelAssets::RenamePendingAsset()
+{
+	const EGE::AssetEntry* current =
+		browser_.FindBySourcePath(pendingRenamePath_);
+	if (!current || !IsValidAssetName(renameName_))
+		return;
+
+	const EGE::AssetEntry entry = *current;
+	const std::filesystem::path assetsRoot =
+		browser_.GetAssetsRoot().lexically_normal();
+	const std::filesystem::path source =
+		(assetsRoot / entry.relativePath).lexically_normal();
+	const std::filesystem::path targetRelative =
+		entry.parentPath / renameName_;
+	const std::filesystem::path target =
+		(assetsRoot / targetRelative).lexically_normal();
+
+	std::error_code error;
+	const std::filesystem::path canonicalRoot =
+		std::filesystem::weakly_canonical(assetsRoot, error);
+	if (error)
+	{
+		errorMessage_ = "The Assets directory could not be resolved.";
+		return;
+	}
+	std::error_code sourceError;
+	const std::filesystem::path canonicalSource =
+		std::filesystem::weakly_canonical(source, sourceError);
+	std::error_code parentError;
+	const std::filesystem::path canonicalTargetParent =
+		std::filesystem::weakly_canonical(
+			target.parent_path(), parentError);
+	if (sourceError || parentError ||
+		canonicalSource == canonicalRoot ||
+		!IsPathInside(canonicalSource, canonicalRoot) ||
+		!IsPathInside(canonicalTargetParent, canonicalRoot))
+	{
+		errorMessage_ = "The selected asset path is not safe to rename.";
+		return;
+	}
+	if (std::filesystem::exists(target, error))
+	{
+		errorMessage_ = "An item with the new name already exists.";
+		return;
+	}
+	if (!entry.directory &&
+		EGE::AssetBrowserModel::Classify(target) != entry.kind)
+	{
+		errorMessage_ = "The new extension changes the asset type.";
+		return;
+	}
+
+	std::vector<EGE::AssetEntry> affectedFiles;
+	for (const EGE::AssetEntry* asset :
+		browser_.QueryAll(EGE::AssetKind::Unknown))
+	{
+		if (!asset)
+			continue;
+		if (asset->sourcePath == entry.sourcePath ||
+			(entry.directory &&
+			 IsPathInside(
+				assetsRoot / asset->relativePath,
+				source)))
+		{
+			affectedFiles.push_back(*asset);
+		}
+	}
+
+	App->editor->CloseAssetEditors();
+	std::filesystem::rename(source, target, error);
+	if (error)
+	{
+		errorMessage_ =
+			"The asset could not be renamed: " + error.message();
+		return;
+	}
+
+	bool reloadScripts = false;
+	for (const EGE::AssetEntry& asset : affectedFiles)
+	{
+		const std::filesystem::path suffix = entry.directory
+			? asset.relativePath.lexically_relative(entry.relativePath)
+			: std::filesystem::path{};
+		const std::filesystem::path newRelative = entry.directory
+			? targetRelative / suffix
+			: targetRelative;
+		const std::string newSource =
+			"Assets/" + newRelative.generic_string();
+		App->resources->RenameResourceSourcePath(
+			asset.sourcePath, newSource);
+		App->level->OnAssetRenamed(
+			asset.sourcePath, newSource);
+		reloadScripts =
+			reloadScripts ||
+			asset.kind == EGE::AssetKind::Script;
+	}
+
+	const std::string renamedSource =
+		"Assets/" + targetRelative.generic_string();
+	if (entry.directory)
+	{
+		App->level->OnAssetRenamed(
+			entry.sourcePath, renamedSource);
+	}
+	pendingRenamePath_.clear();
+	selection_.clear();
+	selection_.insert(renamedSource);
+	Refresh();
+	if (const EGE::AssetEntry* renamed =
+			browser_.FindBySourcePath(renamedSource))
+	{
+		SelectInInspector(*renamed);
+	}
+	if (reloadScripts && App->scripting)
+		App->scripting->Reload();
+	statusMessage_ = entry.name + " renamed to " + renameName_ + ".";
+}
+
+void PanelAssets::RequestDeleteSelected()
+{
+	pendingDeletePaths_ = GetSelectedSourcePaths();
+	openDeleteDialog_ = !pendingDeletePaths_.empty();
+}
+
+void PanelAssets::DeletePendingAssets()
+{
+	struct DeleteTarget
+	{
+		EGE::AssetEntry entry;
+		std::filesystem::path absolutePath;
+	};
+
+	const std::filesystem::path assetsRoot =
+		browser_.GetAssetsRoot().lexically_normal();
+	std::error_code error;
+	const std::filesystem::path canonicalRoot =
+		std::filesystem::weakly_canonical(assetsRoot, error);
+	if (error)
+	{
+		errorMessage_ = "The Assets directory could not be resolved.";
+		return;
+	}
+
+	std::vector<DeleteTarget> targets;
+	for (const std::string& path : pendingDeletePaths_)
+	{
+		const EGE::AssetEntry* entry =
+			browser_.FindBySourcePath(path);
+		if (!entry)
+			continue;
+
+		const std::filesystem::path absolute =
+			std::filesystem::weakly_canonical(
+				assetsRoot / entry->relativePath, error);
+		if (error || absolute == canonicalRoot ||
+			!IsPathInside(absolute, canonicalRoot))
+		{
+			error.clear();
+			continue;
+		}
+		targets.push_back({*entry, absolute});
+	}
+
+	std::vector<DeleteTarget> rootTargets;
+	for (const DeleteTarget& candidate : targets)
+	{
+		const bool insideSelectedFolder = std::any_of(
+			targets.begin(),
+			targets.end(),
+			[&candidate](const DeleteTarget& other)
+			{
+				return other.entry.directory &&
+					candidate.absolutePath != other.absolutePath &&
+					IsPathInside(
+						candidate.absolutePath,
+						other.absolutePath);
+			});
+		if (!insideSelectedFolder)
+			rootTargets.push_back(candidate);
+	}
+	targets = std::move(rootTargets);
+
+	std::vector<EGE::AssetEntry> files;
+	for (const EGE::AssetEntry* entry :
+		browser_.QueryAll(EGE::AssetKind::Unknown))
+	{
+		if (entry)
+			files.push_back(*entry);
+	}
+
+	App->editor->CloseAssetEditors();
+	std::vector<DeleteTarget> removedTargets;
+	std::string firstError;
+	for (const DeleteTarget& target : targets)
+	{
+		error.clear();
+		std::filesystem::remove_all(target.absolutePath, error);
+		if (error)
+		{
+			if (firstError.empty())
+				firstError = error.message();
+			continue;
+		}
+		removedTargets.push_back(target);
+	}
+
+	bool reloadScripts = false;
+	std::size_t removedResources = 0;
+	for (const EGE::AssetEntry& file : files)
+	{
+		const std::filesystem::path absolute =
+			(assetsRoot / file.relativePath).lexically_normal();
+		const bool removed = std::any_of(
+			removedTargets.begin(),
+			removedTargets.end(),
+			[&absolute](const DeleteTarget& target)
+			{
+				return absolute == target.absolutePath ||
+					(target.entry.directory &&
+					 IsPathInside(absolute, target.absolutePath));
+			});
+		if (!removed)
+			continue;
+
+		removedResources +=
+			App->resources->RemoveResourcesBySourcePath(
+				file.sourcePath);
+		reloadScripts =
+			reloadScripts ||
+			file.kind == EGE::AssetKind::Script;
+	}
+	for (const DeleteTarget& target : removedTargets)
+		App->level->OnAssetDeleted(target.entry.sourcePath);
+
+	pendingDeletePaths_.clear();
+	selection_.clear();
+	selectionAnchor_ = std::numeric_limits<std::size_t>::max();
+	if (std::holds_alternative<EGE::EditorAssetSelection>(
+			App->editor->GetSelection()))
+	{
+		App->editor->ClearSelected();
+	}
+	Refresh();
+	if (reloadScripts && App->scripting)
+		App->scripting->Reload();
+
+	if (!firstError.empty())
+	{
+		errorMessage_ =
+			"Some assets could not be deleted: " + firstError;
+	}
+	else
+	{
+		statusMessage_ =
+			std::to_string(removedTargets.size()) +
+			" item(s) deleted";
+		if (removedResources > 0)
+		{
+			statusMessage_ += ", " +
+				std::to_string(removedResources) +
+				" imported resource(s) removed";
+		}
+		statusMessage_ += ".";
+	}
 }
 
 void PanelAssets::HandleAssetInteractions(

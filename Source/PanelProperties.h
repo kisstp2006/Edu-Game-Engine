@@ -43,6 +43,7 @@ class SkyboxRollout;
 class Texture2D;
 class Framebuffer;
 namespace EGE { struct EditorAssetSelection; }
+namespace EGE { struct GameObjectSelection; }
 
 class PanelProperties : public Panel
 {
@@ -74,6 +75,8 @@ public:
     const SkyboxRollout* getSkyboxEditor() const { return skybox.get(); }
 private:
     void DrawGameObject(GameObject* go, Component* component);
+	void DrawGameObjectSelection(
+		const EGE::GameObjectSelection& selection);
     void DrawDirLight(DirLight* light);
     void DrawPointLight(PointLight* light);
     void DrawSpotLight(SpotLight* light);

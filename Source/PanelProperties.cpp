@@ -202,7 +202,8 @@ void PanelProperties::Draw()
 		ReleaseInspectedAssetResource();
 
     std::visit(overload {
-        [this](GameObject* go)      { DrawGameObject(go, nullptr);      },
+        [this](const EGE::GameObjectSelection& gameObjects)
+			{ DrawGameObjectSelection(gameObjects); },
         [this](DirLight* light)     { DrawDirLight(light);     },
         [this](PointLight* light)   { DrawPointLight(light);   },
         [this](SpotLight* light)    { DrawSpotLight(light);    },
@@ -975,6 +976,114 @@ void PanelProperties::DrawLocalIBLLight(LocalIBLLight *light)
         }
     }
 
+}
+
+void PanelProperties::DrawGameObjectSelection(
+	const EGE::GameObjectSelection& selection)
+{
+	if (selection.objects.empty())
+	{
+		ImGui::TextDisabled("Nothing selected.");
+		return;
+	}
+	if (selection.objects.size() == 1)
+	{
+		DrawGameObject(selection.objects.front(), nullptr);
+		return;
+	}
+
+	GameObject* primary = selection.primary
+		? selection.primary
+		: selection.objects.back();
+	ImGui::Text(
+		"%zu GameObjects selected",
+		selection.objects.size());
+	ImGui::TextDisabled(
+		"Primary: %s",
+		primary->name.empty() ? "(unnamed)" : primary->name.c_str());
+	ImGui::Separator();
+
+	if (ImGui::BeginMenu("Options"))
+	{
+		if (ImGui::MenuItem("Reset Transforms"))
+		{
+			for (GameObject* gameObject : selection.objects)
+			{
+				gameObject->SetLocalPosition(float3::zero);
+				gameObject->SetLocalRotation(Quat::identity);
+				gameObject->SetLocalScale(float3::one);
+			}
+		}
+		ImGui::EndMenu();
+	}
+
+	bool active = primary->IsActive();
+	const bool mixedActive = std::any_of(
+		selection.objects.begin(),
+		selection.objects.end(),
+		[active](const GameObject* gameObject)
+		{
+			return gameObject->IsActive() != active;
+		});
+	if (ImGui::Checkbox("Active", &active))
+	{
+		for (GameObject* gameObject : selection.objects)
+			gameObject->SetActive(active);
+	}
+	if (mixedActive)
+	{
+		ImGui::SameLine();
+		ImGui::TextDisabled("(mixed)");
+	}
+
+	ImGui::TextDisabled("Name");
+	ImGui::SameLine();
+	ImGui::TextUnformatted("Multiple values");
+
+	if (ImGui::CollapsingHeader(
+			"Local Transformation",
+			ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		float3 position = primary->GetLocalPosition();
+		float3 rotation =
+			primary->GetLocalRotation() * RADTODEG;
+		float3 scale = primary->GetLocalScale();
+
+		if (ImGui::DragFloat3(
+				"Position", &position.x, 0.01f))
+		{
+			for (GameObject* gameObject : selection.objects)
+				gameObject->SetLocalPosition(position);
+		}
+		if (ImGui::DragFloat3(
+				"Rotation", &rotation.x, 0.1f))
+		{
+			const float3 radians = rotation * DEGTORAD;
+			for (GameObject* gameObject : selection.objects)
+				gameObject->SetLocalRotation(radians);
+		}
+		if (ImGui::DragFloat3(
+				"Scale", &scale.x, 0.01f))
+		{
+			for (GameObject* gameObject : selection.objects)
+				gameObject->SetLocalScale(scale);
+		}
+		float uniformScale = scale.x;
+		if (ImGui::DragFloat(
+				"Uniform Scale", &uniformScale, 0.01f))
+		{
+			scale = float3(uniformScale);
+			for (GameObject* gameObject : selection.objects)
+				gameObject->SetLocalScale(scale);
+		}
+
+		App->renderer3D->viewport->GetScene()->
+			DrawGuizmoProperties(selection);
+	}
+
+	ImGui::Spacing();
+	ImGui::TextDisabled(
+		"Component editing is available when one GameObject is selected.");
 }
 
 // ---------------------------------------------------------

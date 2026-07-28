@@ -3,6 +3,7 @@
 #include "PanelGOTree.h"
 #include <imgui.h>
 #include "Application.h"
+#include "EditorDialog.h"
 #include "ModuleLevelManager.h"
 #include "LightManager.h"
 #include "ModuleEditor.h"
@@ -14,6 +15,7 @@
 #include "GameObject.h"
 
 #include <list>
+#include <SDL_scancode.h>
 #include <string>
 #include <variant>
 
@@ -94,12 +96,20 @@ PanelGOTree::~PanelGOTree()
 // ---------------------------------------------------------
 void PanelGOTree::Draw()
 {
+	DrawActionDialogs();
+
 	if (!drag &&
 		drag_candidate &&
 		ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f))
 	{
 		drag = drag_candidate;
 	}
+	GameObject* root = App->level->GetRoot();
+	selectionOrder_.clear();
+	for (GameObject* gameObject : root->childs)
+		BuildSelectionOrder(gameObject);
+	selectionAnchor_ = App->level->Validate(selectionAnchor_);
+
 	//ImGui::SetNextWindowContentWidth((float) (width*2));
     //ImGui::Begin("GameObjects Hierarchy", &active, 
 		//ImGuiWindowFlags_NoResize | 
@@ -108,6 +118,41 @@ void PanelGOTree::Draw()
 
 	if (ImGui::BeginMenu("Options"))
 	{
+		GameObject* primary = App->editor->GetPrimaryGameObject();
+		const bool hasSelection = primary != nullptr;
+		if (ImGui::MenuItem("New Game Object", "Ctrl+Shift+N"))
+		{
+			if (GameObject* gameObject =
+					App->level->CreateGameObject())
+			{
+				App->editor->SetSelected(gameObject);
+				selectionAnchor_ = gameObject;
+			}
+		}
+		if (ImGui::MenuItem(
+				"Select All", "Ctrl+A", false,
+				!selectionOrder_.empty()))
+		{
+			App->editor->SetGameObjectSelection(
+				selectionOrder_,
+				selectionOrder_.empty()
+					? nullptr
+					: selectionOrder_.back());
+		}
+		if (ImGui::MenuItem(
+				"Duplicate Selected", "Ctrl+D", false, hasSelection))
+			DuplicateSelection();
+		if (ImGui::MenuItem(
+				"Rename Selected", "F2", false, hasSelection))
+			RequestRenameSelection();
+		if (ImGui::MenuItem(
+				"Frame Selected", "F", false, hasSelection))
+			FrameSelection();
+		if (ImGui::MenuItem(
+				"Delete Selected", "Delete", false, hasSelection))
+			RequestDeleteSelection();
+
+		ImGui::Separator();
 		if (ImGui::MenuItem("Load..", nullptr, false, App->IsStop()))
 			App->editor->RequestOpenScene();
 
@@ -120,9 +165,6 @@ void PanelGOTree::Draw()
 			DrawModelPrefabMenu();
             ImGui::EndMenu();
 		}
-
-		if(ImGui::MenuItem("New Game Object"))
-			App->level->CreateGameObject();
 
         if(ImGui::MenuItem("New Point Light"))
             App->level->GetLightManager()->AddPointLight();
@@ -155,7 +197,7 @@ void PanelGOTree::Draw()
 
 	DrawModelImportDialog();
 
-	GameObject* root = App->level->GetRoot();
+	HandleShortcuts();
 	for (GameObject* gameObject : root->childs)
 	{
 		if (!gameObject->IsPendingDestroy() &&
@@ -261,6 +303,325 @@ void PanelGOTree::ResetProjectState()
 	modelAssetError_.clear();
 	modelImportDialog_.ClearSelection();
 	modelMenuWasOpen_ = false;
+	selectionOrder_.clear();
+	selectionAnchor_ = nullptr;
+	pendingDeleteIds_.clear();
+	pendingRenameId_ = 0;
+	openDeleteDialog_ = false;
+	openRenameDialog_ = false;
+	renameBuffer_[0] = '\0';
+}
+
+void PanelGOTree::BuildSelectionOrder(GameObject* gameObject)
+{
+	if (!gameObject || gameObject->IsPendingDestroy())
+		return;
+
+	if (gameObject->name.find("$AssimpFbx$") == std::string::npos)
+		selectionOrder_.push_back(gameObject);
+	for (GameObject* child : gameObject->childs)
+		BuildSelectionOrder(child);
+}
+
+void PanelGOTree::HandleSelectionClick(GameObject* gameObject)
+{
+	if (!gameObject)
+		return;
+
+	const ImGuiIO& input = ImGui::GetIO();
+	if (input.KeyShift && selectionAnchor_)
+	{
+		const auto anchor = std::find(
+			selectionOrder_.begin(),
+			selectionOrder_.end(),
+			selectionAnchor_);
+		const auto current = std::find(
+			selectionOrder_.begin(),
+			selectionOrder_.end(),
+			gameObject);
+		if (anchor != selectionOrder_.end() &&
+			current != selectionOrder_.end())
+		{
+			const auto first = std::min(anchor, current);
+			const auto last = std::max(anchor, current);
+			std::vector<GameObject*> selection;
+			if (input.KeyCtrl)
+			{
+				if (const EGE::GameObjectSelection* existing =
+						App->editor->GetGameObjectSelection())
+				{
+					selection = existing->objects;
+				}
+			}
+			for (auto iterator = first; iterator != last + 1; ++iterator)
+			{
+				if (std::find(
+						selection.begin(),
+						selection.end(),
+						*iterator) == selection.end())
+				{
+					selection.push_back(*iterator);
+				}
+			}
+			App->editor->SetGameObjectSelection(
+				std::move(selection), gameObject);
+			return;
+		}
+	}
+
+	if (input.KeyCtrl)
+		App->editor->ToggleGameObjectSelection(gameObject);
+	else
+		App->editor->SetSelected(gameObject);
+	selectionAnchor_ = gameObject;
+}
+
+std::vector<GameObject*> PanelGOTree::GetSelectionRoots(
+	GameObject* context) const
+{
+	std::vector<GameObject*> objects;
+	if (App->editor->IsGameObjectSelected(context))
+	{
+		if (const EGE::GameObjectSelection* selection =
+				App->editor->GetGameObjectSelection())
+		{
+			objects = selection->objects;
+		}
+	}
+	if (objects.empty() && context)
+		objects.push_back(context);
+
+	std::vector<GameObject*> roots;
+	for (GameObject* candidate : objects)
+	{
+		const bool hasSelectedAncestor = std::any_of(
+			objects.begin(),
+			objects.end(),
+			[candidate](const GameObject* other)
+			{
+				return candidate != other &&
+					candidate->IsUnder(other);
+			});
+		if (!hasSelectedAncestor)
+			roots.push_back(candidate);
+	}
+	return roots;
+}
+
+void PanelGOTree::HandleShortcuts()
+{
+	const ImGuiIO& input = ImGui::GetIO();
+	if (!ImGui::IsWindowFocused(
+			ImGuiFocusedFlags_RootAndChildWindows) ||
+		input.WantTextInput ||
+		ImGui::IsAnyItemActive() ||
+		ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
+	{
+		return;
+	}
+
+	if (input.KeyCtrl &&
+		input.KeyShift &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_N, false))
+	{
+		if (GameObject* gameObject =
+				App->level->CreateGameObject())
+		{
+			App->editor->SetSelected(gameObject);
+			selectionAnchor_ = gameObject;
+		}
+		return;
+	}
+	if (input.KeyCtrl &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_A, false))
+	{
+		App->editor->SetGameObjectSelection(
+			selectionOrder_,
+			selectionOrder_.empty()
+				? nullptr
+				: selectionOrder_.back());
+		return;
+	}
+	if (input.KeyCtrl &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_D, false))
+	{
+		DuplicateSelection();
+		return;
+	}
+	if (ImGui::IsKeyPressed(SDL_SCANCODE_DELETE, false))
+	{
+		RequestDeleteSelection();
+		return;
+	}
+	if (ImGui::IsKeyPressed(SDL_SCANCODE_F2, false))
+	{
+		RequestRenameSelection();
+		return;
+	}
+	if (ImGui::IsKeyPressed(SDL_SCANCODE_F, false))
+	{
+		FrameSelection();
+		return;
+	}
+	if (ImGui::IsKeyPressed(SDL_SCANCODE_ESCAPE, false))
+		App->editor->ClearSelected();
+}
+
+void PanelGOTree::DrawActionDialogs()
+{
+	if (openDeleteDialog_)
+	{
+		EGE::EditorDialog::Open("Delete Game Objects");
+		openDeleteDialog_ = false;
+	}
+	if (EGE::EditorDialog::Begin(
+			"Delete Game Objects",
+			ImVec2(430.0f, 0.0f),
+			ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::Text(
+			"Delete %zu selected GameObject%s?",
+			pendingDeleteIds_.size(),
+			pendingDeleteIds_.size() == 1 ? "" : "s");
+		ImGui::Spacing();
+		ImGui::TextDisabled(
+			"This removes the selection and all of its children.");
+		ImGui::Spacing();
+		if (ImGui::Button("Cancel"))
+		{
+			pendingDeleteIds_.clear();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Delete"))
+		{
+			DeletePendingSelection();
+			ImGui::CloseCurrentPopup();
+		}
+		EGE::EditorDialog::End();
+	}
+
+	bool focusRename = false;
+	if (openRenameDialog_)
+	{
+		EGE::EditorDialog::Open("Rename Game Object");
+		openRenameDialog_ = false;
+		focusRename = true;
+	}
+	if (EGE::EditorDialog::Begin(
+			"Rename Game Object",
+			ImVec2(430.0f, 0.0f),
+			ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		if (focusRename)
+			ImGui::SetKeyboardFocusHere();
+		ImGui::SetNextItemWidth(-1.0f);
+		const bool submit = ImGui::InputText(
+			"##GameObjectName",
+			renameBuffer_,
+			sizeof(renameBuffer_),
+			ImGuiInputTextFlags_EnterReturnsTrue);
+		const bool valid = renameBuffer_[0] != '\0';
+		if (!valid)
+			ImGui::TextDisabled("The name cannot be empty.");
+		if (ImGui::Button("Cancel"))
+		{
+			pendingRenameId_ = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if ((ImGui::Button("Rename") || submit) && valid)
+		{
+			if (GameObject* gameObject =
+					App->level->Find(pendingRenameId_))
+			{
+				gameObject->name = renameBuffer_;
+			}
+			pendingRenameId_ = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		EGE::EditorDialog::End();
+	}
+}
+
+void PanelGOTree::DuplicateSelection(GameObject* context)
+{
+	if (!context)
+		context = App->editor->GetPrimaryGameObject();
+
+	std::vector<GameObject*> duplicates;
+	for (GameObject* gameObject : GetSelectionRoots(context))
+	{
+		if (GameObject* duplicate =
+				App->level->Duplicate(gameObject))
+		{
+			duplicates.push_back(duplicate);
+		}
+	}
+	if (!duplicates.empty())
+	{
+		App->editor->SetGameObjectSelection(
+			duplicates, duplicates.back());
+		selectionAnchor_ = duplicates.back();
+	}
+}
+
+void PanelGOTree::RequestDeleteSelection(GameObject* context)
+{
+	if (!context)
+		context = App->editor->GetPrimaryGameObject();
+
+	pendingDeleteIds_.clear();
+	for (GameObject* gameObject : GetSelectionRoots(context))
+	{
+		if (gameObject)
+			pendingDeleteIds_.push_back(gameObject->GetUID());
+	}
+	openDeleteDialog_ = !pendingDeleteIds_.empty();
+}
+
+void PanelGOTree::DeletePendingSelection()
+{
+	for (uint uid : pendingDeleteIds_)
+	{
+		if (GameObject* gameObject = App->level->Find(uid))
+			gameObject->Remove();
+	}
+	pendingDeleteIds_.clear();
+	App->editor->ClearSelected();
+	selectionAnchor_ = nullptr;
+	drag = nullptr;
+	drag_candidate = nullptr;
+}
+
+void PanelGOTree::RequestRenameSelection(GameObject* context)
+{
+	GameObject* gameObject = context
+		? context
+		: App->editor->GetPrimaryGameObject();
+	if (!gameObject)
+		return;
+
+	pendingRenameId_ = gameObject->GetUID();
+	std::snprintf(
+		renameBuffer_,
+		sizeof(renameBuffer_),
+		"%s",
+		gameObject->name.c_str());
+	openRenameDialog_ = true;
+}
+
+void PanelGOTree::FrameSelection() const
+{
+	GameObject* gameObject = App->editor->GetPrimaryGameObject();
+	if (!gameObject)
+		return;
+
+	const float radius =
+		gameObject->global_bbox.MinimalEnclosingSphere().r;
+	App->camera->CenterOn(
+		gameObject->GetGlobalPosition(),
+		std::fmaxf(radius, 5.0f) * 2.0f);
 }
 
 void PanelGOTree::EnsureModelAssetIndex()
@@ -473,9 +834,10 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
             flags |= ImGuiTreeNodeFlags_Leaf;
 
 
-        GameObject* const* selected_go = std::get_if<GameObject*>(&App->editor->GetSelection());
+		GameObject* selected_go =
+			App->editor->GetPrimaryGameObject();
 
-        if (selected_go && go == *selected_go)
+        if (App->editor->IsGameObjectSelected(go))
         {
             flags |= ImGuiTreeNodeFlags_Selected;
             open_selected = false;
@@ -497,17 +859,12 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
 
         ImGui::PushStyleColor(ImGuiCol_Text, color);
 
-        if (open_selected == true && selected_go && (*selected_go)->IsUnder(go) == true)
+        if (open_selected == true && selected_go && selected_go->IsUnder(go) == true)
             ImGui::SetNextTreeNodeOpen(true);
 
         if (ImGui::TreeNodeEx(label.c_str(), flags))
         {
             CheckHover(go);
-
-			if (ImGui::IsItemClicked(0)) {
-				App->editor->SetSelected(go);
-				drag_candidate = go;
-			}
 
             if (ImGui::BeginPopupContextItem())
             {
@@ -519,7 +876,15 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
 						App->editor->SetSelected(child);
 				}
 				if (ImGui::MenuItem("Duplicate"))
-                    App->level->Duplicate(go);
+					DuplicateSelection(go);
+				if (ImGui::MenuItem("Rename", "F2"))
+					RequestRenameSelection(go);
+				if (ImGui::MenuItem("Frame Selected", "F"))
+				{
+					if (!App->editor->IsGameObjectSelected(go))
+						App->editor->SetSelected(go);
+					FrameSelection();
+				}
 				if (ImGui::MenuItem(
 						"Create Prefab...",
 						nullptr,
@@ -530,14 +895,8 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
 					ImGui::SetWindowFocus(
 						App->editor->assets->GetName());
 				}
-				if (ImGui::MenuItem("Remove"))
-				{
-					App->editor->ClearSelected();
-					drag = nullptr;
-					drag_candidate = nullptr;
-					go->Remove();
-					stop = true;
-                }
+				if (ImGui::MenuItem("Delete", "Delete"))
+					RequestDeleteSelection(go);
 
                 ImGui::EndPopup();
             }
@@ -572,7 +931,7 @@ void PanelGOTree::CheckHover(GameObject* go)
 		}
 
 		if (ImGui::IsMouseClicked(0)) {
-            App->editor->SetSelected(go);
+			HandleSelectionClick(go);
 			drag_candidate = go;
 		}
 

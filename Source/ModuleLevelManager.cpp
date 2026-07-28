@@ -795,6 +795,30 @@ const std::filesystem::path& ModuleLevelManager::GetScenePath() const
 	return scene_path;
 }
 
+void ModuleLevelManager::OnAssetRenamed(
+	const std::filesystem::path& oldPath,
+	const std::filesystem::path& newPath)
+{
+	if (scene_path.lexically_normal() == oldPath.lexically_normal())
+		scene_path = newPath.lexically_normal();
+}
+
+void ModuleLevelManager::OnAssetDeleted(
+	const std::filesystem::path& path)
+{
+	const std::filesystem::path normalized =
+		path.lexically_normal();
+	const std::filesystem::path relative =
+		scene_path.lexically_normal().lexically_relative(normalized);
+	if (scene_path.lexically_normal() == normalized ||
+		(!relative.empty() &&
+		 relative.generic_string() != ".." &&
+		 !relative.generic_string().starts_with("../")))
+	{
+		scene_path.clear();
+	}
+}
+
 void ModuleLevelManager::UnloadCurrent()
 {
 	App->GetTime().DiscardPendingFixedSteps();
@@ -1136,7 +1160,21 @@ GameObject* ModuleLevelManager::AddModel(UID id)
             gos.push_back(go);
 
             go->SetLocalTransform(node.transform);
-            go->name = node.name.c_str();
+			if (!node.name.empty())
+			{
+				go->name = node.name;
+			}
+			else if (i == 0)
+			{
+				const char* modelName = model->GetUserResName();
+				go->name = modelName && modelName[0] != '\0'
+					? modelName
+					: "Model";
+			}
+			else
+			{
+				go->name = "Node " + std::to_string(i);
+			}
         }
 
         for (uint i = 0, count = model->GetNumNodes(); ok && i < count; ++i)

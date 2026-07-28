@@ -6,6 +6,7 @@
 #include <imgui.h>
 #include "imgui-filebrowser/imfilebrowser.h"
 #include <filesystem>
+#include <type_traits>
 #include <vector>
 #include <variant>
 #include <memory>
@@ -37,6 +38,12 @@ namespace EGE
 	class AssetEditorManager;
 	class Project;
 	class RecentProjects;
+
+	struct GameObjectSelection
+	{
+		std::vector<GameObject*> objects;
+		GameObject* primary = nullptr;
+	};
 }
 
 class ModuleEditor : public Module
@@ -59,7 +66,7 @@ public:
         SelSkybox
     };
 
-    typedef std::variant<GameObject*, ComponentMeshRenderer*, DirLight*, PointLight*, SpotLight*, QuadLight*, SphereLight*, TubeLight*, LocalIBLLight*, IBLData*, EGE::EditorAssetSelection> SelectionVariant;
+    typedef std::variant<EGE::GameObjectSelection, ComponentMeshRenderer*, DirLight*, PointLight*, SpotLight*, QuadLight*, SphereLight*, TubeLight*, LocalIBLLight*, IBLData*, EGE::EditorAssetSelection> SelectionVariant;
 
 
     enum TabPanelEnum
@@ -103,6 +110,7 @@ public:
 	void RecordRecentProject(const EGE::Project& project);
 	void ApplyAppearance(const std::string& theme, bool compact);
 	bool OpenAssetEditor(const EGE::EditorAssetSelection& asset);
+	void CloseAssetEditors();
 	bool OpenSceneAsset(const std::filesystem::path& scenePath);
 	void RequestOpenScene();
 	void RequestSaveScene(bool saveAs = false);
@@ -113,18 +121,27 @@ public:
     int GetPosY(TabPanelEnum panel) const { return tab_panels[panel].posy; }
 
     const SelectionVariant& GetSelection() const { return selected; }
+	const EGE::GameObjectSelection* GetGameObjectSelection() const;
+	GameObject* GetPrimaryGameObject() const;
+	bool IsGameObjectSelected(const GameObject* gameObject) const;
+	void SetSelected(GameObject* gameObject);
+	void SetGameObjectSelection(
+		std::vector<GameObject*> gameObjects,
+		GameObject* primary = nullptr);
+	void ToggleGameObjectSelection(GameObject* gameObject);
 
     template<typename Arg>
+		requires (
+			!std::is_same_v<std::remove_cvref_t<Arg>, GameObject*> &&
+			!std::is_same_v<
+				std::remove_cvref_t<Arg>,
+				EGE::GameObjectSelection>)
     void SetSelected(Arg && arg)
 	{
 		selected = std::forward<Arg>(arg);
 		NotifySelectionChanged();
 	}
-    void ClearSelected()
-	{
-		selected = {};
-		NotifySelectionChanged();
-	}
+    void ClearSelected();
 
 private:
 

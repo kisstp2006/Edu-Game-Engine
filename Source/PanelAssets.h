@@ -102,6 +102,8 @@ private:
 		const ImVec2& minimum,
 		const ImVec2& maximum) const;
 	void DrawAssetContextMenu(const EGE::AssetEntry& entry);
+	void DrawActionsMenu();
+	void DrawActionDialogs();
 	void DrawCreateMenu();
 	void DrawCreateDialog();
 	void DrawImportMenu();
@@ -128,6 +130,14 @@ private:
 	void InstantiatePrefab(const EGE::AssetEntry& entry);
 	void OpenAssetEditor(const EGE::AssetEntry& entry);
 	void OpenScriptInVsCode(const EGE::AssetEntry& entry);
+	void OpenSelectedAsset();
+	void SelectAllVisible();
+	void CopySelectedPaths() const;
+	void RequestRenameSelected();
+	void RenamePendingAsset();
+	void RequestDeleteSelected();
+	void DeletePendingAssets();
+	std::vector<std::string> GetSelectedSourcePaths() const;
 	void HandleAssetInteractions(
 		const EGE::AssetEntry& entry,
 		const std::vector<const EGE::AssetEntry*>& entries,
@@ -193,6 +203,11 @@ private:
 	CreateAssetKind createKind_ = CreateAssetKind::None;
 	bool openCreateDialog_ = false;
 	char createName_[128] = {};
+	std::vector<std::string> pendingDeletePaths_;
+	std::string pendingRenamePath_;
+	bool openDeleteDialog_ = false;
+	bool openRenameDialog_ = false;
+	char renameName_[256] = {};
 	MeshCreationForm meshCreation_;
 	GameObject* prefabSource_ = nullptr;
 

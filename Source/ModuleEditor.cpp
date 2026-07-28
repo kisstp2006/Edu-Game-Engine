@@ -1264,6 +1264,12 @@ bool ModuleEditor::OpenAssetEditor(
 	return false;
 }
 
+void ModuleEditor::CloseAssetEditors()
+{
+	if (assetEditorManager)
+		assetEditorManager->CloseAll();
+}
+
 bool ModuleEditor::OpenSceneAsset(
 	const std::filesystem::path& scenePath)
 {
@@ -1514,10 +1520,12 @@ void ModuleEditor::ReceiveEvent(const Event& event)
 	{
 		case Event::gameobject_destroyed:
 		{
-			GameObject** go = std::get_if<GameObject*>(&selected);
-			if (go)
+			if (const EGE::GameObjectSelection* selection =
+					std::get_if<EGE::GameObjectSelection>(&selected))
 			{
-				selected = App->level->Validate(*go);
+				SetGameObjectSelection(
+					selection->objects,
+					selection->primary);
 			}
 			tree->drag = App->level->Validate(tree->drag);
 			tree->drag_candidate =
@@ -1528,6 +1536,112 @@ void ModuleEditor::ReceiveEvent(const Event& event)
 			OnResize(event.point2d.x, event.point2d.y);
 		break;
 	}
+}
+
+const EGE::GameObjectSelection*
+ModuleEditor::GetGameObjectSelection() const
+{
+	return std::get_if<EGE::GameObjectSelection>(&selected);
+}
+
+GameObject* ModuleEditor::GetPrimaryGameObject() const
+{
+	const EGE::GameObjectSelection* selection =
+		GetGameObjectSelection();
+	return selection ? selection->primary : nullptr;
+}
+
+bool ModuleEditor::IsGameObjectSelected(
+	const GameObject* gameObject) const
+{
+	const EGE::GameObjectSelection* selection =
+		GetGameObjectSelection();
+	return selection && std::find(
+		selection->objects.begin(),
+		selection->objects.end(),
+		gameObject) != selection->objects.end();
+}
+
+void ModuleEditor::SetSelected(GameObject* gameObject)
+{
+	SetGameObjectSelection(
+		gameObject ? std::vector<GameObject*>{gameObject}
+				   : std::vector<GameObject*>{},
+		gameObject);
+}
+
+void ModuleEditor::SetGameObjectSelection(
+	std::vector<GameObject*> gameObjects,
+	GameObject* primary)
+{
+	EGE::GameObjectSelection selection;
+	selection.objects.reserve(gameObjects.size());
+	for (GameObject* gameObject : gameObjects)
+	{
+		GameObject* valid = App && App->level
+			? App->level->Validate(gameObject)
+			: nullptr;
+		if (!valid ||
+			std::find(
+				selection.objects.begin(),
+				selection.objects.end(),
+				valid) != selection.objects.end())
+		{
+			continue;
+		}
+		selection.objects.push_back(valid);
+	}
+
+	selection.primary = App && App->level
+		? App->level->Validate(primary)
+		: nullptr;
+	if (std::find(
+			selection.objects.begin(),
+			selection.objects.end(),
+			selection.primary) == selection.objects.end())
+	{
+		selection.primary = selection.objects.empty()
+			? nullptr
+			: selection.objects.back();
+	}
+
+	selected = std::move(selection);
+	NotifySelectionChanged();
+}
+
+void ModuleEditor::ToggleGameObjectSelection(GameObject* gameObject)
+{
+	gameObject = App && App->level
+		? App->level->Validate(gameObject)
+		: nullptr;
+	if (!gameObject)
+		return;
+
+	std::vector<GameObject*> objects;
+	if (const EGE::GameObjectSelection* selection =
+			GetGameObjectSelection())
+	{
+		objects = selection->objects;
+	}
+
+	const auto found =
+		std::find(objects.begin(), objects.end(), gameObject);
+	if (found == objects.end())
+	{
+		objects.push_back(gameObject);
+		SetGameObjectSelection(std::move(objects), gameObject);
+	}
+	else
+	{
+		objects.erase(found);
+		SetGameObjectSelection(std::move(objects), nullptr);
+	}
+}
+
+void ModuleEditor::ClearSelected()
+{
+	selected = EGE::GameObjectSelection{};
+	NotifySelectionChanged();
 }
 
 void ModuleEditor::DrawDebug()

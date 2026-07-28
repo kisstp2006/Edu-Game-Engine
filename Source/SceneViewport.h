@@ -18,7 +18,11 @@ class TubeLight;
 class LocalIBLLight;
 class IBLData;
 class Config;
-namespace EGE { struct EditorAssetSelection; }
+namespace EGE
+{
+	struct EditorAssetSelection;
+	struct GameObjectSelection;
+}
 
 class SceneViewport
 {
@@ -41,6 +45,8 @@ public:
 	bool                IsUsingGuizmo       () const { return ImGuizmo::IsUsing(); }
 
     void                DrawGuizmoProperties(GameObject* go);
+	void                DrawGuizmoProperties(
+		const EGE::GameObjectSelection& selection);
     void                DrawGuizmoProperties(PointLight* point);
     void                DrawGuizmoProperties(SpotLight* spot);
     void                DrawGuizmoProperties(SphereLight* sphere);
@@ -58,6 +64,9 @@ private:
     void    DrawQuickBar    (ComponentCamera* camera);
     void    DrawGuizmo      (ComponentCamera* camera);
     void    DrawGuizmo      (ComponentCamera* camera, GameObject* go);
+	void    DrawGuizmo      (
+		ComponentCamera* camera,
+		const EGE::GameObjectSelection& selection);
     void    DrawGuizmo      (ComponentCamera* camera, PointLight* point);
     void    DrawGuizmo      (ComponentCamera* camera, SpotLight* spot);
     void    DrawGuizmo      (ComponentCamera* camera, DirLight* light);

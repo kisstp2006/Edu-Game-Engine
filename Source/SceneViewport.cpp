@@ -109,7 +109,14 @@ void SceneViewport::Draw(ComponentCamera* camera, ComponentCamera* culling)
         ImVec2 mouse = ImGui::GetMousePos();
         ImVec2 rel_position = ImVec2(mouse.x-cursor.x, mouse.y-cursor.y);
 
-        if(focused && ImGui::IsMouseClicked(0, false) && rel_position.x >= 0 && rel_position.x <= width && rel_position.y >= 0 && rel_position.y <= height)
+        if(focused &&
+			!ImGuizmo::IsOver() &&
+			!ImGuizmo::IsUsing() &&
+			ImGui::IsMouseClicked(0, false) &&
+			rel_position.x >= 0 &&
+			rel_position.x <= width &&
+			rel_position.y >= 0 &&
+			rel_position.y <= height)
         {
             PickSelection(camera, (int)rel_position.x, (int)rel_position.y);
         }
@@ -169,14 +176,18 @@ void SceneViewport::PickSelection(ComponentCamera* camera, int mouse_x, int mous
         ComponentMeshRenderer* renderer = App->renderer->GetBatchManager()->FindComponentMeshRenderer(batchIndex, instanceIndex);
         if (renderer)
         {
-            App->editor->SetSelected(renderer);
+			GameObject* gameObject = renderer->GetGameObject();
+			if (ImGui::GetIO().KeyCtrl)
+				App->editor->ToggleGameObjectSelection(gameObject);
+			else
+				App->editor->SetSelected(gameObject);
         }
-        else
+        else if (!ImGui::GetIO().KeyCtrl)
         {
             App->editor->ClearSelected();
         }
     }
-    else
+    else if (!ImGui::GetIO().KeyCtrl)
     {
         App->editor->ClearSelected();
     }
@@ -185,64 +196,65 @@ void SceneViewport::PickSelection(ComponentCamera* camera, int mouse_x, int mous
 
 void SceneViewport::DrawSelection(ComponentCamera* camera, Framebuffer* framebuffer)
 {
-    GameObject* const * selection = std::get_if<GameObject*>(&App->editor->GetSelection()); // App->editor->selection_type == ModuleEditor::SelectionGameObject ? App->editor->selected.go : nullptr;
+	const EGE::GameObjectSelection* selection =
+		App->editor->GetGameObjectSelection();
 
-    if(selection && *selection)
+    if(selection)
     {
-        std::vector<Component*> components;
-        (*selection)->FindComponents(Component::MeshRenderer, components);
-        for(Component* comp : components)
+		for (GameObject* gameObject : selection->objects)
         {
-            ComponentMeshRenderer* mesh = static_cast<ComponentMeshRenderer*>(comp);
+			std::vector<Component*> components;
+			gameObject->FindComponents(
+				Component::MeshRenderer, components);
+			for(Component* comp : components)
+			{
+				ComponentMeshRenderer* mesh =
+					static_cast<ComponentMeshRenderer*>(comp);
 
-            framebuffer->Bind();
-            float4x4 proj   = camera->GetProjectionMatrix();	
-            float4x4 view   = camera->GetViewMatrix();
-            glStencilMask(0XFF);
-            glStencilFunc(GL_ALWAYS, 1, 0XFF);
-            glStencilOp(GL_KEEP, GL_REPLACE, GL_REPLACE);
-            glDepthFunc(GL_LESS);
+				framebuffer->Bind();
+				float4x4 proj = camera->GetProjectionMatrix();
+				float4x4 view = camera->GetViewMatrix();
+				glStencilMask(0XFF);
+				glStencilFunc(GL_ALWAYS, 1, 0XFF);
+				glStencilOp(GL_KEEP, GL_REPLACE, GL_REPLACE);
+				glDepthFunc(GL_LESS);
 
-            App->programs->UseProgram("color", 0);
+				App->programs->UseProgram("color", 0);
 
-            float4 no_color(0.0, 0.0, 0.0, 0.0);
+				float4 no_color(0.0, 0.0, 0.0, 0.0);
 
-            float4x4 transform = std::get<GameObject*>(App->editor->GetSelection())->GetGlobalTransformation();
-            glUniformMatrix4fv(App->programs->GetUniformLocation("proj"), 1, GL_TRUE, reinterpret_cast<const float*>(&proj));
-            glUniformMatrix4fv(App->programs->GetUniformLocation("view"), 1, GL_TRUE, reinterpret_cast<const float*>(&view));
-            glUniformMatrix4fv(App->programs->GetUniformLocation("model"), 1, GL_TRUE, reinterpret_cast<const float*>(&transform));
-            glUniform4fv(App->programs->GetUniformLocation("color"), 1, (float*)&no_color);
+				const float4x4& transform =
+					gameObject->GetGlobalTransformation();
+				glUniformMatrix4fv(App->programs->GetUniformLocation("proj"), 1, GL_TRUE, reinterpret_cast<const float*>(&proj));
+				glUniformMatrix4fv(App->programs->GetUniformLocation("view"), 1, GL_TRUE, reinterpret_cast<const float*>(&view));
+				glUniformMatrix4fv(App->programs->GetUniformLocation("model"), 1, GL_TRUE, reinterpret_cast<const float*>(&transform));
+				glUniform4fv(App->programs->GetUniformLocation("color"), 1, (float*)&no_color);
 
-            ResourceMesh* mesh_res = mesh->GetMeshRes();
+				ResourceMesh* mesh_res = mesh->GetMeshRes();
 
-            if (mesh_res)
-            {
-                //mesh_res->UpdateUniforms(mesh->UpdateSkinPalette(), mesh->GetMorphTargetWeights());
-                mesh_res->Draw();
-            }
+				if (mesh_res)
+					mesh_res->Draw();
 
-            float4 selection_color(1.0, 1.0, 0.0, 1.0);
+				float4 selection_color(1.0, 1.0, 0.0, 1.0);
 
-            glUniform4fv(App->programs->GetUniformLocation("color"), 1, (float*)&selection_color);
+				glUniform4fv(App->programs->GetUniformLocation("color"), 1, (float*)&selection_color);
 
-            glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
-            glStencilMask(0xFF);
-            glDisable(GL_DEPTH_TEST);
+				glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
+				glStencilMask(0xFF);
+				glDisable(GL_DEPTH_TEST);
 
-            glLineWidth(5);
-            glPolygonMode(GL_FRONT, GL_LINE);
+				glLineWidth(5);
+				glPolygonMode(GL_FRONT, GL_LINE);
 
-            if (mesh_res)
-            {
-                //mesh_res->UpdateUniforms(mesh->UpdateSkinPalette(), mesh->GetMorphTargetWeights());
-                mesh_res->Draw();
-            }
+				if (mesh_res)
+					mesh_res->Draw();
 
-            glPolygonMode(GL_FRONT, GL_FILL);
-            glEnable(GL_DEPTH_TEST);
-            glLineWidth(1);
-            App->programs->UnuseProgram();
-        }
+				glPolygonMode(GL_FRONT, GL_FILL);
+				glEnable(GL_DEPTH_TEST);
+				glLineWidth(1);
+				App->programs->UnuseProgram();
+			}
+		}
     }
 
 }
@@ -487,6 +499,14 @@ void SceneViewport::DrawGuizmoProperties(GameObject* go)
     bool transform_changed = ImGui::DragFloat3("Tr", matrixTranslation, 0.01f);
     transform_changed = transform_changed || ImGui::DragFloat3("Rt", matrixRotation, 0.01f);
     transform_changed = transform_changed || ImGui::DragFloat3("Sc", matrixScale, 0.01f);
+	float uniformScale = matrixScale[0];
+	if (ImGui::DragFloat("Uniform Scale", &uniformScale, 0.01f))
+	{
+		matrixScale[0] = uniformScale;
+		matrixScale[1] = uniformScale;
+		matrixScale[2] = uniformScale;
+		transform_changed = true;
+	}
 
     if(transform_changed)
     {
@@ -749,6 +769,45 @@ void SceneViewport::DrawGuizmo(ComponentCamera* camera)
     std::visit([this, camera](auto ptr) {DrawGuizmo(camera, ptr); }, App->editor->GetSelection());
 }
 
+void SceneViewport::DrawGuizmoProperties(
+	const EGE::GameObjectSelection& selection)
+{
+	if (selection.objects.size() == 1)
+	{
+		DrawGuizmoProperties(selection.objects.front());
+		return;
+	}
+
+	ImGui::Separator();
+	ImGui::TextDisabled("GROUP GIZMO");
+	ImGui::RadioButton(
+		"Translate", (int*)&guizmo_op, (int)ImGuizmo::TRANSLATE);
+	ImGui::SameLine();
+	ImGui::RadioButton(
+		"Rotate", (int*)&guizmo_op, (int)ImGuizmo::ROTATE);
+	ImGui::SameLine();
+	ImGui::RadioButton(
+		"Scale", (int*)&guizmo_op, (int)ImGuizmo::SCALE);
+
+	if (guizmo_op != ImGuizmo::SCALE)
+	{
+		ImGui::RadioButton(
+			"Local", (int*)&guizmo_mode, (int)ImGuizmo::LOCAL);
+		ImGui::SameLine();
+		ImGui::RadioButton(
+			"World", (int*)&guizmo_mode, (int)ImGuizmo::WORLD);
+	}
+
+	ImGui::PushID("GroupSnap");
+	ImGui::Checkbox("Snap", &guizmo_useSnap);
+	ImGui::PopID();
+	ImGui::SameLine();
+	if (guizmo_op == ImGuizmo::ROTATE)
+		ImGui::InputFloat("Angle", &guizmo_snap.x);
+	else
+		ImGui::InputFloat3("Step", &guizmo_snap.x);
+}
+
 void SceneViewport::DrawGuizmo(
     ComponentCamera* camera,
     const EGE::EditorAssetSelection& asset)
@@ -881,6 +940,119 @@ void SceneViewport::DrawGuizmo(ComponentCamera* camera, GameObject* go)
             dd::line(go_camera->frustum.NearPlanePos(float2(1.0, 1.0)), go_camera->frustum.FarPlanePos(float2(1.0, 1.0)), dd::colors::Gray);            
         }
     }
+}
+
+void SceneViewport::DrawGuizmo(
+	ComponentCamera* camera,
+	const EGE::GameObjectSelection& selection)
+{
+	if (selection.objects.empty())
+		return;
+	if (selection.objects.size() == 1)
+	{
+		DrawGuizmo(camera, selection.objects.front());
+		return;
+	}
+
+	std::vector<GameObject*> roots;
+	roots.reserve(selection.objects.size());
+	for (GameObject* candidate : selection.objects)
+	{
+		const bool hasSelectedAncestor = std::any_of(
+			selection.objects.begin(),
+			selection.objects.end(),
+			[candidate](const GameObject* other)
+			{
+				return candidate != other &&
+					candidate->IsUnder(other);
+			});
+		if (!hasSelectedAncestor)
+			roots.push_back(candidate);
+	}
+	if (roots.empty())
+		return;
+
+	float3 pivotPosition = float3::zero;
+	for (GameObject* gameObject : roots)
+		pivotPosition += gameObject->GetGlobalPosition();
+	pivotPosition /= static_cast<float>(roots.size());
+
+	float4x4 pivot = float4x4::identity;
+	GameObject* primary = selection.primary
+		? selection.primary
+		: roots.back();
+	if (guizmo_mode == ImGuizmo::LOCAL)
+	{
+		float3 position;
+		float3 scale;
+		Quat rotation;
+		primary->GetGlobalTransformation().Decompose(
+			position, rotation, scale);
+		pivot.SetRotatePart(rotation);
+	}
+	pivot.SetTranslatePart(pivotPosition);
+
+	const float4x4 pivotBefore = pivot;
+	float4x4 model = pivot;
+	model.Transpose();
+	float4x4 view = camera->GetOpenGLViewMatrix();
+	float4x4 projection = camera->GetOpenGLProjectionMatrix();
+
+	ImGuizmo::BeginFrame();
+	ImGuizmo::Enable(true);
+	ImGuizmo::SetRect(
+		ImGui::GetCursorScreenPos().x,
+		ImGui::GetCursorScreenPos().y,
+		static_cast<float>(fb_width),
+		static_cast<float>(fb_height));
+	ImGuizmo::SetDrawlist();
+	ImGuizmo::Manipulate(
+		(const float*)&view,
+		(const float*)&projection,
+		guizmo_op,
+		guizmo_mode,
+		(float*)&model,
+		nullptr,
+		guizmo_useSnap ? &guizmo_snap.x : nullptr);
+
+	if (ImGuizmo::IsUsing())
+	{
+		model.Transpose();
+		const float4x4 groupDelta =
+			model * pivotBefore.Inverted();
+		if (!groupDelta.IsIdentity())
+		{
+			for (GameObject* gameObject : roots)
+			{
+				const float4x4 transformed =
+					groupDelta *
+					gameObject->GetGlobalTransformation();
+				if (GameObject* parent = gameObject->GetParent())
+				{
+					gameObject->SetLocalTransform(
+						parent->GetGlobalTransformation().Inverted() *
+						transformed);
+				}
+				else
+				{
+					gameObject->SetLocalTransform(transformed);
+				}
+			}
+		}
+	}
+
+	for (GameObject* gameObject : selection.objects)
+	{
+		if (!gameObject->global_bbox.IsFinite())
+			continue;
+		float3 points[8];
+		gameObject->global_bbox.GetCornerPoints(points);
+		std::swap(points[2], points[5]);
+		std::swap(points[3], points[4]);
+		std::swap(points[4], points[5]);
+		std::swap(points[6], points[7]);
+		dd::box(points, dd::colors::Yellow);
+	}
 }
 
 void SceneViewport::DrawGuizmo(ComponentCamera* camera, LocalIBLLight* light)

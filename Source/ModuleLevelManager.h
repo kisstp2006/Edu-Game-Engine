@@ -57,6 +57,10 @@ public:
 		std::string* error = nullptr);
 	bool HasScenePath() const;
 	const std::filesystem::path& GetScenePath() const;
+	void OnAssetRenamed(
+		const std::filesystem::path& oldPath,
+		const std::filesystem::path& newPath);
+	void OnAssetDeleted(const std::filesystem::path& path);
 	void UnloadCurrent();
 	
 	// Add or remove from the hierarchy
