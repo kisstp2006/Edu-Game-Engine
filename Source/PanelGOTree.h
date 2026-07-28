@@ -5,8 +5,6 @@
 #include "Panel.h"
 
 class GameObject;
-class DirLight;
-class AmbientLight;
 
 class PanelGOTree : public Panel
 {
