@@ -7,6 +7,8 @@
 #include "../ModuleInput.h"
 #include "../ModuleLevelManager.h"
 #include "../Globals.h"
+#include "ScriptMath.h"
+#include "ScriptCoreHelpers.h"
 #include "ScriptObjectReference.h"
 
 #include <angelscript.h>
@@ -15,7 +17,6 @@
 #include <charconv>
 #include <cctype>
 #include <iomanip>
-#include <new>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -26,42 +27,6 @@
 namespace EGE
 {
 namespace {
-
-struct ScriptVector3
-{
-	float x = 0.0f;
-	float y = 0.0f;
-	float z = 0.0f;
-};
-
-void ConstructVector3(
-	float x,
-	float y,
-	float z,
-	ScriptVector3* value)
-{
-	new (value) ScriptVector3{x, y, z};
-}
-
-void CopyConstructVector3(
-	const ScriptVector3& source,
-	ScriptVector3* value)
-{
-	new (value) ScriptVector3(source);
-}
-
-void DestructVector3(ScriptVector3* value)
-{
-	value->~ScriptVector3();
-}
-
-ScriptVector3& AssignVector3(
-	const ScriptVector3& source,
-	ScriptVector3* value)
-{
-	*value = source;
-	return *value;
-}
 
 ScriptVector3 ToScriptVector3(const float3& value)
 {
@@ -192,6 +157,13 @@ std::string ConvertToString(const ScriptVector3& value)
 		FormatDouble(value.y) + ", " + FormatDouble(value.z) + ")";
 }
 
+std::string ConvertToString(const ScriptColor& value)
+{
+	return "(" + FormatDouble(value.r) + ", " +
+		FormatDouble(value.g) + ", " + FormatDouble(value.b) + ", " +
+		FormatDouble(value.a) + ")";
+}
+
 bool TryParseVector3(const std::string& value, ScriptVector3& result)
 {
 	std::string text = Trim(value);
@@ -217,6 +189,52 @@ bool TryParseVector3(const std::string& value, ScriptVector3& result)
 		TryParseFloat(text.substr(first + 1, second - first - 1), parsed.y) &&
 		TryParseFloat(text.substr(second + 1), parsed.z) &&
 		(result = parsed, true);
+}
+
+bool TryParseColor(const std::string& value, ScriptColor& result)
+{
+	std::string text = Trim(value);
+	if (text.size() >= 2 &&
+		((text.front() == '(' && text.back() == ')') ||
+			(text.front() == '[' && text.back() == ']')))
+	{
+		text = text.substr(1, text.size() - 2);
+	}
+
+	float components[4] = {};
+	std::size_t begin = 0;
+	int count = 0;
+	bool hasExtraComponent = false;
+	while (begin <= text.size() && count < 4)
+	{
+		const std::size_t separator = text.find(',', begin);
+		const std::size_t end = separator == std::string::npos
+			? text.size()
+			: separator;
+		if (!TryParseFloat(text.substr(begin, end - begin), components[count]))
+			return false;
+		++count;
+		if (separator == std::string::npos)
+			break;
+		if (count == 4)
+		{
+			hasExtraComponent = true;
+			break;
+		}
+		begin = separator + 1;
+	}
+
+	if ((count != 3 && count != 4) || hasExtraComponent)
+	{
+		return false;
+	}
+
+	result = {
+		components[0],
+		components[1],
+		components[2],
+		count == 4 ? components[3] : 1.0f};
+	return true;
 }
 
 int ConvertToInt(const std::string& value, int fallback)
@@ -266,6 +284,20 @@ ScriptVector3 ConvertToVector3(
 ScriptVector3 ConvertToVector3(const std::string& value)
 {
 	return ConvertToVector3(value, {});
+}
+
+ScriptColor ConvertToColor(
+	const std::string& value,
+	const ScriptColor& fallback)
+{
+	ScriptColor result = fallback;
+	TryParseColor(value, result);
+	return result;
+}
+
+ScriptColor ConvertToColor(const std::string& value)
+{
+	return ConvertToColor(value, {});
 }
 
 GameObject* ResolveGameObject(
@@ -345,6 +377,7 @@ bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
 		engine.RegisterGlobalFunction("string ToString(float value)", asFUNCTIONPR(ConvertToString, (float), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(bool value)", asFUNCTIONPR(ConvertToString, (bool), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(const Vector3 &in value)", asFUNCTIONPR(ConvertToString, (const ScriptVector3&), std::string), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("string ToString(const Color &in value)", asFUNCTIONPR(ConvertToString, (const ScriptColor&), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(GameObject@+ object)", asFUNCTIONPR(ConvertToString, (const ScriptGameObjectReference*), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(Transform@+ transform)", asFUNCTION(ConvertTransformToString), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(Component@+ component)", asFUNCTION(ConvertComponentToString), asCALL_CDECL) >= 0 &&
@@ -354,13 +387,16 @@ bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
 		engine.RegisterGlobalFunction("bool TryParseFloat(const string &in text, float &out value)", asFUNCTION(TryParseFloat), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseBool(const string &in text, bool &out value)", asFUNCTION(TryParseBool), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseVector3(const string &in text, Vector3 &out value)", asFUNCTION(TryParseVector3), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("bool TryParseColor(const string &in text, Color &out value)", asFUNCTION(TryParseColor), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("int ToInt(const string &in text, int fallback = 0)", asFUNCTION(ConvertToInt), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("uint ToUInt(const string &in text, uint fallback = 0)", asFUNCTION(ConvertToUInt), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("double ToDouble(const string &in text, double fallback = 0)", asFUNCTION(ConvertToDouble), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("float ToFloat(const string &in text, float fallback = 0)", asFUNCTION(ConvertToFloat), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool ToBool(const string &in text, bool fallback = false)", asFUNCTION(ConvertToBool), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("Vector3 ToVector3(const string &in text)", asFUNCTIONPR(ConvertToVector3, (const std::string&), ScriptVector3), asCALL_CDECL) >= 0 &&
-		engine.RegisterGlobalFunction("Vector3 ToVector3(const string &in text, const Vector3 &in fallback)", asFUNCTIONPR(ConvertToVector3, (const std::string&, const ScriptVector3&), ScriptVector3), asCALL_CDECL) >= 0;
+		engine.RegisterGlobalFunction("Vector3 ToVector3(const string &in text, const Vector3 &in fallback)", asFUNCTIONPR(ConvertToVector3, (const std::string&, const ScriptVector3&), ScriptVector3), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("Color ToColor(const string &in text)", asFUNCTIONPR(ConvertToColor, (const std::string&), ScriptColor), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("Color ToColor(const string &in text, const Color &in fallback)", asFUNCTIONPR(ConvertToColor, (const std::string&, const ScriptColor&), ScriptColor), asCALL_CDECL) >= 0;
 	engine.SetDefaultNamespace("");
 	if (registered)
 		return true;
@@ -602,38 +638,6 @@ bool ComponentsEqual(
 
 bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 {
-	if (engine.RegisterObjectType(
-			"Vector3", sizeof(ScriptVector3),
-			asOBJ_VALUE | asOBJ_APP_CLASS_CDAK |
-				asOBJ_APP_CLASS_ALLFLOATS) < 0 ||
-		engine.RegisterObjectBehaviour(
-			"Vector3", asBEHAVE_CONSTRUCT,
-			"void f(float x = 0, float y = 0, float z = 0)",
-			asFUNCTION(ConstructVector3), asCALL_CDECL_OBJLAST) < 0 ||
-		engine.RegisterObjectBehaviour(
-			"Vector3", asBEHAVE_CONSTRUCT,
-			"void f(const Vector3 &in)",
-			asFUNCTION(CopyConstructVector3),
-			asCALL_CDECL_OBJLAST) < 0 ||
-		engine.RegisterObjectBehaviour(
-			"Vector3", asBEHAVE_DESTRUCT, "void f()",
-			asFUNCTION(DestructVector3),
-			asCALL_CDECL_OBJLAST) < 0 ||
-		engine.RegisterObjectMethod(
-			"Vector3", "Vector3 &opAssign(const Vector3 &in)",
-			asFUNCTION(AssignVector3),
-			asCALL_CDECL_OBJLAST) < 0 ||
-		engine.RegisterObjectProperty(
-			"Vector3", "float x", asOFFSET(ScriptVector3, x)) < 0 ||
-		engine.RegisterObjectProperty(
-			"Vector3", "float y", asOFFSET(ScriptVector3, y)) < 0 ||
-		engine.RegisterObjectProperty(
-			"Vector3", "float z", asOFFSET(ScriptVector3, z)) < 0)
-	{
-		error = "Could not register the Vector3 value type.";
-		return false;
-	}
-
 	const bool registered =
 		engine.RegisterObjectMethod(
 			"GameObject", "uint get_id() const",
@@ -965,6 +969,10 @@ bool RegisterEngineBindings(
 {
     // --- KeyCode enum ---
     error.clear();
+	if (!RegisterMathApi(engine, error))
+		return false;
+	if (!RegisterCoreHelpersApi(engine, error))
+		return false;
 	if (!RegisterGameObjectApi(engine, error))
 		return false;
 	if (!RegisterConvertApi(engine, error))

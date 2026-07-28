@@ -4,6 +4,7 @@
 #include "EditorAssetSelection.h"
 #include "ModuleEditor.h"
 #include "ModuleFileSystem.h"
+#include "ModuleLevelManager.h"
 #include "ModuleResources.h"
 #include "ResourceTexture.h"
 #include "Project/VsCodeWorkspace.h"
@@ -132,6 +133,12 @@ void PanelAssets::ResetProjectState()
 	openCreateDialog_ = false;
 	createName_[0] = '\0';
 	meshCreation_ = {};
+}
+
+void PanelAssets::RefreshProjectAssets()
+{
+	EnsureProject();
+	Refresh();
 }
 
 void PanelAssets::DrawDialogs()
@@ -820,6 +827,8 @@ void PanelAssets::DrawCreateMenu()
 {
 	if (ImGui::MenuItem("Folder"))
 		BeginCreate(CreateAssetKind::Folder);
+	if (ImGui::MenuItem("Scene"))
+		BeginCreate(CreateAssetKind::Scene);
 	if (ImGui::MenuItem("AngelScript"))
 		BeginCreate(CreateAssetKind::AngelScript);
 
@@ -992,6 +1001,7 @@ void PanelAssets::BeginCreate(CreateAssetKind kind)
 	switch (kind)
 	{
 	case CreateAssetKind::Folder: baseName = "New Folder"; break;
+	case CreateAssetKind::Scene: baseName = "New Scene"; break;
 	case CreateAssetKind::AngelScript: baseName = "New Script"; break;
 	case CreateAssetKind::MaterialMetallicRoughness:
 	case CreateAssetKind::MaterialSpecularGlossiness:
@@ -1035,6 +1045,21 @@ void PanelAssets::CreatePendingAsset()
 	}
 
 	const std::string sourcePath = BuildCreateSourcePath();
+	if (createKind_ == CreateAssetKind::Scene)
+	{
+		if (!App->level->CreateEmptySceneAsset(
+				sourcePath.c_str(),
+				createName_,
+				&errorMessage_))
+		{
+			if (errorMessage_.empty())
+				errorMessage_ = "The scene could not be created.";
+			return;
+		}
+		FinishAssetCreation(sourcePath, "Scene");
+		return;
+	}
+
 	if (createKind_ == CreateAssetKind::AngelScript)
 	{
 		const EGE::ScriptAssetCreationResult result =
@@ -1240,6 +1265,8 @@ const char* PanelAssets::CreateExtension(CreateAssetKind kind)
 {
 	switch (kind)
 	{
+	case CreateAssetKind::Scene:
+		return ".eduscene";
 	case CreateAssetKind::AngelScript:
 		return ".as";
 	case CreateAssetKind::MaterialMetallicRoughness:
@@ -1264,6 +1291,7 @@ const char* PanelAssets::CreateTypeName(CreateAssetKind kind)
 	switch (kind)
 	{
 	case CreateAssetKind::Folder: return "Folder";
+	case CreateAssetKind::Scene: return "Scene";
 	case CreateAssetKind::AngelScript: return "AngelScript";
 	case CreateAssetKind::MaterialMetallicRoughness:
 		return "Metallic / Roughness Material";

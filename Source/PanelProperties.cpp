@@ -179,6 +179,7 @@ PanelProperties::~PanelProperties()
 void PanelProperties::ResetProjectState()
 {
 	ReleaseInspectedAssetResource();
+	selectGameObjectAfterDraw = nullptr;
 	show_texture.Clear();
 	selectTexture.ClearSelection();
 }
@@ -207,9 +208,16 @@ void PanelProperties::Draw()
         [this](LocalIBLLight* light)   { DrawLocalIBLLight(light); },
         [this](IBLData* sky)         { skybox->DrawProperties(sky);},
         [this](ComponentMeshRenderer* renderer) { DrawGameObject(renderer->GetGameObject(), renderer); },
-		[this](const EGE::EditorAssetSelection& asset)
+        [this](const EGE::EditorAssetSelection& asset)
 			{ DrawAssetSelection(asset); },
         }, selection);
+
+	if (selectGameObjectAfterDraw)
+	{
+		GameObject* gameObject = selectGameObjectAfterDraw;
+		selectGameObjectAfterDraw = nullptr;
+		App->editor->SetSelected(gameObject);
+	}
 
     show_texture.Display();
     selectTexture.Display();
@@ -1121,6 +1129,10 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
 						break;
 				}
             }
+			else if ((*it)->flag_for_removal && *it == component)
+			{
+				selectGameObjectAfterDraw = go;
+			}
             ImGui::PopID();
         }
 
@@ -1346,20 +1358,26 @@ void PanelProperties::RecursiveDrawTree(const GameObject * go, const GameObject*
 
 bool PanelProperties::InitComponentDraw(Component* component, const char * name, bool opened)
 {
-	bool ret = false;
+	bool keepComponent = true;
+	const bool expanded = ImGui::CollapsingHeader(
+		name,
+		&keepComponent,
+		opened ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+	if (!keepComponent)
+	{
+		if (GameObject* gameObject = component->GetGameObject())
+			gameObject->RemoveComponent(component);
+		return false;
+	}
 
-	if (ImGui::CollapsingHeader(name, opened ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+	if (expanded)
 	{
 		bool active = component->IsActive();
 		if(ImGui::Checkbox("Active", &active))
 			component->SetActive(active);
-		ImGui::SameLine();
-		if (ImGui::Button("Delete Component"))
-			component->flag_for_removal = true;
-		ret = true;
 	}
 
-	return ret;
+	return expanded;
 }
 
 void PanelProperties::DrawBatchProperties(ComponentMeshRenderer* component)

@@ -27,7 +27,93 @@
 #include "OpenGL.h"
 #include "Leaks.h"
 
+#include <algorithm>
+#include <cctype>
+
 using namespace std;
+
+namespace
+{
+	bool ResolveProjectScenePath(
+		const char* file,
+		std::filesystem::path& relativePath,
+		std::string& error)
+	{
+		if (!file || file[0] == '\0')
+		{
+			error = "No scene file was selected.";
+			return false;
+		}
+
+		const std::filesystem::path projectRoot =
+			App->fs->GetProjectRoot().lexically_normal();
+		if (projectRoot.empty())
+		{
+			error = "No project is currently mounted.";
+			return false;
+		}
+
+		std::filesystem::path candidate(file);
+		if (candidate.is_absolute())
+		{
+			candidate =
+				candidate.lexically_normal().lexically_relative(projectRoot);
+		}
+		else
+		{
+			candidate = candidate.lexically_normal();
+		}
+
+		if (!EGE::IsSafeProjectRelativePath(candidate))
+		{
+			error = "The scene must be inside the active project.";
+			return false;
+		}
+
+		std::string extension = candidate.extension().string();
+		std::transform(
+			extension.begin(),
+			extension.end(),
+			extension.begin(),
+			[](unsigned char character)
+			{
+				return static_cast<char>(std::tolower(character));
+			});
+		if (extension != ".eduscene" && extension != ".scene")
+		{
+			error = "Scene files must use the .eduscene extension.";
+			return false;
+		}
+
+		relativePath = std::move(candidate);
+		return true;
+	}
+
+	bool WriteSceneConfig(
+		const Config& config,
+		const std::filesystem::path& relativePath,
+		std::string* error)
+	{
+		char* buffer = nullptr;
+		const uint size = static_cast<uint>(
+			config.Save(&buffer, "EDU Engine scene"));
+		const uint written = App->fs->Save(
+			relativePath.generic_string().c_str(),
+			buffer,
+			size);
+		RELEASE_ARRAY(buffer);
+
+		if (written == size)
+			return true;
+
+		LOG(
+			"Could not write scene [%s]",
+			relativePath.generic_string().c_str());
+		if (error)
+			*error = "The scene file could not be written.";
+		return false;
+	}
+}
 
 ModuleLevelManager::ModuleLevelManager( bool start_enabled) : Module("LevelManager", start_enabled)
 {
@@ -69,7 +155,15 @@ bool ModuleLevelManager::Start(Config * config)
 update_status ModuleLevelManager::PreUpdate(float dt)
 {
 	if (App->IsPlay())
-		RecursiveFixedUpdate(root, dt);
+	{
+		const EGE::TimeService& time = App->GetTime();
+		for (std::uint32_t step = 0;
+			step < time.GetFixedStepCount();
+			++step)
+		{
+			RecursiveFixedUpdate(root, time.GetFixedDeltaTime());
+		}
+	}
 	return UPDATE_CONTINUE;
 }
 
@@ -77,6 +171,7 @@ update_status ModuleLevelManager::Update(float dt)
 {
     if (App->IsPlay())
     {
+		dt = App->GetTime().GetDeltaTime();
 #ifdef USE_THREAD_POOL
         root->OnUpdate(dt);
 
@@ -119,7 +214,7 @@ update_status ModuleLevelManager::Update(float dt)
 update_status ModuleLevelManager::PostUpdate(float dt)
 {
 	if (App->IsPlay())
-		RecursiveLateUpdate(root, dt);
+		RecursiveLateUpdate(root, App->GetTime().GetDeltaTime());
 	return UPDATE_CONTINUE;
 }
 
@@ -184,6 +279,7 @@ bool ModuleLevelManager::CreateNewEmpty(const char * name)
 {
 	UnloadCurrent();
 	this->name = name ? name : "Untitled";
+	scene_path.clear();
 	return true;
 }
 
@@ -253,6 +349,8 @@ void ModuleLevelManager::FlushPendingDestructions()
 		if (gameObject && gameObject != root)
 			gameObject->DestroyImmediate();
 	}
+
+	RecursiveFlushPendingComponentRemovals(root);
 }
 
 GameObject * ModuleLevelManager::Duplicate(const GameObject * original)
@@ -321,13 +419,14 @@ void ModuleLevelManager::LoadGameObjects(const Config & config)
 bool ModuleLevelManager::Load(const char * file)
 {
 	bool ret = false;
+	std::filesystem::path resolvedPath;
+	std::string pathError;
 
-	if (file != nullptr)
+	if (ResolveProjectScenePath(file, resolvedPath, pathError))
 	{
-		int len = int(strlen(file));
-
 		char* buffer = nullptr;
-		uint size = App->fs->Load(file, &buffer);
+		const std::string sourcePath = resolvedPath.generic_string();
+		uint size = App->fs->Load(sourcePath.c_str(), &buffer);
 
 		if (buffer != nullptr && size > 0)
 		{
@@ -346,11 +445,16 @@ bool ModuleLevelManager::Load(const char * file)
 				lightManager->LoadLights(config.GetSection("Lights"));
 				LoadGameObjects(config);
 				skybox->Load(config.GetSection("Skybox"));
+				scene_path = resolvedPath;
 				ret = true;
 			}
         }
 
 		RELEASE_ARRAY(buffer); 
+	}
+	else
+	{
+		LOG("Could not load scene: %s", pathError.c_str());
 	}
 
 	return ret;
@@ -358,13 +462,27 @@ bool ModuleLevelManager::Load(const char * file)
 
 bool ModuleLevelManager::Save(const char * file)
 {
-	bool ret = true;
+	const char* requestedPath = file;
+	const std::string currentPath = scene_path.generic_string();
+	if (!requestedPath && !currentPath.empty())
+		requestedPath = currentPath.c_str();
+
+	std::filesystem::path resolvedPath;
+	std::string pathError;
+	if (!ResolveProjectScenePath(
+			requestedPath, resolvedPath, pathError))
+	{
+		LOG("Could not save scene: %s", pathError.c_str());
+		return false;
+	}
+
+	const std::string savedName = resolvedPath.stem().string();
 
 	Config save;
 
 	// Add header info
 	Config desc(save.AddSection("Description"));
-	desc.AddString("Name", name.c_str());
+	desc.AddString("Name", savedName.c_str());
     //App->hints->Save(&desc);
     //App->camera->Save(&desc);
 
@@ -380,17 +498,70 @@ bool ModuleLevelManager::Save(const char * file)
     Config skyCfg = save.AddSection("Skybox");
 	skybox->Save(skyCfg);
 
-	// Finally save to file
-	char* buf = nullptr;
-	uint size = uint(save.Save(&buf, "Level save file from EDU Engine"));
-	App->fs->Save(file, buf, size);
-	RELEASE_ARRAY(buf);
+	if (!WriteSceneConfig(save, resolvedPath, nullptr))
+		return false;
 
-	return ret;
+	name = savedName;
+	scene_path = std::move(resolvedPath);
+	return true;
+}
+
+bool ModuleLevelManager::CreateEmptySceneAsset(
+	const char* file,
+	const char* sceneName,
+	std::string* error) const
+{
+	std::filesystem::path resolvedPath;
+	std::string pathError;
+	if (!ResolveProjectScenePath(file, resolvedPath, pathError))
+	{
+		if (error)
+			*error = std::move(pathError);
+		return false;
+	}
+
+	if (App->fs->Exists(resolvedPath.generic_string().c_str()))
+	{
+		if (error)
+			*error = "A scene with this name already exists.";
+		return false;
+	}
+
+	Config scene;
+	Config description = scene.AddSection("Description");
+	const std::string resolvedName =
+		sceneName && sceneName[0] != '\0'
+			? sceneName
+			: resolvedPath.stem().string();
+	description.AddString("Name", resolvedName.c_str());
+
+	LightManager defaultLights;
+	Config lights = scene.AddSection("Lights");
+	defaultLights.SaveLights(lights);
+
+	scene.AddArray("Game Objects");
+
+	Config skyboxConfig = scene.AddSection("Skybox");
+	skyboxConfig.AddUInt("Texture", 0);
+	skyboxConfig.AddFloat("intensity", 1.0f);
+
+	return WriteSceneConfig(scene, resolvedPath, error);
+}
+
+bool ModuleLevelManager::HasScenePath() const
+{
+	return !scene_path.empty();
+}
+
+const std::filesystem::path& ModuleLevelManager::GetScenePath() const
+{
+	return scene_path;
 }
 
 void ModuleLevelManager::UnloadCurrent()
 {
+	App->GetTime().DiscardPendingFixedSteps();
+
 	{
 		std::scoped_lock lock(pending_destructions_mutex);
 		pending_destructions.clear();
@@ -411,6 +582,7 @@ void ModuleLevelManager::UnloadCurrent()
 	skybox = std::make_unique<IBLData>();
 	lightManager = std::make_unique<LightManager>();
 	name.clear();
+	scene_path.clear();
 }
 
 void ModuleLevelManager::RecursiveProcessEvent(GameObject * go, const Event & event) const
@@ -454,6 +626,41 @@ void ModuleLevelManager::RecursiveLateUpdate(GameObject* go, float dt) const
 	go->OnLateUpdate(dt);
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
 		RecursiveLateUpdate(*it, dt);
+}
+
+void ModuleLevelManager::RecursiveFlushPendingComponentRemovals(
+	GameObject* go) const
+{
+	if (!go)
+		return;
+
+	for (auto component = go->components.begin();
+		component != go->components.end();)
+	{
+		if (!(*component)->flag_for_removal)
+		{
+			++component;
+			continue;
+		}
+
+		Component* removed = *component;
+		if (App->renderer3D)
+		{
+			ComponentCamera* fallback =
+				App->camera ? App->camera->GetDummy() : nullptr;
+			if (App->renderer3D->active_camera == removed)
+				App->renderer3D->active_camera = fallback;
+			if (App->renderer3D->culling_camera == removed)
+				App->renderer3D->culling_camera = fallback;
+		}
+
+		removed->OnFinish();
+		delete removed;
+		component = go->components.erase(component);
+	}
+
+	for (GameObject* child : go->childs)
+		RecursiveFlushPendingComponentRemovals(child);
 }
 
 GameObject* ModuleLevelManager::RecursiveFind(

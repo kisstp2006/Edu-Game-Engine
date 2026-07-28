@@ -26,6 +26,7 @@ public:
 
 	void Draw() override;
 	void ResetProjectState();
+	void RefreshProjectAssets();
 
 private:
 	enum class ViewMode
@@ -38,6 +39,7 @@ private:
 	{
 		None,
 		Folder,
+		Scene,
 		AngelScript,
 		MaterialMetallicRoughness,
 		MaterialSpecularGlossiness,

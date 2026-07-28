@@ -2,6 +2,7 @@
 
 #include "ScriptRuntime.h"
 #include "ScriptInstanceContext.h"
+#include "ScriptMath.h"
 #include "ScriptObjectReference.h"
 #include "ScriptResource.h"
 
@@ -309,6 +310,25 @@ shared class EGEBehaviour
 			return type.GetName();
 		}
 
+		bool InheritsFromEGEBehaviour(const asITypeInfo& type)
+		{
+			for (const asITypeInfo* base = type.GetBaseType();
+				base;
+				base = base->GetBaseType())
+			{
+				if (QualifiedTypeName(*base) == "EGEBehaviour")
+					return true;
+			}
+			return false;
+		}
+
+		bool IsBehaviourRuntimeProperty(std::string_view name)
+		{
+			return name == "gameObject" ||
+				name == "transform" ||
+				name == "enabled";
+		}
+
 		bool HasDefaultFactory(const asITypeInfo& type)
 		{
 			for (asUINT index = 0; index < type.GetFactoryCount(); ++index)
@@ -357,8 +377,13 @@ shared class EGEBehaviour
 			}
 			if ((type->GetFlags() & asOBJ_ENUM) != 0)
 				return PropertyKind::Enumeration;
-			if (std::string(type->GetName()) == "string")
+			const std::string typeName = type->GetName();
+			if (typeName == "string")
 				return PropertyKind::String;
+			if (typeName == "Vector3")
+				return PropertyKind::Vector3;
+			if (typeName == "Color")
+				return PropertyKind::Color;
 			return PropertyKind::Unsupported;
 		}
 
@@ -433,6 +458,22 @@ shared class EGEBehaviour
 							reference
 								? reference->GetComponentId()
 								: 0};
+						return true;
+					}
+				case PropertyKind::Vector3:
+					{
+						const auto& vector =
+							*static_cast<ScriptVector3*>(address);
+						value = Vector3Value{
+							vector.x, vector.y, vector.z};
+						return true;
+					}
+				case PropertyKind::Color:
+					{
+						const auto& color =
+							*static_cast<ScriptColor*>(address);
+						value = ColorValue{
+							color.r, color.g, color.b, color.a};
 						return true;
 					}
 				default:
@@ -537,6 +578,20 @@ shared class EGEBehaviour
 								reference.objectId),
 							static_cast<std::uint32_t>(
 								reference.componentId));
+						return true;
+					}
+				case PropertyKind::Vector3:
+					{
+						const auto source = std::get<Vector3Value>(value);
+						*static_cast<ScriptVector3*>(address) = {
+							source.x, source.y, source.z};
+						return true;
+					}
+				case PropertyKind::Color:
+					{
+						const auto source = std::get<ColorValue>(value);
+						*static_cast<ScriptColor*>(address) = {
+							source.r, source.g, source.b, source.a};
 						return true;
 					}
 				default:
@@ -1048,7 +1103,6 @@ shared class EGEBehaviour
 			int typeId = asTYPEID_VOID;
 			bool isPrivate = false;
 			bool isProtected = false;
-			bool isReference = false;
 			bool isConst = false;
 			type.GetProperty(
 				propertyIndex,
@@ -1057,7 +1111,7 @@ shared class EGEBehaviour
 				&isPrivate,
 				&isProtected,
 				nullptr,
-				&isReference,
+				nullptr,
 				nullptr,
 				nullptr,
 				nullptr,
@@ -1076,11 +1130,7 @@ shared class EGEBehaviour
 				engine->GetTypeDeclaration(typeId, true);
 			descriptor.typeName =
 				typeDeclaration ? typeDeclaration : "unknown";
-			descriptor.kind =
-				isReference &&
-					(typeId & asTYPEID_OBJHANDLE) == 0
-					? PropertyKind::Unsupported
-					: ToPropertyKind(*engine, typeId);
+			descriptor.kind = ToPropertyKind(*engine, typeId);
 			if (descriptor.kind == PropertyKind::Unsupported &&
 				descriptor.typeName == "string")
 			{
@@ -1204,13 +1254,23 @@ shared class EGEBehaviour
 				descriptor.id = qualifiedName;
 				descriptor.displayName =
 					HumanizeIdentifier(type->GetName());
+				const bool isBehaviour =
+					InheritsFromEGEBehaviour(*type);
 				for (asUINT property = 0;
 					property < type->GetPropertyCount();
 					++property)
 				{
-					descriptor.properties.push_back(
+					PropertyDescriptor propertyDescriptor =
 						BuildPropertyDescriptor(
-							builder, *type, property));
+							builder, *type, property);
+					if (isBehaviour &&
+						IsBehaviourRuntimeProperty(
+							propertyDescriptor.name))
+					{
+						continue;
+					}
+					descriptor.properties.push_back(
+						std::move(propertyDescriptor));
 				}
 
 				candidate.classes.emplace(
@@ -1606,7 +1666,30 @@ shared class EGEBehaviour
 				}
 				definitions << " {\n";
 
-				// Factories (constructors)
+				for (asUINT behaviorIndex = 0;
+					behaviorIndex < type->GetBehaviourCount();
+					++behaviorIndex)
+				{
+					asEBehaviours behavior = asBEHAVE_MAX;
+					asIScriptFunction* function =
+						type->GetBehaviourByIndex(
+							behaviorIndex, &behavior);
+					if (!function || behavior != asBEHAVE_CONSTRUCT)
+						continue;
+
+					const std::string declaration =
+						function->GetDeclaration(false, true, true);
+					const std::size_t parameters =
+						declaration.find('(');
+					if (parameters != std::string::npos)
+					{
+						definitions
+							<< "    " << typeName
+							<< declaration.substr(parameters)
+							<< ";\n";
+					}
+				}
+
 				for (asUINT b = 0; b < type->GetFactoryCount(); ++b)
 				{
 					asIScriptFunction* factory = type->GetFactoryByIndex(b);
@@ -1619,7 +1702,14 @@ shared class EGEBehaviour
 				{
 					asIScriptFunction* method = type->GetMethodByIndex(m);
 					if (method)
-						definitions << "    " << method->GetDeclaration(false, true, true) << ";\n";
+					{
+						definitions
+							<< "    "
+							<< method->GetDeclaration(false, true, true);
+						if (method->IsProperty())
+							definitions << " property";
+						definitions << ";\n";
+					}
 				}
 
 				// Properties
@@ -1680,9 +1770,27 @@ shared class EGEBehaviour
 					engine->GetGlobalFunctionByIndex(index);
 				if (function)
 				{
+					const char* functionNamespace =
+						function->GetNamespace();
+					if (functionNamespace &&
+						functionNamespace[0] != '\0')
+					{
+						definitions
+							<< "namespace " << functionNamespace
+							<< " {\n    ";
+					}
+
 					definitions
-						<< function->GetDeclaration(true, true, true)
-						<< ";\n";
+						<< function->GetDeclaration(false, false, true);
+					if (function->IsProperty())
+						definitions << " property";
+					definitions << ";\n";
+
+					if (functionNamespace &&
+						functionNamespace[0] != '\0')
+					{
+						definitions << "}\n";
+					}
 				}
 			}
 
@@ -2312,5 +2420,10 @@ shared class EGEBehaviour
 		ScriptRuntime::GetDiagnostics() const
 	{
 		return impl_->diagnostics;
+	}
+
+	void ScriptRuntime::ClearDiagnostics()
+	{
+		impl_->diagnostics.clear();
 	}
 }

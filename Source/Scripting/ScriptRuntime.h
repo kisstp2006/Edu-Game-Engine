@@ -117,6 +117,7 @@ namespace EGE
 		[[nodiscard]] const std::filesystem::path& GetScriptRoot() const;
 		[[nodiscard]] const std::vector<ScriptDiagnostic>&
 			GetDiagnostics() const;
+		void ClearDiagnostics();
 
 	private:
 		struct Impl;

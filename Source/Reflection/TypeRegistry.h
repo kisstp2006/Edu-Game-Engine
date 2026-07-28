@@ -32,7 +32,28 @@ namespace EGE
 		String,
 		Enumeration,
 		GameObjectReference,
-		ComponentReference
+		ComponentReference,
+		Vector3,
+		Color
+	};
+
+	struct Vector3Value
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float z = 0.0f;
+
+		bool operator==(const Vector3Value&) const = default;
+	};
+
+	struct ColorValue
+	{
+		float r = 0.0f;
+		float g = 0.0f;
+		float b = 0.0f;
+		float a = 1.0f;
+
+		bool operator==(const ColorValue&) const = default;
 	};
 
 	struct GameObjectReferenceValue
@@ -58,7 +79,9 @@ namespace EGE
 		double,
 		std::string,
 		GameObjectReferenceValue,
-		ComponentReferenceValue>;
+		ComponentReferenceValue,
+		Vector3Value,
+		ColorValue>;
 
 	struct PropertyRange
 	{
@@ -189,6 +212,10 @@ namespace EGE
 			return PropertyKind::Double;
 		else if constexpr (std::is_same_v<Type, std::string>)
 			return PropertyKind::String;
+		else if constexpr (std::is_same_v<Type, Vector3Value>)
+			return PropertyKind::Vector3;
+		else if constexpr (std::is_same_v<Type, ColorValue>)
+			return PropertyKind::Color;
 		else if constexpr (std::is_enum_v<Type>)
 			return PropertyKind::Enumeration;
 		else
@@ -228,6 +255,12 @@ namespace EGE
 				value = static_cast<double>(source);
 			else if constexpr (std::is_same_v<Value, std::string>)
 				value = source;
+			else if constexpr (
+				std::is_same_v<Value, Vector3Value> ||
+				std::is_same_v<Value, ColorValue>)
+			{
+				value = source;
+			}
 			else
 				return false;
 			return true;
@@ -262,6 +295,10 @@ namespace EGE
 					static_cast<Value>(std::get<double>(converted));
 			else if constexpr (std::is_same_v<Value, std::string>)
 				destination = std::get<std::string>(converted);
+			else if constexpr (std::is_same_v<Value, Vector3Value>)
+				destination = std::get<Vector3Value>(converted);
+			else if constexpr (std::is_same_v<Value, ColorValue>)
+				destination = std::get<ColorValue>(converted);
 			else
 				return false;
 			return true;

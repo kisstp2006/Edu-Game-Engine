@@ -99,37 +99,13 @@ void PanelGOTree::Draw()
 		//ImGuiWindowFlags_NoFocusOnAppearing |
 		//ImGuiWindowFlags_HorizontalScrollbar );
 
-	// Menu ---
-	static bool waiting_to_load_file = false;
-	static bool waiting_to_save_file = false;
-
-	if (waiting_to_load_file == true && App->editor->FileDialog("eduscene"))
-	{
-		const char* file = App->editor->CloseFileDialog();
-		if (file != nullptr)
-			App->level->Load(file);
-		waiting_to_load_file = false;
-	}
-
-	if (waiting_to_save_file == true && App->editor->FileDialog("eduscene"))
-	{
-		const char* file = App->editor->CloseFileDialog();
-        if (file != nullptr)
-        {
-            App->level->Save(file);
-            App->resources->SaveResources();
-        }
-		waiting_to_save_file = false;
-	}
-
 	if (ImGui::BeginMenu("Options"))
 	{
-		bool sel = false;
-		if (ImGui::MenuItem("Load..", "", &sel, App->IsStop()))
-			waiting_to_load_file = true;
+		if (ImGui::MenuItem("Load..", nullptr, false, App->IsStop()))
+			App->editor->RequestOpenScene();
 
-		if (ImGui::MenuItem("Save..", "", &sel, App->IsStop()))
-			waiting_to_save_file = true;
+		if (ImGui::MenuItem("Save..", nullptr, false, App->IsStop()))
+			App->editor->RequestSaveScene(true);
 
 		if (ImGui::BeginMenu("Load Prefab"))
 		{

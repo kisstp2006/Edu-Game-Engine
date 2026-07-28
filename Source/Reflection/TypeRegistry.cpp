@@ -171,6 +171,16 @@ namespace EGE
 				*number = std::clamp(
 					*number, range.minimum, range.maximum);
 			}
+			else if (auto* vector = std::get_if<Vector3Value>(&converted))
+			{
+				const float minimum =
+					static_cast<float>(range.minimum);
+				const float maximum =
+					static_cast<float>(range.maximum);
+				vector->x = std::clamp(vector->x, minimum, maximum);
+				vector->y = std::clamp(vector->y, minimum, maximum);
+				vector->z = std::clamp(vector->z, minimum, maximum);
+			}
 		}
 
 		return writer(object, converted);
@@ -432,6 +442,8 @@ namespace EGE
 				return "GameObjectReference";
 			case PropertyKind::ComponentReference:
 				return "ComponentReference";
+			case PropertyKind::Vector3: return "Vector3";
+			case PropertyKind::Color: return "Color";
 			default: return "Unsupported";
 		}
 	}
@@ -439,7 +451,7 @@ namespace EGE
 	bool ParsePropertyKind(const std::string& text, PropertyKind& kind)
 	{
 		for (int value = static_cast<int>(PropertyKind::Unsupported);
-			value <= static_cast<int>(PropertyKind::ComponentReference);
+			value <= static_cast<int>(PropertyKind::Color);
 			++value)
 		{
 			const auto candidate = static_cast<PropertyKind>(value);
@@ -519,6 +531,26 @@ namespace EGE
 		{
 			if (const auto* value =
 				std::get_if<ComponentReferenceValue>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
+		if (targetKind == PropertyKind::Vector3)
+		{
+			if (const auto* value = std::get_if<Vector3Value>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
+		if (targetKind == PropertyKind::Color)
+		{
+			if (const auto* value = std::get_if<ColorValue>(&source))
 			{
 				result = *value;
 				return true;

@@ -45,6 +45,21 @@ namespace EGE
 					"ComponentUID",
 					std::to_string(value->componentId).c_str());
 			}
+			else if (const auto* value =
+				std::get_if<Vector3Value>(&property.value))
+			{
+				entry.AddFloat("X", value->x);
+				entry.AddFloat("Y", value->y);
+				entry.AddFloat("Z", value->z);
+			}
+			else if (const auto* value =
+				std::get_if<ColorValue>(&property.value))
+			{
+				entry.AddFloat("R", value->r);
+				entry.AddFloat("G", value->g);
+				entry.AddFloat("B", value->b);
+				entry.AddFloat("A", value->a);
+			}
 			else
 				continue;
 
@@ -155,6 +170,19 @@ namespace EGE
 							objectId, componentId};
 						break;
 					}
+				case PropertyKind::Vector3:
+					value = Vector3Value{
+						entry.GetFloat("X", 0.0f),
+						entry.GetFloat("Y", 0.0f),
+						entry.GetFloat("Z", 0.0f)};
+					break;
+				case PropertyKind::Color:
+					value = ColorValue{
+						entry.GetFloat("R", 0.0f),
+						entry.GetFloat("G", 0.0f),
+						entry.GetFloat("B", 0.0f),
+						entry.GetFloat("A", 1.0f)};
+					break;
 				default:
 					continue;
 			}

@@ -1,7 +1,11 @@
 #include "../Scripting/ScriptRuntime.h"
 #include "../Scripting/ScriptAsset.h"
+#include "../Scripting/ScriptCoreHelpers.h"
+#include "../Scripting/ScriptMath.h"
 #include "../Scripting/ScriptResource.h"
+#include "../Scripting/ScriptTime.h"
 #include "../Project/VsCodeWorkspace.h"
+#include "../EngineTime.h"
 #include "../Config.h"
 #include "../Reflection/PropertySerializer.h"
 
@@ -70,6 +74,18 @@ namespace
 		return object.type ? object.type->FindProperty(name) : nullptr;
 	}
 
+	const EGE::PropertyState* FindState(
+		const EGE::PropertyBag& properties,
+		const char* name)
+	{
+		for (const EGE::PropertyState& property : properties)
+		{
+			if (property.name == name)
+				return &property;
+		}
+		return nullptr;
+	}
+
 	double ReadNumber(
 		const EGE::ReflectedScriptObject& object,
 		const char* name)
@@ -93,10 +109,443 @@ namespace
 		float exposure = 1.0f;
 		std::string profile = "Default";
 	};
+
+	EGE::TimeService* testTimeService = nullptr;
+
+	EGE::TimeService* ResolveTestTimeService()
+	{
+		return testTimeService;
+	}
 }
 
 int main()
 {
+	TemporaryProject helpersProject;
+	helpersProject.WriteScript(
+		"[ScriptComponent]\n"
+		"class HelpersProbe : EGEBehaviour\n"
+		"{\n"
+		"    bool deterministicRandom = false;\n"
+		"    bool randomRangeValid = false;\n"
+		"    string builtText;\n"
+		"    double durationSeconds = 0.0;\n"
+		"    bool stopwatchValid = false;\n"
+		"    bool guidRoundTrip = false;\n"
+		"    string pathName;\n"
+		"    string normalizedText;\n"
+		"    bool stringChecks = false;\n"
+		"\n"
+		"    void OnUpdate(float deltaTime)\n"
+		"    {\n"
+		"        Random first(1337);\n"
+		"        Random second(1337);\n"
+		"        deterministicRandom = first.Next() == second.Next();\n"
+		"        int ranged = first.Next(10, 20);\n"
+		"        Vector3 randomVector = first.NextVector3(-2, 2);\n"
+		"        Color randomColor = first.NextColor();\n"
+		"        randomRangeValid = ranged >= 10 && ranged < 20 &&\n"
+		"            randomVector.x >= -2 && randomVector.x <= 2 &&\n"
+		"            randomColor.a == 1;\n"
+		"\n"
+		"        StringBuilder builder(\"Value: \");\n"
+		"        builder.Append(42).AppendLine().Append(true);\n"
+		"        builtText = builder.ToString();\n"
+		"\n"
+		"        TimeSpan duration = TimeSpan::FromSeconds(90.5);\n"
+		"        durationSeconds = duration.TotalSeconds;\n"
+		"\n"
+		"        Stopwatch stopwatch;\n"
+		"        stopwatch.Start();\n"
+		"        stopwatch.Stop();\n"
+		"        Stopwatch started = Stopwatch::StartNew();\n"
+		"        started.Stop();\n"
+		"        stopwatchValid = !stopwatch.IsRunning &&\n"
+		"            stopwatch.ElapsedMilliseconds >= 0 &&\n"
+		"            stopwatch.Elapsed.TotalMilliseconds >= 0 &&\n"
+		"            started.ElapsedMilliseconds >= 0;\n"
+		"\n"
+		"        Guid generated = Guid::NewGuid();\n"
+		"        Guid parsed;\n"
+		"        guidRoundTrip = !generated.IsEmpty &&\n"
+		"            Guid::TryParse(generated.ToString(), parsed) &&\n"
+		"            parsed == generated && Guid::Empty.IsEmpty;\n"
+		"\n"
+		"        pathName = Path::GetFileNameWithoutExtension(\n"
+		"            Path::Combine(\"Assets/Scripts\", \"Player.as\"));\n"
+		"        normalizedText = \"  Hello Engine  \".Trim().\n"
+		"            ToUpper().Replace(\"ENGINE\", \"WORLD\");\n"
+		"        stringChecks = normalizedText == \"HELLO WORLD\" &&\n"
+		"            normalizedText.StartsWith(\"HELLO\") &&\n"
+		"            normalizedText.EndsWith(\"WORLD\") &&\n"
+		"            normalizedText.Contains(\"LO WO\") &&\n"
+		"            normalizedText.Length == 11 &&\n"
+		"            String::IsNullOrWhiteSpace(\"  \\t\");\n"
+		"    }\n"
+		"}\n");
+
+	EGE::ScriptRuntime helpersRuntime;
+	std::string helpersRegistrationError;
+	if (!Check(
+			helpersRuntime.RegisterApi(
+				"Engine.Math",
+				EGE::RegisterMathApi,
+				helpersRegistrationError),
+			"Helper Math API registration was rejected") ||
+		!Check(
+			helpersRuntime.RegisterApi(
+				"Engine.CoreHelpers",
+				EGE::RegisterCoreHelpersApi,
+				helpersRegistrationError),
+			"Core helper API registration was rejected") ||
+		!Check(
+			helpersRuntime.Initialize(),
+			"Core helper runtime initialization failed") ||
+		!Check(
+			helpersRuntime.SetProjectRoot(helpersProject.Root()),
+			"Core helper script did not compile"))
+	{
+		std::cerr << helpersRegistrationError << '\n';
+		for (const EGE::ScriptDiagnostic& diagnostic :
+			helpersRuntime.GetDiagnostics())
+		{
+			std::cerr
+				<< diagnostic.file.string() << ':'
+				<< diagnostic.line << ':'
+				<< diagnostic.column << ' '
+				<< diagnostic.message << '\n';
+		}
+		return 1;
+	}
+
+	const EGE::ScriptInstanceHandle helpersInstance =
+		helpersRuntime.CreateInstance("HelpersProbe");
+	helpersRuntime.EnterPlayMode();
+	helpersRuntime.StartInstance(helpersInstance);
+	helpersRuntime.UpdateInstance(helpersInstance, 1.0f / 60.0f);
+	const EGE::ReflectedScriptObject reflectedHelpers =
+		helpersRuntime.GetReflectedInstance(helpersInstance);
+
+	const auto ReadBool = [&reflectedHelpers](const char* name)
+	{
+		const EGE::PropertyDescriptor* property =
+			FindProperty(reflectedHelpers, name);
+		EGE::PropertyValue value;
+		return property &&
+			property->Read(reflectedHelpers.object, value) &&
+			std::holds_alternative<bool>(value) &&
+			std::get<bool>(value);
+	};
+	const auto ReadText = [&reflectedHelpers](const char* name)
+	{
+		const EGE::PropertyDescriptor* property =
+			FindProperty(reflectedHelpers, name);
+		EGE::PropertyValue value;
+		if (!property ||
+			!property->Read(reflectedHelpers.object, value) ||
+			!std::holds_alternative<std::string>(value))
+		{
+			return std::string();
+		}
+		return std::get<std::string>(value);
+	};
+
+	const bool deterministicRandom =
+		ReadBool("deterministicRandom");
+	const bool randomRangeValid = ReadBool("randomRangeValid");
+	const std::string builtText = ReadText("builtText");
+	const double durationSeconds =
+		ReadNumber(reflectedHelpers, "durationSeconds");
+	const bool stopwatchValid = ReadBool("stopwatchValid");
+	const bool guidRoundTrip = ReadBool("guidRoundTrip");
+	const std::string pathName = ReadText("pathName");
+	const std::string normalizedText = ReadText("normalizedText");
+	const bool stringChecks = ReadBool("stringChecks");
+	const bool helpersValid =
+		reflectedHelpers &&
+		deterministicRandom &&
+		randomRangeValid &&
+		builtText == "Value: 42\nTrue" &&
+		std::abs(durationSeconds - 90.5) < 0.0001 &&
+		stopwatchValid &&
+		guidRoundTrip &&
+		pathName == "Player" &&
+		normalizedText == "HELLO WORLD" &&
+		stringChecks;
+	if (!helpersValid)
+	{
+		std::cerr
+			<< "Helper results: deterministic=" << deterministicRandom
+			<< " range=" << randomRangeValid
+			<< " built=[" << builtText << ']'
+			<< " duration=" << durationSeconds
+			<< " stopwatch=" << stopwatchValid
+			<< " guid=" << guidRoundTrip
+			<< " path=[" << pathName << ']'
+			<< " text=[" << normalizedText << ']'
+			<< " string=" << stringChecks << '\n';
+		for (const EGE::ScriptDiagnostic& diagnostic :
+			helpersRuntime.GetDiagnostics())
+		{
+			std::cerr
+				<< diagnostic.file.string() << ':'
+				<< diagnostic.line << ':'
+				<< diagnostic.column << ' '
+				<< diagnostic.message << '\n';
+		}
+	}
+	if (!Check(
+			helpersValid,
+			"One or more C#-style helpers returned an unexpected value"))
+	{
+		return 1;
+	}
+
+	std::ifstream helpersDefinitions(
+		helpersProject.Root() / "as.predefined");
+	const std::string helpersLanguageServerApi(
+		(std::istreambuf_iterator<char>(helpersDefinitions)),
+		std::istreambuf_iterator<char>());
+	if (!Check(
+			helpersLanguageServerApi.find("class Random") !=
+				std::string::npos &&
+			helpersLanguageServerApi.find("class StringBuilder") !=
+				std::string::npos &&
+			helpersLanguageServerApi.find("class TimeSpan") !=
+				std::string::npos &&
+			helpersLanguageServerApi.find("class Stopwatch") !=
+				std::string::npos &&
+			helpersLanguageServerApi.find("class Guid") !=
+				std::string::npos &&
+			helpersLanguageServerApi.find(
+				"namespace Stopwatch {\n"
+				"    Stopwatch StartNew()") != std::string::npos &&
+			helpersLanguageServerApi.find(
+				"namespace Path {\n"
+				"    string Combine(") != std::string::npos &&
+			helpersLanguageServerApi.find(
+				"bool Contains(const string&in value) const;") !=
+				std::string::npos,
+			"Language-server definitions do not include the core helpers"))
+	{
+		return 1;
+	}
+	helpersRuntime.LeavePlayMode();
+	helpersRuntime.DestroyInstance(helpersInstance);
+	helpersRuntime.Shutdown();
+
+	EGE::TimeService engineTime;
+	engineTime.BeginPlay();
+	if (!Check(
+			engineTime.IsPlaying() &&
+				!engineTime.IsPaused() &&
+				engineTime.GetTime() == 0.0 &&
+				engineTime.GetUnscaledTime() == 0.0 &&
+				engineTime.GetFrameCount() == 0,
+			"Play did not reset the engine timeline"))
+	{
+		return 1;
+	}
+
+	engineTime.BeginFrame(0.01f);
+	engineTime.SetTimeScale(0.5f);
+	engineTime.BeginFrame(0.02f);
+	if (!Check(
+			std::abs(engineTime.GetDeltaTime() - 0.01f) < 0.0001f &&
+				std::abs(engineTime.GetTime() - 0.02) < 0.0001 &&
+				std::abs(engineTime.GetUnscaledTime() - 0.03) < 0.0001 &&
+				engineTime.GetFrameCount() == 2,
+			"Scaled and unscaled engine time diverged incorrectly"))
+	{
+		return 1;
+	}
+
+	const double scaledTimeBeforePause = engineTime.GetTime();
+	engineTime.Pause();
+	engineTime.BeginFrame(0.5f);
+	if (!Check(
+			engineTime.IsPaused() &&
+				engineTime.GetDeltaTime() == 0.0f &&
+				engineTime.GetFixedStepCount() == 0 &&
+				engineTime.GetTime() == scaledTimeBeforePause &&
+				engineTime.GetUnscaledTime() > 0.5 &&
+				engineTime.GetFrameCount() == 3,
+			"Pause did not stop scaled time while retaining real time"))
+	{
+		return 1;
+	}
+
+	engineTime.Resume();
+	engineTime.SetTimeScale(1.0f);
+	engineTime.DiscardPendingFixedSteps();
+	engineTime.BeginFrame(1.0f);
+	if (!Check(
+			engineTime.GetFixedStepCount() ==
+				EGE::TimeService::MaximumFixedStepsPerFrame &&
+				engineTime.GetFixedInterpolationAlpha() >= 0.0f &&
+				engineTime.GetFixedInterpolationAlpha() < 1.0f,
+			"Fixed timestep catch-up was not bounded or stable"))
+	{
+		return 1;
+	}
+	engineTime.DiscardPendingFixedSteps();
+	if (!Check(
+			engineTime.GetFixedStepCount() == 0 &&
+				engineTime.GetFixedInterpolationAlpha() == 0.0f,
+			"Scene reset did not discard pending fixed steps"))
+	{
+		return 1;
+	}
+
+	engineTime.BeginPlay();
+	if (!Check(
+			engineTime.GetTime() == 0.0 &&
+				engineTime.GetUnscaledTime() == 0.0 &&
+				engineTime.GetFrameCount() == 0 &&
+				engineTime.GetTimeScale() == 1.0f,
+			"A subsequent Play did not start from a clean timeline"))
+	{
+		return 1;
+	}
+
+	TemporaryProject timeProject;
+	timeProject.WriteScript(
+		"[ScriptComponent]\n"
+		"class TimeProbe : EGEBehaviour\n"
+		"{\n"
+		"    double scaledTime = -1.0;\n"
+		"    double realTime = -1.0;\n"
+		"    float delta = -1.0f;\n"
+		"    float realDelta = -1.0f;\n"
+		"    float fixedDelta = -1.0f;\n"
+		"    uint64 frame = 0;\n"
+		"    bool playing = false;\n"
+		"\n"
+		"    void OnUpdate(float deltaTime)\n"
+		"    {\n"
+		"        scaledTime = Time::time;\n"
+		"        realTime = Time::unscaledTime;\n"
+		"        delta = Time::deltaTime;\n"
+		"        realDelta = Time::unscaledDeltaTime;\n"
+		"        fixedDelta = Time::fixedDeltaTime;\n"
+		"        frame = Time::frameCount;\n"
+		"        playing = Time::isPlaying && !Time::isPaused;\n"
+		"        Time::timeScale = 0.25f;\n"
+		"    }\n"
+		"}\n");
+
+	testTimeService = &engineTime;
+	EGE::SetTimeServiceProvider(ResolveTestTimeService);
+	EGE::ScriptRuntime timeRuntime;
+	std::string timeRegistrationError;
+	if (!Check(
+			timeRuntime.RegisterApi(
+				"Engine.Time",
+				EGE::RegisterTimeApi,
+				timeRegistrationError),
+			"Time API registration was rejected") ||
+		!Check(
+			timeRuntime.Initialize(),
+			"Time runtime initialization failed"))
+	{
+		std::cerr << timeRegistrationError << '\n';
+		return 1;
+	}
+
+	engineTime.BeginFrame(0.02f);
+	if (!Check(
+			timeRuntime.SetProjectRoot(timeProject.Root()),
+			"Time API script did not compile"))
+	{
+		for (const EGE::ScriptDiagnostic& diagnostic :
+			timeRuntime.GetDiagnostics())
+		{
+			std::cerr
+				<< diagnostic.file.string() << ':'
+				<< diagnostic.line << ':'
+				<< diagnostic.column << ' '
+				<< diagnostic.message << '\n';
+		}
+		return 1;
+	}
+
+	const EGE::ScriptInstanceHandle timeInstance =
+		timeRuntime.CreateInstance("TimeProbe");
+	timeRuntime.EnterPlayMode();
+	timeRuntime.StartInstance(timeInstance);
+	timeRuntime.UpdateInstance(
+		timeInstance, engineTime.GetDeltaTime());
+	const EGE::ReflectedScriptObject reflectedTime =
+		timeRuntime.GetReflectedInstance(timeInstance);
+	const EGE::PropertyDescriptor* playingProperty =
+		FindProperty(reflectedTime, "playing");
+	EGE::PropertyValue playingValue;
+	if (!Check(
+			reflectedTime &&
+				std::abs(
+					ReadNumber(reflectedTime, "delta") - 0.02) <
+					0.0001 &&
+				ReadNumber(reflectedTime, "frame") == 1.0 &&
+				playingProperty &&
+				playingProperty->Read(
+					reflectedTime.object, playingValue) &&
+				std::get<bool>(playingValue) &&
+				engineTime.GetTimeScale() == 0.25f,
+			"AngelScript Time properties do not match the engine timeline"))
+	{
+		return 1;
+	}
+
+	std::ifstream timeDefinitions(
+		timeProject.Root() / "as.predefined");
+	const std::string timeLanguageServerApi(
+		(std::istreambuf_iterator<char>(timeDefinitions)),
+		std::istreambuf_iterator<char>());
+	if (!Check(
+			timeLanguageServerApi.find(
+				"namespace Time {\n"
+				"    float get_deltaTime() property;") !=
+				std::string::npos &&
+			timeLanguageServerApi.find(
+				"uint64 get_frameCount() property;") !=
+				std::string::npos,
+			"Language-server definitions do not include the Time API"))
+	{
+		return 1;
+	}
+
+	const double timeBeforeReload = engineTime.GetTime();
+	const std::uint64_t frameBeforeReload =
+		engineTime.GetFrameCount();
+	if (!Check(
+			timeRuntime.ForceReload(),
+			"Time API script hot reload failed") ||
+		!Check(
+			engineTime.GetTime() == timeBeforeReload &&
+				engineTime.GetFrameCount() == frameBeforeReload,
+			"Script hot reload modified the engine timeline"))
+	{
+		return 1;
+	}
+	timeRuntime.LeavePlayMode();
+	timeRuntime.DestroyInstance(timeInstance);
+	timeRuntime.Shutdown();
+	EGE::SetTimeServiceProvider(nullptr);
+	testTimeService = nullptr;
+
+	engineTime.ResetForProjectChange();
+	if (!Check(
+			!engineTime.IsPlaying() &&
+				!engineTime.IsPaused() &&
+				engineTime.GetTime() == 0.0 &&
+				engineTime.GetUnscaledTime() == 0.0 &&
+				engineTime.GetFrameCount() == 0 &&
+				engineTime.GetFixedStepCount() == 0 &&
+				engineTime.GetTimeScale() == 1.0f,
+			"Project reset retained timeline state"))
+	{
+		return 1;
+	}
+
 	TemporaryProject createdAssetProject;
 	std::string workspaceError;
 	if (!Check(
@@ -160,6 +609,228 @@ int main()
 	}
 	createdAssetRuntime.Shutdown();
 
+	TemporaryProject mathProject;
+	mathProject.WriteScript(
+		"[ScriptComponent]\n"
+		"class MathProbe : EGEBehaviour\n"
+		"{\n"
+		"    [SerializeField]\n"
+		"    [Range(-10, 10)]\n"
+		"    Vector3 direction = Vector3(1, 2, 3);\n"
+		"\n"
+		"    [SerializeField]\n"
+		"    Color tint = Color(0.25f, 0.5f, 0.75f, 1.0f);\n"
+		"\n"
+		"    private float result = 0.0f;\n"
+		"\n"
+		"    void OnUpdate(float deltaTime)\n"
+		"    {\n"
+		"        Vector3 sum = direction + Vector3(3, 2, 1);\n"
+		"        Vector3 unit = Vector3(0, 3, 4).normalized;\n"
+		"        direction = Math::Lerp(\n"
+		"            direction, Math::Vector3Forward * 4.0f, 0.5f);\n"
+		"        tint = Math::Lerp(tint, Math::ColorWhite, 0.5f);\n"
+		"        result = Math::Dot(sum, Math::Vector3One) +\n"
+		"            Math::Clamp(2.5f, 0.0f, 2.0f) + unit.length;\n"
+		"    }\n"
+		"}\n");
+
+	EGE::ScriptRuntime mathRuntime;
+	std::string mathRegistrationError;
+	if (!Check(
+			mathRuntime.RegisterApi(
+				"Engine.Math",
+				EGE::RegisterMathApi,
+				mathRegistrationError),
+			"Math API registration was rejected") ||
+		!Check(
+			mathRuntime.Initialize(),
+			"Math runtime initialization failed") ||
+		!Check(
+			mathRuntime.SetProjectRoot(mathProject.Root()),
+			"Math project root was rejected") ||
+		!Check(
+			mathRuntime.HasClass("MathProbe"),
+			"Math script did not compile"))
+	{
+		std::cerr << mathRegistrationError << '\n';
+		for (const EGE::ScriptDiagnostic& diagnostic :
+			mathRuntime.GetDiagnostics())
+		{
+			std::cerr
+				<< diagnostic.file.string() << ':'
+				<< diagnostic.line << ':'
+				<< diagnostic.column << ' '
+				<< diagnostic.message << '\n';
+		}
+		return 1;
+	}
+
+	const EGE::ScriptInstanceHandle mathInstance =
+		mathRuntime.CreateInstance("MathProbe");
+	mathRuntime.EnterPlayMode();
+	mathRuntime.StartInstance(mathInstance);
+	mathRuntime.UpdateInstance(mathInstance, 1.0f / 60.0f);
+
+	EGE::ReflectedScriptObject mathReflected =
+		mathRuntime.GetReflectedInstance(mathInstance);
+	const EGE::PropertyDescriptor* direction =
+		FindProperty(mathReflected, "direction");
+	const EGE::PropertyDescriptor* tint =
+		FindProperty(mathReflected, "tint");
+	EGE::PropertyValue directionValue;
+	EGE::PropertyValue tintValue;
+	const EGE::Vector3Value expectedDirection{0.5f, 1.0f, 3.5f};
+	const EGE::ColorValue expectedTint{0.625f, 0.75f, 0.875f, 1.0f};
+	const bool directionRead =
+		direction &&
+		direction->Read(mathReflected.object, directionValue);
+	const bool tintRead =
+		tint &&
+		tint->Read(mathReflected.object, tintValue);
+	if (directionRead &&
+		std::holds_alternative<EGE::Vector3Value>(directionValue))
+	{
+		const auto actual = std::get<EGE::Vector3Value>(directionValue);
+		if (actual != expectedDirection)
+		{
+			std::cerr
+				<< "Actual Vector3: "
+				<< actual.x << ", " << actual.y << ", " << actual.z << '\n';
+		}
+	}
+	if (!directionRead ||
+		!std::holds_alternative<EGE::Vector3Value>(directionValue))
+	{
+		std::cerr
+			<< "Vector3 reflection state: object="
+			<< static_cast<bool>(mathReflected)
+			<< " property=" << (direction != nullptr)
+			<< " kind="
+			<< (direction
+				? static_cast<int>(direction->kind)
+				: -1)
+			<< " type="
+			<< (direction ? direction->typeName : std::string())
+			<< " read=" << directionRead
+			<< " value-index=" << directionValue.index()
+			<< '\n';
+	}
+	if (!Check(
+			direction &&
+				direction->kind == EGE::PropertyKind::Vector3 &&
+				directionRead &&
+				std::get<EGE::Vector3Value>(directionValue) ==
+					expectedDirection,
+			"Vector3 operators or reflection returned an unexpected value") ||
+		!Check(
+			tint &&
+				tint->kind == EGE::PropertyKind::Color &&
+				tintRead &&
+				std::get<EGE::ColorValue>(tintValue) == expectedTint,
+			"Color math or reflection returned an unexpected value") ||
+		!Check(
+			std::abs(ReadNumber(mathReflected, "result") - 15.0) < 0.001,
+			"Math scalar or Vector3 functions returned an unexpected value"))
+	{
+		return 1;
+	}
+
+	const EGE::PropertyBag mathState =
+		mathRuntime.CaptureInstanceState(mathInstance, true);
+	Config savedMathProperties;
+	EGE::SavePropertyBag(
+		savedMathProperties, "Properties", mathState);
+	char* serializedMathJson = nullptr;
+	savedMathProperties.Save(&serializedMathJson, nullptr);
+	Config loadedMathProperties(serializedMathJson);
+	delete[] serializedMathJson;
+	const EGE::PropertyBag loadedMathState =
+		EGE::LoadPropertyBag(loadedMathProperties, "Properties");
+	const EGE::PropertyState* loadedDirection =
+		FindState(loadedMathState, "direction");
+	const EGE::PropertyState* loadedTint =
+		FindState(loadedMathState, "tint");
+	if (!Check(
+			loadedDirection && loadedTint,
+			"Vector3 and Color serialization did not retain both properties") ||
+		!Check(
+			std::get<EGE::Vector3Value>(loadedDirection->value) ==
+				expectedDirection,
+			"Vector3 JSON serialization did not round-trip") ||
+		!Check(
+			std::get<EGE::ColorValue>(loadedTint->value) ==
+				expectedTint,
+			"Color JSON serialization did not round-trip"))
+	{
+		return 1;
+	}
+
+	mathProject.WriteScript(
+		"[ScriptComponent]\n"
+		"class MathProbe : EGEBehaviour\n"
+		"{\n"
+		"    [SerializeField]\n"
+		"    Vector3 direction = Vector3(9, 9, 9);\n"
+		"    [SerializeField]\n"
+		"    Color tint = Math::ColorBlack;\n"
+		"    private float result = -1.0f;\n"
+		"    void OnUpdate(float deltaTime) {}\n"
+		"}\n");
+	if (!Check(
+			mathRuntime.ForceReload(),
+			"Math script hot reload failed"))
+	{
+		return 1;
+	}
+
+	mathReflected = mathRuntime.GetReflectedInstance(mathInstance);
+	direction = FindProperty(mathReflected, "direction");
+	tint = FindProperty(mathReflected, "tint");
+	directionValue = {};
+	tintValue = {};
+	if (!Check(
+			direction &&
+				direction->Read(mathReflected.object, directionValue) &&
+				std::get<EGE::Vector3Value>(directionValue) ==
+					expectedDirection,
+			"Vector3 state was not preserved during hot reload") ||
+		!Check(
+			tint &&
+				tint->Read(mathReflected.object, tintValue) &&
+				std::get<EGE::ColorValue>(tintValue) == expectedTint,
+			"Color state was not preserved during hot reload"))
+	{
+		return 1;
+	}
+
+	std::ifstream mathDefinitions(mathProject.Root() / "as.predefined");
+	const std::string mathLanguageServerApi(
+		(std::istreambuf_iterator<char>(mathDefinitions)),
+		std::istreambuf_iterator<char>());
+	if (!Check(
+			mathLanguageServerApi.find(
+				"namespace Math {\n"
+				"    Vector3 Cross(") != std::string::npos &&
+			mathLanguageServerApi.find(
+				"namespace Math {\n"
+				"    Color Lerp(") != std::string::npos &&
+			mathLanguageServerApi.find(
+				"float Math::Log(") == std::string::npos &&
+			mathLanguageServerApi.find(
+				"Vector3(float x = 0, float y = 0, "
+				"float z = 0);") != std::string::npos &&
+			mathLanguageServerApi.find(
+				"Color(float r = 0, float g = 0, "
+				"float b = 0, float a = 1);") != std::string::npos,
+			"Language-server definitions do not include the Math API"))
+	{
+		return 1;
+	}
+	mathRuntime.LeavePlayMode();
+	mathRuntime.DestroyInstance(mathInstance);
+	mathRuntime.Shutdown();
+
 	TemporaryProject ownerProject;
 	ownerProject.WriteScript(
 		"[ScriptComponent]\n"
@@ -189,9 +860,14 @@ int main()
 	const EGE::PropertyDescriptor* ownerBound =
 		FindProperty(ownerReflected, "ownerBound");
 	if (!Check(
-		ownerBound && ownerBound->Read(ownerReflected.object, ownerBoundValue) &&
-			std::get<bool>(ownerBoundValue),
-		"EGEBehaviour did not receive its GameObject and Transform handles"))
+			ownerBound && ownerBound->Read(ownerReflected.object, ownerBoundValue) &&
+				std::get<bool>(ownerBoundValue),
+			"EGEBehaviour did not receive its GameObject and Transform handles") ||
+		!Check(
+			FindProperty(ownerReflected, "gameObject") == nullptr &&
+				FindProperty(ownerReflected, "transform") == nullptr &&
+				FindProperty(ownerReflected, "enabled") == nullptr,
+			"EGEBehaviour runtime properties were exposed through reflection"))
 	{
 		return 1;
 	}

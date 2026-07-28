@@ -42,6 +42,7 @@ public:
 	void RecalculateBoundingBox();
 
 	Component* CreateComponent(Component::Types type);
+	bool RemoveComponent(Component* component);
 
 	void SetNewParent(GameObject* node, bool recalc_transformation = false);
 	GameObject* GetParent() const;

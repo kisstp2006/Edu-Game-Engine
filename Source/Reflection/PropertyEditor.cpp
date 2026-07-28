@@ -70,6 +70,19 @@ namespace EGE
 					: "Missing (" +
 						std::to_string(current->componentId) + ")";
 			}
+			if (const auto* current = std::get_if<Vector3Value>(&value))
+			{
+				return "(" + std::to_string(current->x) + ", " +
+					std::to_string(current->y) + ", " +
+					std::to_string(current->z) + ")";
+			}
+			if (const auto* current = std::get_if<ColorValue>(&value))
+			{
+				return "(" + std::to_string(current->r) + ", " +
+					std::to_string(current->g) + ", " +
+					std::to_string(current->b) + ", " +
+					std::to_string(current->a) + ")";
+			}
 			return {};
 		}
 
@@ -261,6 +274,45 @@ namespace EGE
 				&maximum);
 		}
 
+		bool DrawVector3(
+			const PropertyDescriptor& property,
+			Vector3Value& value)
+		{
+			float components[] = {value.x, value.y, value.z};
+			const bool changed = property.attributes.range
+				? ImGui::SliderFloat3(
+					"##Value",
+					components,
+					static_cast<float>(
+						property.attributes.range->minimum),
+					static_cast<float>(
+						property.attributes.range->maximum))
+				: ImGui::DragFloat3(
+					"##Value", components, 0.1f);
+			if (changed)
+				value = {components[0], components[1], components[2]};
+			return changed;
+		}
+
+		bool DrawColor(ColorValue& value)
+		{
+			float components[] = {value.r, value.g, value.b, value.a};
+			const bool changed = ImGui::ColorEdit4(
+				"##Value",
+				components,
+				ImGuiColorEditFlags_AlphaBar |
+					ImGuiColorEditFlags_Float);
+			if (changed)
+			{
+				value = {
+					components[0],
+					components[1],
+					components[2],
+					components[3]};
+			}
+			return changed;
+		}
+
 		bool DrawProperty(
 			const PropertyDescriptor& property,
 			void* object)
@@ -348,6 +400,20 @@ namespace EGE
 						auto current =
 							std::get<ComponentReferenceValue>(value);
 						changed = DrawComponentReference(current);
+						value = current;
+						break;
+					}
+				case PropertyKind::Vector3:
+					{
+						auto current = std::get<Vector3Value>(value);
+						changed = DrawVector3(property, current);
+						value = current;
+						break;
+					}
+				case PropertyKind::Color:
+					{
+						auto current = std::get<ColorValue>(value);
+						changed = DrawColor(current);
 						value = current;
 						break;
 					}

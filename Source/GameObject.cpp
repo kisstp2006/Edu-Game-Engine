@@ -26,6 +26,8 @@
 #include "OpenGL.h"
 #include "DebugDraw.h"
 
+#include <algorithm>
+
 #include "Leaks.h"
 
 using namespace std;
@@ -215,7 +217,9 @@ void GameObject::OnUpdate(float dt)
 	for (list<Component*>::iterator it = components.begin(); it != components.end(); ++it)
 		(*it)->OnUpdate(dt);
 
-	velocity = (last_translation - translation) / dt;
+	velocity = dt > 0.0f
+		? (last_translation - translation) / dt
+		: float3::zero;
 	last_translation = translation;
 }
 
@@ -342,6 +346,22 @@ Component* GameObject::CreateComponent(Component::Types type)
 		components.push_back(ret);
 
 	return ret;
+}
+
+bool GameObject::RemoveComponent(Component* component)
+{
+	if (!component || component->GetGameObject() != this)
+		return false;
+
+	const auto found = std::find(
+		components.begin(), components.end(), component);
+	if (found == components.end() || component->flag_for_removal)
+		return false;
+
+	component->SetActive(false);
+	component->flag_for_removal = true;
+	local_trans_dirty = true;
+	return true;
 }
 
 // ---------------------------------------------------------

@@ -231,6 +231,7 @@ void Application::ProcessPendingProjectChange()
 	if (editor)
 		editor->PrepareForProjectChange();
 
+	time_service.ResetForProjectChange();
 	level->UnloadCurrent();
 	resources->UnloadProjectResources();
 
@@ -359,24 +360,30 @@ void Application::PrepareUpdate()
 		case waiting_play:
 		{
 			state = play;
+			time_service.BeginPlay();
 			BroadcastEvent(Event(Event::EventType::play));
 		} break;
 		case waiting_stop:
 		{
 			state = stop;
 			BroadcastEvent(Event(Event::EventType::stop));
+			time_service.Stop();
 		} break;
 		case waiting_pause:
 		{
 			state = pause;
+			time_service.Pause();
 			BroadcastEvent(Event(Event::EventType::pause));
 		} break;
 		case waiting_unpause:
 		{
 			state = play;
+			time_service.Resume();
 			BroadcastEvent(Event(Event::EventType::unpause));
 		} break;
 	}
+
+	time_service.BeginFrame(dt);
 }
 
 // ---------------------------------------------
@@ -774,4 +781,14 @@ void Application::ApplySettings()
 		}
 		window->SetTitle(title.c_str());
 	}
+}
+
+EGE::TimeService& Application::GetTime()
+{
+	return time_service;
+}
+
+const EGE::TimeService& Application::GetTime() const
+{
+	return time_service;
 }

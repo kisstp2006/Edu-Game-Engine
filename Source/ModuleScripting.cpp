@@ -6,6 +6,15 @@
 #include "ModuleFileSystem.h"
 #include "Project/Project.h"
 #include "Scripting/ScriptBindings.h"
+#include "Scripting/ScriptTime.h"
+
+namespace
+{
+	EGE::TimeService* ResolveEngineTime()
+	{
+		return App ? &App->GetTime() : nullptr;
+	}
+}
 
 ModuleScripting::ModuleScripting(bool startEnabled)
 	: Module("Scripting", startEnabled)
@@ -16,13 +25,26 @@ bool ModuleScripting::Init(Config*)
 {
 	runtime_.SetEditorBuild(App && App->IsEditor());
 	std::string error;
+	EGE::SetTimeServiceProvider(ResolveEngineTime);
+	if (!runtime_.RegisterApi(
+			"Engine.Time", EGE::RegisterTimeApi, error))
+	{
+		LOG("Could not configure AngelScript Time bindings: %s", error.c_str());
+		EGE::SetTimeServiceProvider(nullptr);
+		return false;
+	}
 	if (!runtime_.RegisterApi(
 			"Engine.Input", EGE::RegisterEngineBindings, error))
 	{
 		LOG("Could not configure AngelScript engine bindings: %s", error.c_str());
+		EGE::SetTimeServiceProvider(nullptr);
 		return false;
 	}
-	return runtime_.Initialize();
+	if (runtime_.Initialize())
+		return true;
+
+	EGE::SetTimeServiceProvider(nullptr);
+	return false;
 }
 
 bool ModuleScripting::Start(Config*)
@@ -37,13 +59,14 @@ update_status ModuleScripting::PreUpdate(float)
 
 update_status ModuleScripting::Update(float dt)
 {
-	runtime_.Tick(dt);
+	runtime_.Tick(App ? App->GetTime().GetDeltaTime() : dt);
 	return UPDATE_CONTINUE;
 }
 
 bool ModuleScripting::CleanUp()
 {
 	runtime_.Shutdown();
+	EGE::SetTimeServiceProvider(nullptr);
 	LOG("AngelScript scripting runtime shut down");
 	return true;
 }

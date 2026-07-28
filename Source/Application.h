@@ -8,6 +8,7 @@
 #include <memory>
 #include <filesystem>
 #include "Timer.h"
+#include "EngineTime.h"
 #include "MathGeoLib/include/Algorithm/Random/LCG.h"
 
 class Config;
@@ -96,6 +97,8 @@ public:
 	EGE::SettingsService* GetSettings();
 	const EGE::SettingsService* GetSettings() const;
 	void ApplySettings();
+	EGE::TimeService& GetTime();
+	const EGE::TimeService& GetTime() const;
 
 	ThreadPool* getThreadPool() {return threadPool.get(); }
 private:
@@ -165,6 +168,7 @@ private:
 	std::unique_ptr<EGE::SettingsService> settings_service;
 	PendingProjectChange pending_project_change;
 	std::filesystem::path fallback_project_file;
+	EGE::TimeService time_service;
 
 	State state = State::stop;
 	EngineMode mode = EngineMode::Editor;

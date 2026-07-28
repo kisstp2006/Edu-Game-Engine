@@ -19,6 +19,8 @@ class EGEBehaviour {
 }
 
 class string {
+    string();
+    string(const string&in);
     string& opAssign(const string&in);
     string& opAddAssign(const string&in);
     bool opEquals(const string&in) const;

@@ -5,7 +5,9 @@
 #include "Module.h"
 #include "Math.h"
 #include "QuadTree.h"
+#include <filesystem>
 #include <mutex>
+#include <string>
 #include <vector>
 
 class GameObject;
@@ -41,6 +43,12 @@ public:
 	bool CreateNewEmpty(const char* name);
 	bool Load(const char* file);
 	bool Save(const char* file = nullptr);
+	bool CreateEmptySceneAsset(
+		const char* file,
+		const char* sceneName,
+		std::string* error = nullptr) const;
+	bool HasScenePath() const;
+	const std::filesystem::path& GetScenePath() const;
 	void UnloadCurrent();
 	
 	// Add or remove from the hierarchy
@@ -72,6 +80,7 @@ private:
 	void RecursiveFixedUpdate(GameObject* go, float dt) const;
 	void RecursiveUpdate(GameObject* go, float dt) const;
 	void RecursiveLateUpdate(GameObject* go, float dt) const;
+	void RecursiveFlushPendingComponentRemovals(GameObject* go) const;
 	GameObject* RecursiveFind(
 		uint uid, GameObject* go, bool includePending) const;
 	GameObject* RecursiveFind(const char* name, GameObject* go) const;
@@ -88,6 +97,7 @@ private:
 	std::mutex pending_destructions_mutex;
 
 	std::string name;
+	std::filesystem::path scene_path;
 
     std::unique_ptr<IBLData> skybox;
     std::unique_ptr<LightManager> lightManager;

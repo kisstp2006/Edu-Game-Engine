@@ -20,7 +20,6 @@ class PanelGOTree;
 class PanelProperties;
 class PanelConfiguration;
 class PanelAssets;
-class PanelScriptDiagnostics;
 class PanelQuickBar;
 class GameObject;
 class DirLight;
@@ -49,7 +48,6 @@ public:
 	PanelProperties* props = nullptr;
 	PanelConfiguration* conf = nullptr;
 	PanelAssets* assets = nullptr;
-	PanelScriptDiagnostics* scriptDiagnostics = nullptr;
 
     enum SelectionType
     {
@@ -105,6 +103,8 @@ public:
 	void RecordRecentProject(const EGE::Project& project);
 	void ApplyAppearance(const std::string& theme, bool compact);
 	bool OpenAssetEditor(const EGE::EditorAssetSelection& asset);
+	void RequestOpenScene();
+	void RequestSaveScene(bool saveAs = false);
 
     int GetWidth(TabPanelEnum panel) const { return tab_panels[panel].width; }
     int GetHeight(TabPanelEnum panel) const { return tab_panels[panel].height; }
@@ -141,6 +141,9 @@ private:
 		const ImVec2& dockspaceSize);
 	void OpenActiveProjectInVsCode();
 	void NotifySelectionChanged();
+	void DrawSceneDialogs();
+	bool SaveSceneTo(const std::filesystem::path& selectedPath);
+	std::filesystem::path GetSceneDialogDirectory() const;
 
 private:
 
@@ -173,7 +176,6 @@ private:
 	bool draw_menu = true;
 	bool open_new_project_popup = false;
 	bool open_project_status_popup = false;
-	bool project_status_success = false;
 	bool show_project_settings = false;
 	bool show_editor_settings = false;
 	bool show_project_selector = true;
@@ -185,6 +187,10 @@ private:
 	ImGui::FileBrowser open_project_dialog;
 	ImGui::FileBrowser project_location_dialog{
 		ImGuiFileBrowserFlags_SelectDirectory |
+		ImGuiFileBrowserFlags_CreateNewDir};
+	ImGui::FileBrowser open_scene_dialog;
+	ImGui::FileBrowser save_scene_dialog{
+		ImGuiFileBrowserFlags_EnterNewFilename |
 		ImGuiFileBrowserFlags_CreateNewDir};
 
     SelectionVariant selected;

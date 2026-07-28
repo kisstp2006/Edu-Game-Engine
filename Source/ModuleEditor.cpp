@@ -7,6 +7,7 @@
 #include "ModuleEditorCamera.h"
 #include "ModuleRenderer3D.h"
 #include "ModuleInput.h"
+#include "ModuleResources.h"
 #include "GameObject.h"
 #include "DebugDraw.h"
 #include "Config.h"
@@ -18,7 +19,6 @@
 #include "PanelConfiguration.h"
 #include "PanelAbout.h"
 #include "PanelAssets.h"
-#include "PanelScriptDiagnostics.h"
 #include "Event.h"
 #include "Project/Project.h"
 #include "Project/RecentProjects.h"
@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <string.h>
 #include <algorithm>
+#include <cctype>
 
 using namespace std;
 
@@ -46,12 +47,44 @@ using namespace std;
 
 namespace ed = ax::NodeEditor;
 
+namespace
+{
+	bool IsPathInside(
+		const std::filesystem::path& child,
+		const std::filesystem::path& parent)
+	{
+		const std::filesystem::path relative =
+			child.lexically_relative(parent);
+		if (relative.empty())
+			return child == parent;
+		const std::string text = relative.generic_string();
+		return text != ".." && !text.starts_with("../");
+	}
+
+	std::string Lowercase(std::string value)
+	{
+		std::transform(
+			value.begin(),
+			value.end(),
+			value.begin(),
+			[](unsigned char character)
+			{
+				return static_cast<char>(std::tolower(character));
+			});
+		return value;
+	}
+}
+
 ModuleEditor::ModuleEditor(bool start_enabled) : Module("Editor", start_enabled)
 {
 	selected_file[0] = '\0';
 	open_project_dialog.SetTitle("Open Edu Game Engine Project");
 	open_project_dialog.SetTypeFilters({".egeproject"});
 	project_location_dialog.SetTitle("Select Project Location");
+	open_scene_dialog.SetTitle("Open Scene");
+	open_scene_dialog.SetTypeFilters({".eduscene", ".scene"});
+	save_scene_dialog.SetTitle("Save Scene");
+	save_scene_dialog.SetTypeFilters({".eduscene"});
 }
 
 // Destructor
@@ -98,8 +131,6 @@ bool ModuleEditor::Init(Config* config)
     tab_panels[TabPanelRight].name = "Inspector";
 
 	tab_panels[TabPanelBottom].panels.push_back(console = new PanelConsole());
-	tab_panels[TabPanelBottom].panels.push_back(
-		scriptDiagnostics = new PanelScriptDiagnostics());
 	tab_panels[TabPanelLeft].panels.push_back(tree = new PanelGOTree());
 	tab_panels[TabPanelRight].panels.push_back(props = new PanelProperties());
 	tab_panels[TabPanelRight].panels.push_back(conf = new PanelConfiguration());
@@ -242,10 +273,34 @@ update_status ModuleEditor::Update(float dt)
 				}
 
 				ImGui::Separator();
+				const bool can_edit_scene =
+					App->GetActiveProject() != nullptr &&
+					App->IsStop();
+				if (ImGui::MenuItem(
+						"New Scene", nullptr, false,
+						can_edit_scene))
+				{
+					App->level->CreateNewEmpty("Untitled");
+					ClearSelected();
+				}
+				if (ImGui::MenuItem(
+						"Open Scene...", nullptr, false,
+						can_edit_scene))
+				{
+					RequestOpenScene();
+				}
 				if (ImGui::MenuItem(
 						"Save Scene", nullptr, false,
-						App->GetActiveProject() != nullptr))
-					App->level->Save("level.json");
+						can_edit_scene))
+				{
+					RequestSaveScene();
+				}
+				if (ImGui::MenuItem(
+						"Save Scene As...", nullptr, false,
+						can_edit_scene))
+				{
+					RequestSaveScene(true);
+				}
 
 				if (ImGui::MenuItem("Quit", "ESC"))
 					ret = UPDATE_STOP;
@@ -285,6 +340,7 @@ update_status ModuleEditor::Update(float dt)
 	}
 
 	DrawProjectDialogs();
+	DrawSceneDialogs();
 	DrawSettingsWindow(show_project_settings, false);
 	DrawSettingsWindow(show_editor_settings, true);
 	if (DrawProjectSelector())
@@ -740,11 +796,8 @@ void ModuleEditor::DrawProjectDialogs()
 			"Project Status", nullptr,
 			ImGuiWindowFlags_AlwaysAutoResize))
 	{
-		const ImVec4 color = project_status_success
-			? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
-			: ImVec4(0.95f, 0.35f, 0.35f, 1.0f);
 		ImGui::TextColored(
-			color, "%s", project_status_success ? "Success" : "Error");
+			ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "Error");
 		ImGui::TextWrapped("%s", project_status_message.c_str());
 		if (ImGui::Button("OK"))
 			ImGui::CloseCurrentPopup();
@@ -1025,6 +1078,10 @@ void ModuleEditor::PrepareForProjectChange()
 	open_project_dialog.ClearSelected();
 	project_location_dialog.Close();
 	project_location_dialog.ClearSelected();
+	open_scene_dialog.Close();
+	open_scene_dialog.ClearSelected();
+	save_scene_dialog.Close();
+	save_scene_dialog.ClearSelected();
 }
 
 bool ModuleEditor::OpenAssetEditor(
@@ -1039,6 +1096,178 @@ bool ModuleEditor::OpenAssetEditor(
 
 	SetProjectStatus(false, error);
 	return false;
+}
+
+void ModuleEditor::RequestOpenScene()
+{
+	const std::filesystem::path directory =
+		GetSceneDialogDirectory();
+	if (directory.empty())
+	{
+		SetProjectStatus(
+			false, "There is no active project to open a scene from.");
+		return;
+	}
+
+	open_scene_dialog.SetPwd(directory);
+	open_scene_dialog.Open();
+}
+
+void ModuleEditor::RequestSaveScene(bool saveAs)
+{
+	if (!App->GetActiveProject())
+	{
+		SetProjectStatus(
+			false, "There is no active project to save the scene into.");
+		return;
+	}
+
+	if (!saveAs && App->level->HasScenePath())
+	{
+		if (!App->level->Save())
+		{
+			SetProjectStatus(false, "The scene could not be saved.");
+			return;
+		}
+
+		App->resources->SaveResources();
+		if (assets)
+			assets->RefreshProjectAssets();
+		return;
+	}
+
+	const std::filesystem::path directory =
+		GetSceneDialogDirectory();
+	if (!directory.empty())
+		save_scene_dialog.SetPwd(directory);
+	save_scene_dialog.Open();
+}
+
+void ModuleEditor::DrawSceneDialogs()
+{
+	open_scene_dialog.Display();
+	if (open_scene_dialog.HasSelected())
+	{
+		const std::filesystem::path selected =
+			open_scene_dialog.GetSelected();
+		open_scene_dialog.ClearSelected();
+
+		const std::shared_ptr<const EGE::Project> project =
+			App->GetActiveProject();
+		if (!project)
+		{
+			SetProjectStatus(
+				false, "The project was closed before the scene could open.");
+		}
+		else
+		{
+			const std::filesystem::path projectDirectory =
+				project->GetProjectDirectory().lexically_normal();
+			const std::filesystem::path assetDirectory =
+				project->GetAssetDirectory().lexically_normal();
+			const std::filesystem::path absolutePath =
+				std::filesystem::absolute(selected).lexically_normal();
+			const std::string extension =
+				Lowercase(absolutePath.extension().string());
+			if (!IsPathInside(absolutePath, assetDirectory) ||
+				(extension != ".eduscene" && extension != ".scene"))
+			{
+				SetProjectStatus(
+					false,
+					"Choose an .eduscene file inside the active "
+					"project's asset directory.");
+			}
+			else
+			{
+				const std::filesystem::path relativePath =
+					absolutePath.lexically_relative(projectDirectory);
+				if (App->level->Load(
+						relativePath.generic_string().c_str()))
+				{
+					ClearSelected();
+				}
+				else
+				{
+					SetProjectStatus(
+						false, "The selected scene could not be loaded.");
+				}
+			}
+		}
+	}
+
+	save_scene_dialog.Display();
+	if (save_scene_dialog.HasSelected())
+	{
+		const std::filesystem::path selected =
+			save_scene_dialog.GetSelected();
+		save_scene_dialog.ClearSelected();
+		SaveSceneTo(selected);
+	}
+}
+
+bool ModuleEditor::SaveSceneTo(
+	const std::filesystem::path& selectedPath)
+{
+	const std::shared_ptr<const EGE::Project> project =
+		App->GetActiveProject();
+	if (!project)
+	{
+		SetProjectStatus(
+			false, "The project was closed before the scene could be saved.");
+		return false;
+	}
+
+	std::filesystem::path absolutePath =
+		std::filesystem::absolute(selectedPath).lexically_normal();
+	if (Lowercase(absolutePath.extension().string()) != ".eduscene")
+		absolutePath.replace_extension(".eduscene");
+
+	const std::filesystem::path projectDirectory =
+		project->GetProjectDirectory().lexically_normal();
+	const std::filesystem::path assetDirectory =
+		project->GetAssetDirectory().lexically_normal();
+	if (!IsPathInside(absolutePath, assetDirectory))
+	{
+		SetProjectStatus(
+			false,
+			"Scenes must be saved inside the active project's "
+			"asset directory.");
+		return false;
+	}
+
+	const std::filesystem::path relativePath =
+		absolutePath.lexically_relative(projectDirectory);
+	if (!EGE::IsSafeProjectRelativePath(relativePath) ||
+		!App->level->Save(relativePath.generic_string().c_str()))
+	{
+		SetProjectStatus(false, "The scene could not be saved.");
+		return false;
+	}
+
+	App->resources->SaveResources();
+	if (assets)
+		assets->RefreshProjectAssets();
+	return true;
+}
+
+std::filesystem::path ModuleEditor::GetSceneDialogDirectory() const
+{
+	const std::shared_ptr<const EGE::Project> project =
+		App->GetActiveProject();
+	if (!project)
+		return {};
+
+	if (App->level->HasScenePath())
+	{
+		const std::filesystem::path currentDirectory =
+			(project->GetProjectDirectory() /
+			 App->level->GetScenePath()).parent_path();
+		std::error_code error;
+		if (std::filesystem::is_directory(currentDirectory, error))
+			return currentDirectory;
+	}
+
+	return project->GetAssetDirectory();
 }
 
 void ModuleEditor::OpenActiveProjectInVsCode()
@@ -1066,7 +1295,9 @@ void ModuleEditor::SetProjectStatus(
 	bool success, const std::string& message)
 {
 	project_selection_pending = false;
-	project_status_success = success;
+	if (success)
+		return;
+
 	project_status_message = message;
 	open_project_status_popup = true;
 }
@@ -1088,26 +1319,6 @@ void ModuleEditor::ReceiveEvent(const Event& event)
 {
 	switch (event.type)
 	{
-#ifndef _DEBUG
-		case Event::play:
-		case Event::unpause:
-			draw_menu = false;
-			console->active = false;
-			tree->active = false;
-            props->active = false;
-            conf->active = false;
-            assets->active = false;
-		break;
-		case Event::stop:
-		case Event::pause:
-			draw_menu = true;
-			console->active = true;
-			tree->active = true;
-            props->active = true;
-            conf->active = true;
-            assets->active = true;
-		break;
-#endif
 		case Event::gameobject_destroyed:
 		{
 			GameObject** go = std::get_if<GameObject*>(&selected);
