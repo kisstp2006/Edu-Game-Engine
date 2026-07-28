@@ -21,6 +21,7 @@
 #include "PanelScriptDiagnostics.h"
 #include "Event.h"
 #include "Project/Project.h"
+#include "Project/RecentProjects.h"
 #include "Project/VsCodeWorkspace.h"
 #include "Settings/SettingsService.h"
 #include "Settings/SettingsStore.h"
@@ -67,7 +68,22 @@ bool ModuleEditor::Init(Config* config)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-	io.IniFilename = "imgui.ini";
+	std::filesystem::path editorPreferenceDirectory;
+	char* preferencePath =
+		SDL_GetPrefPath("TiGames", "EduGameEngine");
+	if (preferencePath)
+	{
+		editorPreferenceDirectory = preferencePath;
+		SDL_free(preferencePath);
+		imgui_ini_path =
+			(editorPreferenceDirectory / "imgui.ini").string();
+		io.IniFilename = imgui_ini_path.c_str();
+	}
+	else
+	{
+		io.IniFilename = nullptr;
+		LOG("Could not resolve the editor preferences directory");
+	}
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableSetMousePos | ImGuiConfigFlags_DockingEnable;  // Enable Keyboard Controls
 	io.WantSetMousePos = true;
     ImGui_ImplSDL2_InitForOpenGL(App->window->GetWindow(), App->renderer3D->context);
@@ -89,6 +105,21 @@ bool ModuleEditor::Init(Config* config)
 	tab_panels[TabPanelRight].panels.push_back(conf = new PanelConfiguration());
 	tab_panels[TabPanelBottom].panels.push_back(assets = new PanelAssets());
 	assetEditorManager = std::make_unique<EGE::AssetEditorManager>();
+	recentProjects = std::make_unique<EGE::RecentProjects>();
+
+	if (!editorPreferenceDirectory.empty())
+	{
+		std::string recentError;
+		const std::filesystem::path recentFile =
+			editorPreferenceDirectory /
+			"RecentProjects.json";
+		if (!recentProjects->Load(recentFile, recentError))
+		{
+			LOG("Could not load recent projects: %s",
+				recentError.c_str());
+		}
+	}
+	show_project_selector = App->GetActiveProject() == nullptr;
 
 	return true;
 }
@@ -172,6 +203,13 @@ update_status ModuleEditor::Update(float dt)
 			{
 				const bool can_change_project = App->IsStop();
 				if (ImGui::MenuItem(
+						"Project Browser...", nullptr, false,
+						can_change_project))
+				{
+					show_project_selector = true;
+				}
+				ImGui::Separator();
+				if (ImGui::MenuItem(
 						"New Project...", nullptr, false,
 						can_change_project))
 				{
@@ -204,7 +242,9 @@ update_status ModuleEditor::Update(float dt)
 				}
 
 				ImGui::Separator();
-				if (ImGui::MenuItem("Save Scene"))
+				if (ImGui::MenuItem(
+						"Save Scene", nullptr, false,
+						App->GetActiveProject() != nullptr))
 					App->level->Save("level.json");
 
 				if (ImGui::MenuItem("Quit", "ESC"))
@@ -215,7 +255,9 @@ update_status ModuleEditor::Update(float dt)
 
 			if (ImGui::BeginMenu("Edit"))
 			{
-				if (ImGui::MenuItem("Project Settings..."))
+				if (ImGui::MenuItem(
+						"Project Settings...", nullptr, false,
+						App->GetActiveProject() != nullptr))
 					show_project_settings = true;
 				if (ImGui::MenuItem("Editor Settings..."))
 					show_editor_settings = true;
@@ -245,12 +287,17 @@ update_status ModuleEditor::Update(float dt)
 	DrawProjectDialogs();
 	DrawSettingsWindow(show_project_settings, false);
 	DrawSettingsWindow(show_editor_settings, true);
+	if (DrawProjectSelector())
+		ret = UPDATE_STOP;
 
-	DrawPanelGroup(TabPanelLeft);
-	DrawPanelGroup(TabPanelRight);
-	DrawStandalonePanels(TabPanelBottom);
-	if (assetEditorManager)
-		assetEditorManager->Draw();
+	if (App->GetActiveProject())
+	{
+		DrawPanelGroup(TabPanelLeft);
+		DrawPanelGroup(TabPanelRight);
+		DrawStandalonePanels(TabPanelBottom);
+		if (assetEditorManager)
+			assetEditorManager->Draw();
+	}
 
     if (file_dialog == opened)
         LoadFile((file_dialog_filter.length() > 0) ? file_dialog_filter.c_str() : nullptr);
@@ -373,6 +420,200 @@ void ModuleEditor::BuildDefaultDockLayout(
 	ImGui::DockBuilderFinish(dockspaceId);
 }
 
+bool ModuleEditor::DrawProjectSelector()
+{
+	if (!show_project_selector)
+		return false;
+
+	ImGuiViewport* viewport = ImGui::GetMainViewport();
+	const ImVec2 workPosition = viewport->GetWorkPos();
+	const ImVec2 workSize = viewport->GetWorkSize();
+	const ImVec2 windowSize(720.0f, 520.0f);
+	ImGui::SetNextWindowPos(
+		ImVec2(
+			workPosition.x +
+				(workSize.x - windowSize.x) * 0.5f,
+			workPosition.y +
+				(workSize.y - windowSize.y) * 0.5f),
+		ImGuiCond_Always);
+	ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+
+	const ImGuiWindowFlags flags =
+		ImGuiWindowFlags_NoDocking |
+		ImGuiWindowFlags_NoCollapse |
+		ImGuiWindowFlags_NoResize |
+		ImGuiWindowFlags_NoSavedSettings;
+	if (!ImGui::Begin("Project Browser", nullptr, flags))
+	{
+		ImGui::End();
+		return false;
+	}
+
+	ImGui::TextUnformatted("EDU GAME ENGINE");
+	ImGui::TextDisabled(
+		"Choose a project. Project assets are loaded only after selection.");
+	ImGui::Separator();
+
+	if (project_selection_pending)
+	{
+		ImGui::TextColored(
+			ImVec4(0.35f, 0.72f, 1.0f, 1.0f),
+			"Opening project...");
+	}
+	else
+	{
+		if (ImGui::Button("New Project", ImVec2(130.0f, 0.0f)))
+			open_new_project_popup = true;
+		ImGui::SameLine();
+		if (ImGui::Button("Open Project", ImVec2(130.0f, 0.0f)))
+		{
+			if (!recentProjects ||
+				recentProjects->GetEntries().empty())
+			{
+				open_project_dialog.SetPwd(
+					App->GetFallbackProjectFile().parent_path());
+			}
+			else
+			{
+				open_project_dialog.SetPwd(
+					recentProjects->GetEntries().front().
+						projectFile.parent_path());
+			}
+			open_project_dialog.Open();
+		}
+
+		std::error_code fallbackError;
+		const bool fallbackAvailable =
+			std::filesystem::is_regular_file(
+				App->GetFallbackProjectFile(), fallbackError);
+		ImGui::SameLine();
+		if (ImGui::Button(
+				"Open Fallback", ImVec2(130.0f, 0.0f)))
+		{
+			if (fallbackAvailable)
+			{
+				RequestProjectFromSelector(
+					App->GetFallbackProjectFile());
+			}
+			else
+			{
+				SetProjectStatus(
+					false,
+					"The fallback project file is unavailable.");
+			}
+		}
+	}
+
+	ImGui::Spacing();
+	ImGui::TextDisabled("RECENT PROJECTS");
+	ImGui::Separator();
+
+	std::filesystem::path removeProject;
+	if (ImGui::BeginChild(
+			"##RecentProjects",
+			ImVec2(0.0f, 330.0f),
+			true))
+	{
+		bool drewEntry = false;
+		if (recentProjects)
+		{
+			for (const EGE::RecentProject& recent :
+				recentProjects->GetEntries())
+			{
+				if (recent.projectFile ==
+					App->GetFallbackProjectFile())
+				{
+					continue;
+				}
+
+				drewEntry = true;
+				ImGui::PushID(
+					recent.projectFile.string().c_str());
+				if (ImGui::BeginChild(
+						"##RecentProject",
+						ImVec2(0.0f, 74.0f),
+						true))
+				{
+					ImGui::TextUnformatted(recent.name.c_str());
+					ImGui::TextDisabled(
+						"%s", recent.projectFile.string().c_str());
+
+					std::error_code projectError;
+					const bool available =
+						std::filesystem::is_regular_file(
+							recent.projectFile, projectError);
+					if (!available)
+					{
+						ImGui::TextColored(
+							ImVec4(0.95f, 0.45f, 0.38f, 1.0f),
+							"Project file is missing");
+						ImGui::SameLine();
+					}
+					if (ImGui::Button("Open") &&
+						available &&
+						!project_selection_pending)
+					{
+						RequestProjectFromSelector(
+							recent.projectFile);
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Remove"))
+						removeProject = recent.projectFile;
+				}
+				ImGui::EndChild();
+				ImGui::PopID();
+			}
+		}
+
+		if (!drewEntry)
+		{
+			ImGui::TextDisabled(
+				"No recent projects yet. Create one or open an "
+				"existing .egeproject file.");
+		}
+	}
+	ImGui::EndChild();
+
+	if (!removeProject.empty() && recentProjects)
+	{
+		std::string removeError;
+		if (!recentProjects->Remove(removeProject, removeError))
+			SetProjectStatus(false, removeError);
+	}
+
+	bool quit = false;
+	if (App->GetActiveProject())
+	{
+		if (ImGui::Button("Close", ImVec2(100.0f, 0.0f)))
+			show_project_selector = false;
+	}
+	else if (ImGui::Button("Quit", ImVec2(100.0f, 0.0f)))
+	{
+		quit = true;
+	}
+
+	ImGui::End();
+	return quit;
+}
+
+bool ModuleEditor::RequestProjectFromSelector(
+	const std::filesystem::path& projectFile)
+{
+	if (project_selection_pending)
+		return false;
+
+	if (!App->RequestOpenProject(projectFile))
+	{
+		SetProjectStatus(
+			false,
+			"Another project operation is already pending.");
+		return false;
+	}
+
+	project_selection_pending = true;
+	return true;
+}
+
 void ModuleEditor::DrawProjectDialogs()
 {
 	if (open_new_project_popup)
@@ -438,8 +679,13 @@ void ModuleEditor::DrawProjectDialogs()
 			const std::filesystem::path project_directory =
 				std::filesystem::path(new_project_location) /
 				new_project_name;
-			if (!App->RequestCreateProject(
+			if (App->RequestCreateProject(
 					project_directory, new_project_name))
+			{
+				if (show_project_selector)
+					project_selection_pending = true;
+			}
+			else
 			{
 				SetProjectStatus(
 					false, "Another project operation is already pending.");
@@ -471,8 +717,12 @@ void ModuleEditor::DrawProjectDialogs()
 	open_project_dialog.Display();
 	if (open_project_dialog.HasSelected())
 	{
-		if (!App->RequestOpenProject(
-				open_project_dialog.GetSelected()))
+		const bool requested = show_project_selector
+			? RequestProjectFromSelector(
+				open_project_dialog.GetSelected())
+			: App->RequestOpenProject(
+				open_project_dialog.GetSelected());
+		if (!requested && !show_project_selector)
 		{
 			SetProjectStatus(
 				false, "Another project operation is already pending.");
@@ -509,7 +759,9 @@ void ModuleEditor::DrawSettingsWindow(
 		return;
 
 	EGE::SettingsService* service = App->GetSettings();
-	if (!service || (editorSettings && !service->HasEditorSettings()))
+	if (!service ||
+		(editorSettings && !service->HasEditorSettings()) ||
+		(!editorSettings && !service->HasProjectSettings()))
 	{
 		open = false;
 		return;
@@ -813,9 +1065,23 @@ void ModuleEditor::NotifySelectionChanged()
 void ModuleEditor::SetProjectStatus(
 	bool success, const std::string& message)
 {
+	project_selection_pending = false;
 	project_status_success = success;
 	project_status_message = message;
 	open_project_status_popup = true;
+}
+
+void ModuleEditor::RecordRecentProject(
+	const EGE::Project& project)
+{
+	project_selection_pending = false;
+	show_project_selector = false;
+	if (!recentProjects)
+		return;
+
+	std::string error;
+	if (!recentProjects->Add(project, error))
+		LOG("Could not save recent project: %s", error.c_str());
 }
 
 void ModuleEditor::ReceiveEvent(const Event& event)

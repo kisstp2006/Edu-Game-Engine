@@ -43,6 +43,7 @@ public:
 	bool IsActive() const;
 	Types GetType() const;
 	const char* GetTypeStr() const;
+	uint GetUID() const;
 	const GameObject* GetGameObject() const;
 	GameObject* GetGameObject();
 
@@ -75,7 +76,12 @@ public:
 	bool flag_for_removal = false;
 
 protected:
+	friend class GameObject;
+
+	void SetUID(uint value);
+
 	Types type = Types::Unknown;
+	uint uid = 0;
 	bool active = false;
 	GameObject* game_object = nullptr;
 };

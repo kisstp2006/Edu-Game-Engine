@@ -98,7 +98,7 @@ bool Application::Init()
 		return false;
 
 	char* buffer = nullptr;
-	fs->Load(SETTINGS_FOLDER "config.json", &buffer);
+	fs->Load("Engine/Settings/config.json", &buffer);
 
 	Config config((const char*) buffer);
 
@@ -131,32 +131,11 @@ bool Application::Init()
 
 bool Application::InitializeProjectSystem()
 {
-	std::error_code error;
-	fallback_project_file = std::filesystem::absolute(
-		"Fallback.egeproject", error).lexically_normal();
-	if (error)
-	{
-		LOG("Could not resolve the fallback project path");
-		return false;
-	}
-
-	const EGE::ProjectOpenResult opened =
-		project_manager->OpenProject(fallback_project_file);
-	if (!opened)
-	{
-		LOG("Could not open fallback project: %s",
-			opened.status.message.c_str());
-		return false;
-	}
-
-	if (!fs->SetProjectRoot(opened.project->GetProjectDirectory()))
-	{
-		LOG("Could not mount fallback project directory");
-		return false;
-	}
-
-	LOG("Opened fallback project [%s]",
-		opened.project->GetProjectFilePath().string().c_str());
+	fallback_project_file =
+		(fs->GetEngineRoot() / "Fallback.egeproject").lexically_normal();
+	project_manager->CloseProject();
+	fs->ClearProjectRoot();
+	LOG("Project system initialized without an active project");
 	return true;
 }
 
@@ -165,7 +144,7 @@ bool Application::InitializeSettingsSystem()
 	settings_service = std::make_unique<EGE::SettingsService>();
 	std::string error;
 	if (!settings_service->Initialize(
-			fs->GetFallbackRoot(), fs->GetProjectRoot(), IsEditor(), error))
+			fs->GetEngineRoot(), {}, IsEditor(), error))
 	{
 		LOG("Could not initialize settings: %s", error.c_str());
 		settings_service.reset();
@@ -195,11 +174,6 @@ void Application::ProcessPendingProjectChange()
 
 	const std::shared_ptr<EGE::Project> previous_project =
 		project_manager->GetActiveProject();
-	if (!previous_project)
-	{
-		NotifyProjectChange(false, "There is no active project.");
-		return;
-	}
 
 	std::string settings_error;
 	if (settings_service && !settings_service->SaveAll(settings_error))
@@ -208,19 +182,22 @@ void Application::ProcessPendingProjectChange()
 		return;
 	}
 
-	const bool save_resources =
-		!settings_service || !settings_service->HasEditorSettings() ||
-		settings_service->Editor().GetBool(
-			"projects.save_before_switch", true);
-	if (save_resources)
-		resources->SaveResources();
-
-	const EGE::ProjectStatus save_status =
-		project_manager->SaveActiveProject();
-	if (!save_status)
+	if (previous_project)
 	{
-		NotifyProjectChange(false, save_status.message);
-		return;
+		const bool save_resources =
+			!settings_service || !settings_service->HasEditorSettings() ||
+			settings_service->Editor().GetBool(
+				"projects.save_before_switch", true);
+		if (save_resources)
+			resources->SaveResources();
+
+		const EGE::ProjectStatus save_status =
+			project_manager->SaveActiveProject();
+		if (!save_status)
+		{
+			NotifyProjectChange(false, save_status.message);
+			return;
+		}
 	}
 
 	EGE::ProjectOpenResult result;
@@ -240,7 +217,8 @@ void Application::ProcessPendingProjectChange()
 		return;
 	}
 
-	if (result.project->GetProjectFilePath() ==
+	if (previous_project &&
+		result.project->GetProjectFilePath() ==
 		previous_project->GetProjectFilePath())
 	{
 		NotifyProjectChange(
@@ -259,11 +237,22 @@ void Application::ProcessPendingProjectChange()
 	if (!fs->SetProjectRoot(result.project->GetProjectDirectory()))
 	{
 		project_manager->ActivateProject(previous_project);
-		resources->LoadProjectResources();
-		LoadProjectContent(previous_project);
+		if (previous_project)
+		{
+			resources->LoadProjectResources();
+			LoadProjectContent(previous_project);
+		}
+		else
+		{
+			fs->ClearProjectRoot();
+			level->CreateNewEmpty("Untitled");
+		}
 		NotifyProjectChange(
 			false, "Could not mount the selected project. "
-				"The previous project was restored.");
+				+ std::string(
+					previous_project
+						? "The previous project was restored."
+						: "No project was opened."));
 		return;
 	}
 
@@ -271,23 +260,37 @@ void Application::ProcessPendingProjectChange()
 		!settings_service->ChangeProject(
 			result.project->GetProjectDirectory(), settings_error))
 	{
-		fs->SetProjectRoot(previous_project->GetProjectDirectory());
-		project_manager->ActivateProject(previous_project);
-		std::string restore_error;
-		settings_service->ChangeProject(
-			previous_project->GetProjectDirectory(), restore_error);
-		resources->LoadProjectResources();
-		LoadProjectContent(previous_project);
+		if (previous_project)
+		{
+			fs->SetProjectRoot(previous_project->GetProjectDirectory());
+			project_manager->ActivateProject(previous_project);
+			std::string restore_error;
+			settings_service->ChangeProject(
+				previous_project->GetProjectDirectory(), restore_error);
+			resources->LoadProjectResources();
+			LoadProjectContent(previous_project);
+		}
+		else
+		{
+			fs->ClearProjectRoot();
+			project_manager->CloseProject();
+			settings_service->ClearProject();
+			level->CreateNewEmpty("Untitled");
+		}
 		ApplySettings();
 		NotifyProjectChange(
 			false, settings_error +
-				" The previous project was restored.");
+				(previous_project
+					? " The previous project was restored."
+					: " No project was opened."));
 		return;
 	}
 
 	resources->LoadProjectResources();
 	ApplySettings();
 	const bool scene_loaded = LoadProjectContent(result.project);
+	if (editor)
+		editor->RecordRecentProject(*result.project);
 
 	std::string title = "Edu Engine - " + result.project->GetName();
 	window->SetTitle(title.c_str());
@@ -401,6 +404,8 @@ update_status Application::Update()
 // ---------------------------------------------
 void Application::FinishUpdate()
 {
+	level->FlushPendingDestructions();
+
 	// Recap on framecount and fps
 	++frames;
 	++fps_counter;
@@ -428,8 +433,14 @@ bool Application::CleanUp()
 {
 	bool ret = true;
 
-    fs->Save(SETTINGS_FOLDER "Engine.log", log.c_str(), uint(log.size()));
-	SavePrefs();
+	if (GetActiveProject())
+	{
+		fs->Save(
+			SETTINGS_FOLDER "Engine.log",
+			log.c_str(),
+			uint(log.size()));
+		SavePrefs();
+	}
 	if (settings_service)
 	{
 		std::string settings_error;
@@ -669,6 +680,11 @@ bool Application::RequestOpenProject(
 	pending_project_change.path = project_file;
 	pending_project_change.name.clear();
 	return true;
+}
+
+const std::filesystem::path& Application::GetFallbackProjectFile() const
+{
+	return fallback_project_file;
 }
 
 EGE::SettingsService* Application::GetSettings()

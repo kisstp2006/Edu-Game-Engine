@@ -321,6 +321,7 @@ inline void ImGui::FileBrowser::Display()
     SameLine();
 #endif
 
+    const ImVec2 navigationButtonSize(0.0f, GetFrameHeight());
     int secIdx = 0, newPwdLastSecIdx = -1;
     for(auto &sec : pwd_)
     {
@@ -334,7 +335,9 @@ inline void ImGui::FileBrowser::Display()
         PushID(secIdx);
         if(secIdx > 0)
             SameLine();
-        if(SmallButton(u8StrToStr(sec.u8string()).c_str()))
+        if(Button(
+               u8StrToStr(sec.u8string()).c_str(),
+               navigationButtonSize))
             newPwdLastSecIdx = secIdx;
         PopID();
         ++secIdx;
@@ -359,13 +362,13 @@ inline void ImGui::FileBrowser::Display()
 
     SameLine();
 
-    if(SmallButton("*"))
+    if(Button("*", navigationButtonSize))
         SetPwd(pwd_);
 
     if(newDirNameBuf_)
     {
         SameLine();
-        if(SmallButton("+"))
+        if(Button("+", navigationButtonSize))
         {
             OpenPopup(openNewDirLabel_.c_str());
             (*newDirNameBuf_)[0] = '\0';

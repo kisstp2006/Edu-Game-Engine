@@ -30,7 +30,24 @@ namespace EGE
 		Float,
 		Double,
 		String,
-		Enumeration
+		Enumeration,
+		GameObjectReference,
+		ComponentReference
+	};
+
+	struct GameObjectReferenceValue
+	{
+		std::uint64_t objectId = 0;
+
+		bool operator==(const GameObjectReferenceValue&) const = default;
+	};
+
+	struct ComponentReferenceValue
+	{
+		std::uint64_t objectId = 0;
+		std::uint64_t componentId = 0;
+
+		bool operator==(const ComponentReferenceValue&) const = default;
 	};
 
 	using PropertyValue = std::variant<
@@ -39,7 +56,9 @@ namespace EGE
 		std::int64_t,
 		std::uint64_t,
 		double,
-		std::string>;
+		std::string,
+		GameObjectReferenceValue,
+		ComponentReferenceValue>;
 
 	struct PropertyRange
 	{

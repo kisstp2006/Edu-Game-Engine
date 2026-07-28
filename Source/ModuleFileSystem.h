@@ -30,8 +30,9 @@ public:
 	// Utility functions
 	bool AddPath(const char* path_or_zip);
 	bool SetProjectRoot(const std::filesystem::path& project_root);
+	bool ClearProjectRoot();
 	const std::filesystem::path& GetProjectRoot() const;
-	const std::filesystem::path& GetFallbackRoot() const;
+	const std::filesystem::path& GetEngineRoot() const;
 	bool Exists(const char* file) const;
 	bool IsDirectory(const char* file) const;
     void CreateDirectory(const char* directory);
@@ -65,12 +66,15 @@ private:
 	void CreateAssimpIO();
 	void CreateAudioVFS();
 	bool CreateStandardDirectories();
+	bool MountEngineDirectory(
+		const std::filesystem::path& source,
+		const char* virtualPath);
 
 private:
 
 	aiFileIO* AssimpIO = nullptr;
 	PhysFSVFS* AudioVFS = nullptr;
-	std::filesystem::path fallback_root;
+	std::filesystem::path engine_root;
 	std::filesystem::path project_root;
 	std::string mounted_project_path;
 };

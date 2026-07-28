@@ -1,4 +1,7 @@
 #include "Globals.h"
+#include "Application.h"
+#include "EngineAssetPath.h"
+#include "ModuleFileSystem.h"
 #include "ModulePrograms.h"
 
 #include "OpenGL.h"
@@ -26,8 +29,10 @@ ModulePrograms::~ModulePrograms()
 bool ModulePrograms::Init(Config* /*config = nullptr*/) 
 {
     // GLSL include files virtual filesystem
-
-    for(const auto& entry : std::filesystem::recursive_directory_iterator("Assets/shaders"))
+	const std::filesystem::path shaderRoot =
+		App->fs->GetEngineRoot() / "Assets" / "Shaders";
+    for(const auto& entry :
+		std::filesystem::recursive_directory_iterator(shaderRoot))
     {
         if(entry.is_regular_file())
         {
@@ -36,13 +41,18 @@ bool ModulePrograms::Init(Config* /*config = nullptr*/)
             std::stringstream buffer;
             buffer << strm.rdbuf();
 
-            size_t pos = path.find_first_of("/", 0);
-            if (pos != std::string::npos)
-            {
-                const char* includePath = &path.c_str()[pos];
-                glNamedStringARB(GL_SHADER_INCLUDE_ARB, -1, includePath, -1, buffer.str().c_str());
-                LOG("Adding shader %s to include files", includePath);
-            }  
+			const std::string includePath =
+				"/shaders/" +
+				entry.path().lexically_relative(shaderRoot).
+					generic_string();
+			glNamedStringARB(
+				GL_SHADER_INCLUDE_ARB,
+				-1,
+				includePath.c_str(),
+				-1,
+				buffer.str().c_str());
+			LOG("Adding shader %s to include files",
+				includePath.c_str());
             strm.close();
         }
     }
@@ -221,25 +231,20 @@ void ModulePrograms::Compile(const char** data,  char* shader_data, unsigned id,
 
 char* ModulePrograms::LoadFile(const char* file_name)
 {
-    char* data = nullptr;
+	char* loaded = nullptr;
+	const std::string shaderPath =
+		EGE::ResolveEngineShaderPath(file_name ? file_name : "");
+	const uint size =
+		App->fs->Load(shaderPath.c_str(), &loaded);
+	if (!loaded || size == 0)
+		return nullptr;
 
-	FILE* file = 0;
-	fopen_s(&file, file_name, "rb");
-
-	if(file)
-	{
-		fseek(file, 0, SEEK_END);
-		int size = ftell(file);
-		rewind(file);
-		data = (char*)malloc(size + 1);
-
-		fread(data, 1, size, file);
-		data[size] = 0;
-
-		fclose(file);
-	}
-
-    return data;
+	char* data = static_cast<char*>(
+		malloc(static_cast<std::size_t>(size) + 1));
+	memcpy(data, loaded, size);
+	data[size] = '\0';
+	RELEASE_ARRAY(loaded);
+	return data;
 }
 
 int  ModulePrograms::GetUniformLocation(const char* uniform)

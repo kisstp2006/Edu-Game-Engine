@@ -31,14 +31,16 @@ ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System"
 	SDL_free(base_path);
 
 	std::error_code path_error;
-	fallback_root = std::filesystem::absolute(
+	engine_root = std::filesystem::absolute(
 		std::filesystem::current_path(), path_error).lexically_normal();
 	if (path_error)
-		fallback_root = std::filesystem::current_path().lexically_normal();
-	project_root = fallback_root;
+		engine_root = std::filesystem::current_path().lexically_normal();
+	project_root.clear();
 
-	// Keep the bundled fallback project mounted behind every user project.
-	AddPath(fallback_root.string().c_str());
+	MountEngineDirectory("Settings", "Engine/Settings");
+	MountEngineDirectory("Assets/Shaders", "Engine/Shaders");
+	MountEngineDirectory("Assets/Textures", "Engine/Textures");
+	MountEngineDirectory("Assets/LUTs", "Engine/LUTs");
 
 	if(0&&game_path != nullptr)
 		AddPath(game_path);
@@ -46,12 +48,6 @@ ModuleFileSystem::ModuleFileSystem(const char* game_path) : Module("File System"
 	// Dump list of paths
 	LOG("FileSystem Operations base is [%s] plus:", GetBasePath());
 	LOG(GetReadPaths());
-
-	// enable us to write in the game's dir area
-	if(PHYSFS_setWriteDir(fallback_root.string().c_str()) == 0)
-		LOG("File System error while creating write dir: %s\n", PHYSFS_getLastError());
-
-	CreateStandardDirectories();
 
 	// Generate IO interfaces
 	CreateAssimpIO();
@@ -148,61 +144,55 @@ bool ModuleFileSystem::SetProjectRoot(
 		return true;
 
 	const std::string new_path = normalized_root.string();
-	const bool use_fallback = normalized_root == fallback_root;
-
-	if (use_fallback)
+	if (PHYSFS_mount(new_path.c_str(), nullptr, 1) == 0)
 	{
-		if (!mounted_project_path.empty() &&
-			PHYSFS_unmount(mounted_project_path.c_str()) == 0)
-		{
-			LOG("Cannot unmount previous project [%s]: %s",
-				mounted_project_path.c_str(), PHYSFS_getLastError());
-			return false;
-		}
-
-		if (PHYSFS_setWriteDir(new_path.c_str()) == 0)
-		{
-			if (!mounted_project_path.empty())
-				PHYSFS_mount(mounted_project_path.c_str(), nullptr, 0);
-			LOG("Cannot set fallback project write directory [%s]: %s",
-				new_path.c_str(), PHYSFS_getLastError());
-			return false;
-		}
-
-		mounted_project_path.clear();
+		LOG("Cannot mount project [%s]: %s",
+			new_path.c_str(), PHYSFS_getLastError());
+		return false;
 	}
-	else
+
+	if (PHYSFS_setWriteDir(new_path.c_str()) == 0)
 	{
-		if (PHYSFS_mount(new_path.c_str(), nullptr, 0) == 0)
-		{
-			LOG("Cannot mount project [%s]: %s",
-				new_path.c_str(), PHYSFS_getLastError());
-			return false;
-		}
+		PHYSFS_unmount(new_path.c_str());
+		LOG("Cannot set project write directory [%s]: %s",
+			new_path.c_str(), PHYSFS_getLastError());
+		return false;
+	}
 
-		if (PHYSFS_setWriteDir(new_path.c_str()) == 0)
-		{
-			PHYSFS_unmount(new_path.c_str());
-			LOG("Cannot set project write directory [%s]: %s",
-				new_path.c_str(), PHYSFS_getLastError());
-			return false;
-		}
-
-		if (!mounted_project_path.empty() &&
-			PHYSFS_unmount(mounted_project_path.c_str()) == 0)
-		{
-			PHYSFS_setWriteDir(project_root.string().c_str());
-			PHYSFS_unmount(new_path.c_str());
-			LOG("Cannot unmount previous project [%s]: %s",
-				mounted_project_path.c_str(), PHYSFS_getLastError());
-			return false;
-		}
-
-		mounted_project_path = new_path;
+	if (!mounted_project_path.empty() &&
+		PHYSFS_unmount(mounted_project_path.c_str()) == 0)
+	{
+		PHYSFS_setWriteDir(project_root.string().c_str());
+		PHYSFS_unmount(new_path.c_str());
+		LOG("Cannot unmount previous project [%s]: %s",
+			mounted_project_path.c_str(), PHYSFS_getLastError());
+		return false;
 	}
 
 	project_root = std::move(normalized_root);
+	mounted_project_path = new_path;
 	return CreateStandardDirectories();
+}
+
+bool ModuleFileSystem::ClearProjectRoot()
+{
+	if (mounted_project_path.empty())
+	{
+		project_root.clear();
+		return true;
+	}
+
+	if (PHYSFS_unmount(mounted_project_path.c_str()) == 0)
+	{
+		LOG("Cannot unmount project [%s]: %s",
+			mounted_project_path.c_str(), PHYSFS_getLastError());
+		return false;
+	}
+
+	PHYSFS_setWriteDir(nullptr);
+	mounted_project_path.clear();
+	project_root.clear();
+	return true;
 }
 
 const std::filesystem::path& ModuleFileSystem::GetProjectRoot() const
@@ -210,9 +200,34 @@ const std::filesystem::path& ModuleFileSystem::GetProjectRoot() const
 	return project_root;
 }
 
-const std::filesystem::path& ModuleFileSystem::GetFallbackRoot() const
+const std::filesystem::path& ModuleFileSystem::GetEngineRoot() const
 {
-	return fallback_root;
+	return engine_root;
+}
+
+bool ModuleFileSystem::MountEngineDirectory(
+	const std::filesystem::path& source,
+	const char* virtualPath)
+{
+	const std::filesystem::path absoluteSource = engine_root / source;
+	std::error_code error;
+	if (!std::filesystem::is_directory(absoluteSource, error))
+	{
+		LOG("Engine directory is unavailable [%s]",
+			absoluteSource.string().c_str());
+		return false;
+	}
+
+	if (PHYSFS_mount(
+			absoluteSource.string().c_str(), virtualPath, 1) == 0)
+	{
+		LOG("Cannot mount engine directory [%s] at [%s]: %s",
+			absoluteSource.string().c_str(),
+			virtualPath,
+			PHYSFS_getLastError());
+		return false;
+	}
+	return true;
 }
 
 // Check if a file exists

@@ -90,6 +90,9 @@ bool GameObject::Save(Config& parent_config, map<uint,uint>* duplicate) const
 	{
 		Config component;
 		component.AddInt("Type", (*it)->GetType());
+		component.AddUInt(
+			"ComponentUID",
+			duplicate ? App->random->Int() : (*it)->GetUID());
 		(*it)->OnSave(component);
 		config.AddArrayEntry(component);
 	}
@@ -147,6 +150,9 @@ void GameObject::LoadComponents(Config* config)
         if (type != Component::Types::Unknown)
         {
             Component* component = CreateComponent(type);
+			component->SetUID(
+				component_conf.GetUInt(
+					"ComponentUID", component->GetUID()));
             component->OnLoad(&component_conf);
         }
         else
@@ -563,29 +569,47 @@ bool GameObject::WasBBoxDirty() const
 }
 
 // ---------------------------------------------------------
+bool GameObject::IsPendingDestroy() const
+{
+	return pending_destroy;
+}
+
+// ---------------------------------------------------------
 void GameObject::Remove()
 {
-    for (list<Component*>::iterator it = components.begin(); it != components.end();++it)
-    {
-        (*it)->OnFinish();
-        RELEASE(*it);
-    }
+	if (App && App->level)
+		App->level->DestroyGameObject(this);
+}
 
-    if (parent)
-    {
-        App->level->quadtree.Erase(this);
-        auto it = std::remove(parent->childs.begin(), parent->childs.end(), this);
-        parent->childs.erase(it, parent->childs.end());
-        delete this;
-    }
-    else
-    {
-        while(!childs.empty())
-        {
-            childs.front()->Remove();
-        }
-    }
+void GameObject::DestroyImmediate()
+{
+	while (!childs.empty())
+		childs.front()->DestroyImmediate();
 
+	for (Component*& component : components)
+	{
+		component->OnFinish();
+		RELEASE(component);
+	}
+	components.clear();
+
+	if (!parent)
+	{
+		pending_destroy = false;
+		return;
+	}
+
+	App->level->quadtree.Erase(this);
+	parent->childs.remove(this);
+	parent = nullptr;
+	delete this;
+}
+
+void GameObject::SetPendingDestroyRecursively(bool pending)
+{
+	pending_destroy = pending;
+	for (GameObject* child : childs)
+		child->SetPendingDestroyRecursively(pending);
 }
 
 // ---------------------------------------------------------
@@ -665,7 +689,8 @@ const GameObject* GameObject::FindChild(const char* name, bool recursive) const
 {
     for(std::list<GameObject*>::const_iterator it = childs.begin(), end = childs.end(); it != end; ++it)
     {
-        if((*it)->name.compare(name) == 0)
+        if(!(*it)->IsPendingDestroy() &&
+			(*it)->name.compare(name) == 0)
         {
             return *it;
         }
@@ -675,6 +700,8 @@ const GameObject* GameObject::FindChild(const char* name, bool recursive) const
     {
         for(std::list<GameObject*>::const_iterator it = childs.begin(), end = childs.end(); it != end; ++it)
         {
+			if ((*it)->IsPendingDestroy())
+				continue;
             const GameObject* go = (*it)->FindChild(name, recursive);
 
             if(go)

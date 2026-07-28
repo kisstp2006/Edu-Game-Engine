@@ -1,10 +1,13 @@
 #include "ScriptBindings.h"
 
 #include "../Application.h"
+#include "../Component.h"
 #include "../GameObject.h"
 #include "../Math.h"
 #include "../ModuleInput.h"
+#include "../ModuleLevelManager.h"
 #include "../Globals.h"
+#include "ScriptObjectReference.h"
 
 #include <angelscript.h>
 #include <SDL_scancode.h>
@@ -38,6 +41,26 @@ void ConstructVector3(
 	ScriptVector3* value)
 {
 	new (value) ScriptVector3{x, y, z};
+}
+
+void CopyConstructVector3(
+	const ScriptVector3& source,
+	ScriptVector3* value)
+{
+	new (value) ScriptVector3(source);
+}
+
+void DestructVector3(ScriptVector3* value)
+{
+	value->~ScriptVector3();
+}
+
+ScriptVector3& AssignVector3(
+	const ScriptVector3& source,
+	ScriptVector3* value)
+{
+	*value = source;
+	return *value;
 }
 
 ScriptVector3 ToScriptVector3(const float3& value)
@@ -245,19 +268,71 @@ ScriptVector3 ConvertToVector3(const std::string& value)
 	return ConvertToVector3(value, {});
 }
 
-std::string ConvertToString(const GameObject* gameObject)
+GameObject* ResolveGameObject(
+	const ScriptGameObjectReference* reference,
+	bool reportInvalid = true)
 {
-	if (!gameObject)
-		return "<null GameObject>";
-	return gameObject->name + " (" + std::to_string(gameObject->GetUID()) + ")";
+	GameObject* gameObject =
+		reference ? reference->Resolve() : nullptr;
+	if (!gameObject && reference && reportInvalid)
+	{
+		if (asIScriptContext* context = asGetActiveContext())
+		{
+			context->SetException(
+				"The GameObject reference is no longer valid.");
+		}
+	}
+	return gameObject;
 }
 
-std::string ConvertTransformToString(const GameObject* transform)
+Component* ResolveComponent(
+	const ScriptComponentReference* reference,
+	bool reportInvalid = true)
 {
-	if (!transform)
+	Component* component =
+		reference ? reference->Resolve() : nullptr;
+	if (!component && reference && reportInvalid)
+	{
+		if (asIScriptContext* context = asGetActiveContext())
+		{
+			context->SetException(
+				"The Component reference is no longer valid.");
+		}
+	}
+	return component;
+}
+
+std::string ConvertToString(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject =
+		ResolveGameObject(reference, false);
+	if (!gameObject)
+		return "<null GameObject>";
+	return gameObject->name + " (" +
+		std::to_string(gameObject->GetUID()) + ")";
+}
+
+std::string ConvertTransformToString(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject =
+		ResolveGameObject(reference, false);
+	if (!gameObject)
 		return "<null Transform>";
 	return ConvertToString(
-		ToScriptVector3(transform->GetGlobalPosition()));
+		ToScriptVector3(gameObject->GetGlobalPosition()));
+}
+
+std::string ConvertComponentToString(
+	const ScriptComponentReference* reference)
+{
+	const Component* component =
+		ResolveComponent(reference, false);
+	if (!component)
+		return "<null Component>";
+	return std::string(component->GetTypeStr()) + " (" +
+		std::to_string(component->GetUID()) + ")";
 }
 
 bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
@@ -270,8 +345,9 @@ bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
 		engine.RegisterGlobalFunction("string ToString(float value)", asFUNCTIONPR(ConvertToString, (float), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(bool value)", asFUNCTIONPR(ConvertToString, (bool), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(const Vector3 &in value)", asFUNCTIONPR(ConvertToString, (const ScriptVector3&), std::string), asCALL_CDECL) >= 0 &&
-		engine.RegisterGlobalFunction("string ToString(GameObject@ object)", asFUNCTIONPR(ConvertToString, (const GameObject*), std::string), asCALL_CDECL) >= 0 &&
-		engine.RegisterGlobalFunction("string ToString(Transform@ transform)", asFUNCTION(ConvertTransformToString), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("string ToString(GameObject@+ object)", asFUNCTIONPR(ConvertToString, (const ScriptGameObjectReference*), std::string), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("string ToString(Transform@+ transform)", asFUNCTION(ConvertTransformToString), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("string ToString(Component@+ component)", asFUNCTION(ConvertComponentToString), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseInt(const string &in text, int &out value)", asFUNCTION(TryParseInt), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseUInt(const string &in text, uint &out value)", asFUNCTION(TryParseUInt), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseDouble(const string &in text, double &out value)", asFUNCTION(TryParseDouble), asCALL_CDECL) >= 0 &&
@@ -293,26 +369,103 @@ bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
 	return false;
 }
 
-std::string GetGameObjectName(const GameObject* gameObject)
+std::string GetGameObjectName(
+	const ScriptGameObjectReference* reference)
 {
+	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject ? gameObject->name : std::string();
 }
 
 void SetGameObjectName(
 	const std::string& name,
-	GameObject* gameObject)
+	ScriptGameObjectReference* reference)
 {
-	if (gameObject)
+	if (GameObject* gameObject = ResolveGameObject(reference))
 		gameObject->name = name;
 }
 
-GameObject* GetGameObjectTransform(GameObject* gameObject)
+bool GetGameObjectActive(
+	const ScriptGameObjectReference* reference)
 {
-	return gameObject;
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject && gameObject->IsActive();
 }
 
-ScriptVector3 GetLocalPosition(const GameObject* gameObject)
+void SetGameObjectActive(
+	bool active,
+	ScriptGameObjectReference* reference)
 {
+	if (GameObject* gameObject = ResolveGameObject(reference))
+		gameObject->SetActive(active);
+}
+
+ScriptGameObjectReference* GetGameObjectTransform(
+	ScriptGameObjectReference* reference)
+{
+	if (!ResolveGameObject(reference))
+		return nullptr;
+	reference->AddRef();
+	return reference;
+}
+
+bool GameObjectsEqual(
+	const ScriptGameObjectReference* other,
+	const ScriptGameObjectReference* reference)
+{
+	return other == reference ||
+		(other && reference &&
+			other->GetObjectId() == reference->GetObjectId());
+}
+
+ScriptGameObjectReference* GetParent(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	const GameObject* parent =
+		gameObject ? gameObject->GetParent() : nullptr;
+	return parent && parent != App->level->GetRoot()
+		? MakeGameObjectReference(parent->GetUID())
+		: nullptr;
+}
+
+ScriptGameObjectReference* FindChild(
+	const std::string& name,
+	bool recursive,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	const GameObject* child =
+		gameObject
+			? gameObject->FindChild(name.c_str(), recursive)
+			: nullptr;
+	return child
+		? MakeGameObjectReference(child->GetUID())
+		: nullptr;
+}
+
+ScriptComponentReference* GetComponent(
+	const std::string& typeName,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return nullptr;
+
+	for (Component* component : gameObject->components)
+	{
+		if (component && typeName == component->GetTypeStr())
+		{
+			return MakeComponentReference(
+				gameObject->GetUID(), component->GetUID());
+		}
+	}
+	return nullptr;
+}
+
+ScriptVector3 GetLocalPosition(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(gameObject->GetLocalPosition())
 		: ScriptVector3{};
@@ -320,14 +473,16 @@ ScriptVector3 GetLocalPosition(const GameObject* gameObject)
 
 void SetLocalPosition(
 	const ScriptVector3& position,
-	GameObject* gameObject)
+	ScriptGameObjectReference* reference)
 {
-	if (gameObject)
+	if (GameObject* gameObject = ResolveGameObject(reference))
 		gameObject->SetLocalPosition(ToEngineVector3(position));
 }
 
-ScriptVector3 GetLocalEulerAngles(const GameObject* gameObject)
+ScriptVector3 GetLocalEulerAngles(
+	const ScriptGameObjectReference* reference)
 {
+	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(gameObject->GetLocalRotation())
 		: ScriptVector3{};
@@ -335,14 +490,16 @@ ScriptVector3 GetLocalEulerAngles(const GameObject* gameObject)
 
 void SetLocalEulerAngles(
 	const ScriptVector3& eulerAngles,
-	GameObject* gameObject)
+	ScriptGameObjectReference* reference)
 {
-	if (gameObject)
+	if (GameObject* gameObject = ResolveGameObject(reference))
 		gameObject->SetLocalRotation(ToEngineVector3(eulerAngles));
 }
 
-ScriptVector3 GetLocalScale(const GameObject* gameObject)
+ScriptVector3 GetLocalScale(
+	const ScriptGameObjectReference* reference)
 {
+	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(gameObject->GetLocalScale())
 		: ScriptVector3{1.0f, 1.0f, 1.0f};
@@ -350,14 +507,16 @@ ScriptVector3 GetLocalScale(const GameObject* gameObject)
 
 void SetLocalScale(
 	const ScriptVector3& scale,
-	GameObject* gameObject)
+	ScriptGameObjectReference* reference)
 {
-	if (gameObject)
+	if (GameObject* gameObject = ResolveGameObject(reference))
 		gameObject->SetLocalScale(ToEngineVector3(scale));
 }
 
-ScriptVector3 GetPosition(const GameObject* gameObject)
+ScriptVector3 GetPosition(
+	const ScriptGameObjectReference* reference)
 {
+	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(gameObject->GetGlobalPosition())
 		: ScriptVector3{};
@@ -365,21 +524,105 @@ ScriptVector3 GetPosition(const GameObject* gameObject)
 
 void Translate(
 	const ScriptVector3& translation,
-	GameObject* gameObject)
+	ScriptGameObjectReference* reference)
 {
-	if (gameObject)
+	if (GameObject* gameObject = ResolveGameObject(reference))
 		gameObject->Move(ToEngineVector3(translation));
+}
+
+ScriptGameObjectReference* FindGameObject(
+	const std::string& name)
+{
+	const GameObject* gameObject =
+		App && App->level ? App->level->Find(name.c_str()) : nullptr;
+	return gameObject
+		? MakeGameObjectReference(gameObject->GetUID())
+		: nullptr;
+}
+
+ScriptGameObjectReference* FindGameObjectById(unsigned int id)
+{
+	const GameObject* gameObject =
+		App && App->level ? App->level->Find(id) : nullptr;
+	return gameObject
+		? MakeGameObjectReference(gameObject->GetUID())
+		: nullptr;
+}
+
+ScriptGameObjectReference* CreateGameObject(
+	const std::string& name)
+{
+	GameObject* gameObject =
+		App && App->level
+			? App->level->CreateGameObject(name.c_str())
+			: nullptr;
+	return gameObject
+		? MakeGameObjectReference(gameObject->GetUID())
+		: nullptr;
+}
+
+void DestroyGameObject(ScriptGameObjectReference* reference)
+{
+	if (!App || !App->level)
+		return;
+	if (GameObject* gameObject =
+		ResolveGameObject(reference, false))
+	{
+		App->level->DestroyGameObject(gameObject);
+	}
+}
+
+std::string GetComponentTypeName(
+	const ScriptComponentReference* reference)
+{
+	const Component* component = ResolveComponent(reference);
+	return component ? component->GetTypeStr() : std::string();
+}
+
+ScriptGameObjectReference* GetComponentGameObject(
+	const ScriptComponentReference* reference)
+{
+	const Component* component = ResolveComponent(reference);
+	const GameObject* gameObject =
+		component ? component->GetGameObject() : nullptr;
+	return gameObject
+		? MakeGameObjectReference(gameObject->GetUID())
+		: nullptr;
+}
+
+bool ComponentsEqual(
+	const ScriptComponentReference* other,
+	const ScriptComponentReference* reference)
+{
+	return other == reference ||
+		(other && reference &&
+			other->GetObjectId() == reference->GetObjectId() &&
+			other->GetComponentId() == reference->GetComponentId());
 }
 
 bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 {
 	if (engine.RegisterObjectType(
 			"Vector3", sizeof(ScriptVector3),
-			asOBJ_VALUE | asOBJ_APP_CLASS_CDAK) < 0 ||
+			asOBJ_VALUE | asOBJ_APP_CLASS_CDAK |
+				asOBJ_APP_CLASS_ALLFLOATS) < 0 ||
 		engine.RegisterObjectBehaviour(
 			"Vector3", asBEHAVE_CONSTRUCT,
 			"void f(float x = 0, float y = 0, float z = 0)",
 			asFUNCTION(ConstructVector3), asCALL_CDECL_OBJLAST) < 0 ||
+		engine.RegisterObjectBehaviour(
+			"Vector3", asBEHAVE_CONSTRUCT,
+			"void f(const Vector3 &in)",
+			asFUNCTION(CopyConstructVector3),
+			asCALL_CDECL_OBJLAST) < 0 ||
+		engine.RegisterObjectBehaviour(
+			"Vector3", asBEHAVE_DESTRUCT, "void f()",
+			asFUNCTION(DestructVector3),
+			asCALL_CDECL_OBJLAST) < 0 ||
+		engine.RegisterObjectMethod(
+			"Vector3", "Vector3 &opAssign(const Vector3 &in)",
+			asFUNCTION(AssignVector3),
+			asCALL_CDECL_OBJLAST) < 0 ||
 		engine.RegisterObjectProperty(
 			"Vector3", "float x", asOFFSET(ScriptVector3, x)) < 0 ||
 		engine.RegisterObjectProperty(
@@ -394,7 +637,12 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 	const bool registered =
 		engine.RegisterObjectMethod(
 			"GameObject", "uint get_id() const",
-			asMETHOD(GameObject, GetUID), asCALL_THISCALL) >= 0 &&
+			asMETHOD(ScriptGameObjectReference, GetObjectId),
+			asCALL_THISCALL) >= 0 &&
+		engine.RegisterObjectMethod(
+			"GameObject", "bool get_valid() const",
+			asMETHOD(ScriptGameObjectReference, IsValid),
+			asCALL_THISCALL) >= 0 &&
 		engine.RegisterObjectMethod(
 			"GameObject", "string get_name() const",
 			asFUNCTION(GetGameObjectName), asCALL_CDECL_OBJLAST) >= 0 &&
@@ -403,13 +651,32 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			asFUNCTION(SetGameObjectName), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"GameObject", "bool get_active() const",
-			asMETHOD(GameObject, IsActive), asCALL_THISCALL) >= 0 &&
+			asFUNCTION(GetGameObjectActive),
+			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"GameObject", "void set_active(bool)",
-			asMETHOD(GameObject, SetActive), asCALL_THISCALL) >= 0 &&
+			asFUNCTION(SetGameObjectActive),
+			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"GameObject", "Transform@ get_transform() const",
 			asFUNCTION(GetGameObjectTransform), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"GameObject",
+			"bool opEquals(const GameObject@+ other) const",
+			asFUNCTION(GameObjectsEqual),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"GameObject", "GameObject@ get_parent() const",
+			asFUNCTION(GetParent), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"GameObject",
+			"GameObject@ FindChild(const string &in name, "
+				"bool recursive = true) const",
+			asFUNCTION(FindChild), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"GameObject",
+			"Component@ GetComponent(const string &in typeName) const",
+			asFUNCTION(GetComponent), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform", "Vector3 get_localPosition() const",
 			asFUNCTION(GetLocalPosition), asCALL_CDECL_OBJLAST) >= 0 &&
@@ -433,11 +700,62 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			asFUNCTION(GetPosition), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform", "void Translate(const Vector3 &in)",
-			asFUNCTION(Translate), asCALL_CDECL_OBJLAST) >= 0;
-	if (registered)
+			asFUNCTION(Translate), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "bool get_valid() const",
+			asMETHOD(ScriptGameObjectReference, IsValid),
+			asCALL_THISCALL) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Component", "uint get_id() const",
+			asMETHOD(ScriptComponentReference, GetComponentId),
+			asCALL_THISCALL) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Component", "bool get_valid() const",
+			asMETHOD(ScriptComponentReference, IsValid),
+			asCALL_THISCALL) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Component", "string get_typeName() const",
+			asFUNCTION(GetComponentTypeName),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Component", "GameObject@ get_gameObject() const",
+			asFUNCTION(GetComponentGameObject),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Component",
+			"bool opEquals(const Component@+ other) const",
+			asFUNCTION(ComponentsEqual),
+			asCALL_CDECL_OBJLAST) >= 0;
+	if (!registered)
+	{
+		error =
+			"Could not register the GameObject, Transform or Component API.";
+		return false;
+	}
+
+	engine.SetDefaultNamespace("GameObject");
+	const bool sceneApiRegistered =
+		engine.RegisterGlobalFunction(
+			"GameObject@ Find(const string &in name)",
+			asFUNCTION(FindGameObject), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction(
+			"GameObject@ FindById(uint id)",
+			asFUNCTION(FindGameObjectById), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction(
+			"GameObject@ FindByUUID(uint uuid)",
+			asFUNCTION(FindGameObjectById), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction(
+			"GameObject@ Create("
+				"const string &in name = \"GameObject\")",
+			asFUNCTION(CreateGameObject), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction(
+			"void Destroy(GameObject@+ object)",
+			asFUNCTION(DestroyGameObject), asCALL_CDECL) >= 0;
+	engine.SetDefaultNamespace("");
+	if (sceneApiRegistered)
 		return true;
 
-	error = "Could not register the GameObject or Transform API.";
+	error = "Could not register the GameObject scene API.";
 	return false;
 }
 

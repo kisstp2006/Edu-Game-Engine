@@ -428,6 +428,10 @@ namespace EGE
 			case PropertyKind::Double: return "Double";
 			case PropertyKind::String: return "String";
 			case PropertyKind::Enumeration: return "Enumeration";
+			case PropertyKind::GameObjectReference:
+				return "GameObjectReference";
+			case PropertyKind::ComponentReference:
+				return "ComponentReference";
 			default: return "Unsupported";
 		}
 	}
@@ -435,7 +439,7 @@ namespace EGE
 	bool ParsePropertyKind(const std::string& text, PropertyKind& kind)
 	{
 		for (int value = static_cast<int>(PropertyKind::Unsupported);
-			value <= static_cast<int>(PropertyKind::Enumeration);
+			value <= static_cast<int>(PropertyKind::ComponentReference);
 			++value)
 		{
 			const auto candidate = static_cast<PropertyKind>(value);
@@ -493,6 +497,28 @@ namespace EGE
 		if (targetKind == PropertyKind::String)
 		{
 			if (const auto* value = std::get_if<std::string>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
+		if (targetKind == PropertyKind::GameObjectReference)
+		{
+			if (const auto* value =
+				std::get_if<GameObjectReferenceValue>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
+		if (targetKind == PropertyKind::ComponentReference)
+		{
+			if (const auto* value =
+				std::get_if<ComponentReferenceValue>(&source))
 			{
 				result = *value;
 				return true;

@@ -204,7 +204,8 @@ update_status ModuleRenderer3D::PostUpdate(float dt)
 {
 	if (viewport && App->editor)
 	{
-		viewport->Draw(active_camera, culling_camera);
+		if (App->GetActiveProject())
+			viewport->Draw(active_camera, culling_camera);
 		App->editor->Draw();
 	}
 

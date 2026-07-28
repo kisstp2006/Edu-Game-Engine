@@ -181,7 +181,7 @@ int main()
 	}
 	const EGE::ScriptInstanceHandle ownerInstance =
 		ownerRuntime.CreateInstance("OwnerProbe");
-	ownerRuntime.SetInstanceOwner(ownerInstance, &ownerProject);
+	ownerRuntime.SetInstanceOwnerId(ownerInstance, 1);
 	ownerRuntime.StartInstance(ownerInstance);
 	const EGE::ReflectedScriptObject ownerReflected =
 		ownerRuntime.GetReflectedInstance(ownerInstance);
@@ -264,6 +264,12 @@ int main()
 		"    [SerializeField]\n"
 		"    string internalName = \"hidden\";\n"
 		"\n"
+		"    [SerializeField]\n"
+		"    GameObject@ targetObject;\n"
+		"\n"
+		"    [SerializeField]\n"
+		"    Component@ targetComponent;\n"
+		"\n"
 		"    void OnUpdate(float deltaTime)\n"
 		"    {\n"
 		"        score += 1;\n"
@@ -316,8 +322,15 @@ int main()
 		FindProperty(reflected, "transientCounter");
 	const EGE::PropertyDescriptor* hidden =
 		FindProperty(reflected, "internalName");
+	const EGE::PropertyDescriptor* targetObject =
+		FindProperty(reflected, "targetObject");
+	const EGE::PropertyDescriptor* targetComponent =
+		FindProperty(reflected, "targetComponent");
 	if (!Check(instance != 0 && reflected, "Script instance was not created") ||
-		!Check(speed && score && transient && hidden, "Script properties were not reflected") ||
+		!Check(
+			speed && score && transient && hidden &&
+				targetObject && targetComponent,
+			"Script properties were not reflected") ||
 		!Check(
 			speed->attributes.header == "Movement" &&
 				speed->attributes.range.has_value(),
@@ -336,7 +349,21 @@ int main()
 		!Check(
 			speed->Write(reflected.object, 50.0) &&
 				std::abs(ReadNumber(reflected, "speed") - 10.0) < 0.001,
-			"Script Range metadata did not clamp the property"))
+			"Script Range metadata did not clamp the property") ||
+		!Check(
+			targetObject->kind ==
+				EGE::PropertyKind::GameObjectReference &&
+				targetObject->Write(
+					reflected.object,
+					EGE::GameObjectReferenceValue{41}),
+			"GameObject reference property was not writable") ||
+		!Check(
+			targetComponent->kind ==
+				EGE::PropertyKind::ComponentReference &&
+				targetComponent->Write(
+					reflected.object,
+					EGE::ComponentReferenceValue{41, 73}),
+			"Component reference property was not writable"))
 	{
 		return 1;
 	}
@@ -393,6 +420,12 @@ int main()
 		"    [SerializeField]\n"
 		"    string internalName = \"changed\";\n"
 		"\n"
+		"    [SerializeField]\n"
+		"    GameObject@ targetObject;\n"
+		"\n"
+		"    [SerializeField]\n"
+		"    Component@ targetComponent;\n"
+		"\n"
 		"    void OnUpdate(float deltaTime) { score += 2; }\n"
 		"    void OnAfterReload() { score += 100; }\n"
 		"}\n");
@@ -411,7 +444,7 @@ int main()
 	reflected = runtime.GetReflectedInstance(instance);
 	const EGE::PropertyBag serializedState =
 		runtime.CaptureInstanceState(instance, true);
-	if (serializedState.size() != 3)
+	if (serializedState.size() != 5)
 	{
 		std::cerr << "Serialized properties:";
 		for (const EGE::PropertyState& property : serializedState)
@@ -432,6 +465,12 @@ int main()
 				<< '\n';
 		}
 	}
+	EGE::PropertyValue targetObjectValue;
+	EGE::PropertyValue targetComponentValue;
+	const EGE::PropertyDescriptor* reloadedTargetObject =
+		FindProperty(reflected, "targetObject");
+	const EGE::PropertyDescriptor* reloadedTargetComponent =
+		FindProperty(reflected, "targetComponent");
 	if (!Check(
 			static_cast<bool>(reflected),
 			"Script instance was not rebound after reload") ||
@@ -445,8 +484,24 @@ int main()
 			std::abs(ReadNumber(reflected, "transientCounter") - 4.0) < 0.001,
 			"Non-serialized runtime state was not preserved during reload") ||
 		!Check(
-			serializedState.size() == 3,
-			"Serialized script property filtering is incorrect"))
+			serializedState.size() == 5,
+			"Serialized script property filtering is incorrect") ||
+		!Check(
+			reloadedTargetObject &&
+				reloadedTargetObject->Read(
+					reflected.object, targetObjectValue) &&
+				std::get<EGE::GameObjectReferenceValue>(
+					targetObjectValue).objectId == 41,
+			"GameObject reference was not preserved during reload") ||
+		!Check(
+			reloadedTargetComponent &&
+				reloadedTargetComponent->Read(
+					reflected.object, targetComponentValue) &&
+				std::get<EGE::ComponentReferenceValue>(
+					targetComponentValue).objectId == 41 &&
+				std::get<EGE::ComponentReferenceValue>(
+					targetComponentValue).componentId == 73,
+			"Component reference was not preserved during reload"))
 	{
 		return 1;
 	}
@@ -464,6 +519,12 @@ int main()
 		runtime.CreateInstance("PlayerController", loadedState);
 	const EGE::ReflectedScriptObject restored =
 		runtime.GetReflectedInstance(restoredInstance);
+	EGE::PropertyValue restoredObjectValue;
+	EGE::PropertyValue restoredComponentValue;
+	const EGE::PropertyDescriptor* restoredTargetObject =
+		FindProperty(restored, "targetObject");
+	const EGE::PropertyDescriptor* restoredTargetComponent =
+		FindProperty(restored, "targetComponent");
 	if (!Check(
 			loadedState.size() == serializedState.size(),
 			"Serialized script property JSON did not round-trip") ||
@@ -471,7 +532,23 @@ int main()
 			restored &&
 				std::abs(ReadNumber(restored, "speed") - 10.0) < 0.001 &&
 				std::abs(ReadNumber(restored, "score") - 118.0) < 0.001,
-			"Saved script properties were not restored into an instance"))
+			"Saved script properties were not restored into an instance") ||
+		!Check(
+			restoredTargetObject &&
+				restoredTargetObject->Read(
+					restored.object, restoredObjectValue) &&
+				std::get<EGE::GameObjectReferenceValue>(
+					restoredObjectValue).objectId == 41,
+			"Serialized GameObject reference did not round-trip") ||
+		!Check(
+			restoredTargetComponent &&
+				restoredTargetComponent->Read(
+					restored.object, restoredComponentValue) &&
+				std::get<EGE::ComponentReferenceValue>(
+					restoredComponentValue).objectId == 41 &&
+				std::get<EGE::ComponentReferenceValue>(
+					restoredComponentValue).componentId == 73,
+			"Serialized Component reference did not round-trip"))
 	{
 		return 1;
 	}

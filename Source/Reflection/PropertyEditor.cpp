@@ -1,5 +1,10 @@
 #include "PropertyEditor.h"
 
+#include "../Application.h"
+#include "../Component.h"
+#include "../GameObject.h"
+#include "../ModuleLevelManager.h"
+
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
@@ -23,7 +28,174 @@ namespace EGE
 				return std::to_string(*current);
 			if (const auto* current = std::get_if<std::string>(&value))
 				return *current;
+			if (const auto* current =
+				std::get_if<GameObjectReferenceValue>(&value))
+			{
+				const GameObject* gameObject =
+					App && App->level
+						? App->level->Find(
+							static_cast<uint>(current->objectId))
+						: nullptr;
+				return gameObject
+					? gameObject->name
+					: current->objectId == 0
+						? "None"
+						: "Missing (" +
+							std::to_string(current->objectId) + ")";
+			}
+			if (const auto* current =
+				std::get_if<ComponentReferenceValue>(&value))
+			{
+				const GameObject* gameObject =
+					App && App->level
+						? App->level->Find(
+							static_cast<uint>(current->objectId))
+						: nullptr;
+				if (gameObject)
+				{
+					for (const Component* component :
+						gameObject->components)
+					{
+						if (component &&
+							component->GetUID() ==
+								current->componentId)
+						{
+							return gameObject->name + " / " +
+								component->GetTypeStr();
+						}
+					}
+				}
+				return current->componentId == 0
+					? "None"
+					: "Missing (" +
+						std::to_string(current->componentId) + ")";
+			}
 			return {};
+		}
+
+		bool DrawGameObjectEntry(
+			const GameObject& gameObject,
+			int depth,
+			GameObjectReferenceValue& value)
+		{
+			bool changed = false;
+			ImGui::PushID(gameObject.GetUID());
+			const std::string label(
+				static_cast<std::size_t>(depth) * 2, ' ');
+			const bool selected =
+				value.objectId == gameObject.GetUID();
+			if (ImGui::Selectable(
+					(label + gameObject.name).c_str(), selected))
+			{
+				value.objectId = gameObject.GetUID();
+				changed = true;
+			}
+			ImGui::PopID();
+
+			for (const GameObject* child : gameObject.childs)
+			{
+				if (child && !child->IsPendingDestroy())
+				changed |= DrawGameObjectEntry(*child, depth + 1, value);
+			}
+			return changed;
+		}
+
+		bool DrawGameObjectReference(
+			GameObjectReferenceValue& value)
+		{
+			const std::string preview =
+				FormatValue(PropertyValue(value));
+			bool changed = false;
+			if (ImGui::BeginCombo("##Value", preview.c_str()))
+			{
+				if (ImGui::Selectable("None", value.objectId == 0))
+				{
+					value.objectId = 0;
+					changed = true;
+				}
+
+				if (App && App->level && App->level->GetRoot())
+				{
+					for (const GameObject* gameObject :
+						App->level->GetRoot()->childs)
+					{
+						if (gameObject &&
+							!gameObject->IsPendingDestroy())
+						{
+							changed |= DrawGameObjectEntry(
+								*gameObject, 0, value);
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+			return changed;
+		}
+
+		bool DrawComponentEntries(
+			const GameObject& gameObject,
+			ComponentReferenceValue& value)
+		{
+			bool changed = false;
+			for (const Component* component : gameObject.components)
+			{
+				if (!component)
+					continue;
+
+				ImGui::PushID(component->GetUID());
+				const std::string label =
+					gameObject.name + " / " + component->GetTypeStr();
+				const bool selected =
+					value.objectId == gameObject.GetUID() &&
+					value.componentId == component->GetUID();
+				if (ImGui::Selectable(label.c_str(), selected))
+				{
+					value.objectId = gameObject.GetUID();
+					value.componentId = component->GetUID();
+					changed = true;
+				}
+				ImGui::PopID();
+			}
+
+			for (const GameObject* child : gameObject.childs)
+			{
+				if (child && !child->IsPendingDestroy())
+					changed |= DrawComponentEntries(*child, value);
+			}
+			return changed;
+		}
+
+		bool DrawComponentReference(
+			ComponentReferenceValue& value)
+		{
+			const std::string preview =
+				FormatValue(PropertyValue(value));
+			bool changed = false;
+			if (ImGui::BeginCombo("##Value", preview.c_str()))
+			{
+				if (ImGui::Selectable(
+						"None", value.componentId == 0))
+				{
+					value = {};
+					changed = true;
+				}
+
+				if (App && App->level && App->level->GetRoot())
+				{
+					for (const GameObject* gameObject :
+						App->level->GetRoot()->childs)
+					{
+						if (gameObject &&
+							!gameObject->IsPendingDestroy())
+						{
+							changed |= DrawComponentEntries(
+								*gameObject, value);
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+			return changed;
 		}
 
 		bool DrawSigned(
@@ -157,12 +329,28 @@ namespace EGE
 					break;
 				}
 				case PropertyKind::String:
-				{
+					{
 					std::string current = std::get<std::string>(value);
 					changed = ImGui::InputText("##Value", &current);
 					value = std::move(current);
 					break;
 				}
+				case PropertyKind::GameObjectReference:
+					{
+						auto current =
+							std::get<GameObjectReferenceValue>(value);
+						changed = DrawGameObjectReference(current);
+						value = current;
+						break;
+					}
+				case PropertyKind::ComponentReference:
+					{
+						auto current =
+							std::get<ComponentReferenceValue>(value);
+						changed = DrawComponentReference(current);
+						value = current;
+						break;
+					}
 				default:
 					break;
 			}

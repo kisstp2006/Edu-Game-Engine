@@ -1,11 +1,13 @@
-#include "Component.h"
 #include "Globals.h"
+#include "Application.h"
+#include "Component.h"
 
 #include "Leaks.h"
 
 // ---------------------------------------------------------
 Component::Component(GameObject* container, Component::Types type) : game_object(container), type(type)
 {
+	uid = App && App->random ? App->random->Int() : 0;
 	if (game_object != nullptr)
 		SetActive(true);
 }
@@ -65,6 +67,17 @@ const char * Component::GetTypeStr() const
 	"Invalid" };
 
 	return names[type];
+}
+
+uint Component::GetUID() const
+{
+	return uid;
+}
+
+void Component::SetUID(uint value)
+{
+	if (value != 0)
+		uid = value;
 }
 
 // ---------------------------------------------------------

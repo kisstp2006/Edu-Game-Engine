@@ -1,8 +1,10 @@
+#include "../Globals.h"
+
 #include "ScriptRuntime.h"
 #include "ScriptInstanceContext.h"
+#include "ScriptObjectReference.h"
 #include "ScriptResource.h"
 
-#include "../Globals.h"
 #include "../Reflection/PropertySerializer.h"
 
 #include <angelscript.h>
@@ -338,12 +340,21 @@ shared class EGEBehaviour
 				default: break;
 			}
 
-			if ((typeId & asTYPEID_OBJHANDLE) != 0)
-				return PropertyKind::Unsupported;
-
 			const asITypeInfo* type = engine.GetTypeInfoById(typeId);
 			if (!type)
 				return PropertyKind::Unsupported;
+			if ((typeId & asTYPEID_OBJHANDLE) != 0)
+			{
+				const std::string typeName = type->GetName();
+				if (typeName == "GameObject" ||
+					typeName == "Transform")
+				{
+					return PropertyKind::GameObjectReference;
+				}
+				if (typeName == "Component")
+					return PropertyKind::ComponentReference;
+				return PropertyKind::Unsupported;
+			}
 			if ((type->GetFlags() & asOBJ_ENUM) != 0)
 				return PropertyKind::Enumeration;
 			if (std::string(type->GetName()) == "string")
@@ -399,6 +410,31 @@ shared class EGEBehaviour
 					value = *static_cast<double*>(address); return true;
 				case PropertyKind::String:
 					value = *static_cast<std::string*>(address); return true;
+				case PropertyKind::GameObjectReference:
+					{
+						auto* reference =
+							*static_cast<
+								ScriptGameObjectReference**>(address);
+						value = GameObjectReferenceValue{
+							reference
+								? reference->GetObjectId()
+								: 0};
+						return true;
+					}
+				case PropertyKind::ComponentReference:
+					{
+						auto* reference =
+							*static_cast<
+								ScriptComponentReference**>(address);
+						value = ComponentReferenceValue{
+							reference
+								? reference->GetObjectId()
+								: 0,
+							reference
+								? reference->GetComponentId()
+								: 0};
+						return true;
+					}
 				default:
 					return false;
 			}
@@ -473,6 +509,36 @@ shared class EGEBehaviour
 					*static_cast<std::string*>(address) =
 						std::get<std::string>(value);
 					return true;
+				case PropertyKind::GameObjectReference:
+					{
+						auto*& destination =
+							*static_cast<
+								ScriptGameObjectReference**>(address);
+						if (destination)
+							destination->Release();
+						const auto reference =
+							std::get<GameObjectReferenceValue>(value);
+						destination = MakeGameObjectReference(
+							static_cast<std::uint32_t>(
+								reference.objectId));
+						return true;
+					}
+				case PropertyKind::ComponentReference:
+					{
+						auto*& destination =
+							*static_cast<
+								ScriptComponentReference**>(address);
+						if (destination)
+							destination->Release();
+						const auto reference =
+							std::get<ComponentReferenceValue>(value);
+						destination = MakeComponentReference(
+							static_cast<std::uint32_t>(
+								reference.objectId),
+							static_cast<std::uint32_t>(
+								reference.componentId));
+						return true;
+					}
 				default:
 					return false;
 			}
@@ -529,7 +595,7 @@ shared class EGEBehaviour
 		{
 			ScriptInstanceHandle handle = 0;
 			std::string className;
-			void* owner = nullptr;
+			std::uint32_t ownerId = 0;
 			asIScriptObject* object = nullptr;
 			std::unique_ptr<ScriptInstanceContext> context;
 			PropertyBag state;
@@ -630,9 +696,35 @@ shared class EGEBehaviour
 		{
 			RegisterStdString(engine);
 			if (engine->RegisterObjectType(
-					"GameObject", 0, asOBJ_REF | asOBJ_NOCOUNT) < 0 ||
+					"GameObject", 0, asOBJ_REF) < 0 ||
 				engine->RegisterObjectType(
-					"Transform", 0, asOBJ_REF | asOBJ_NOCOUNT) < 0)
+					"Transform", 0, asOBJ_REF) < 0 ||
+				engine->RegisterObjectType(
+					"Component", 0, asOBJ_REF) < 0 ||
+				engine->RegisterObjectBehaviour(
+					"GameObject", asBEHAVE_ADDREF, "void f()",
+					asMETHOD(ScriptGameObjectReference, AddRef),
+					asCALL_THISCALL) < 0 ||
+				engine->RegisterObjectBehaviour(
+					"GameObject", asBEHAVE_RELEASE, "void f()",
+					asMETHOD(ScriptGameObjectReference, Release),
+					asCALL_THISCALL) < 0 ||
+				engine->RegisterObjectBehaviour(
+					"Transform", asBEHAVE_ADDREF, "void f()",
+					asMETHOD(ScriptGameObjectReference, AddRef),
+					asCALL_THISCALL) < 0 ||
+				engine->RegisterObjectBehaviour(
+					"Transform", asBEHAVE_RELEASE, "void f()",
+					asMETHOD(ScriptGameObjectReference, Release),
+					asCALL_THISCALL) < 0 ||
+				engine->RegisterObjectBehaviour(
+					"Component", asBEHAVE_ADDREF, "void f()",
+					asMETHOD(ScriptComponentReference, AddRef),
+					asCALL_THISCALL) < 0 ||
+				engine->RegisterObjectBehaviour(
+					"Component", asBEHAVE_RELEASE, "void f()",
+					asMETHOD(ScriptComponentReference, Release),
+					asCALL_THISCALL) < 0)
 			{
 				LOG("Could not register core AngelScript object handles");
 				return false;
@@ -854,13 +946,22 @@ shared class EGEBehaviour
 			if (!bind || !instance.context)
 				return;
 
+			ScriptGameObjectReference* owner =
+				MakeGameObjectReference(instance.ownerId);
+			ScriptGameObjectReference* transform =
+				MakeGameObjectReference(instance.ownerId);
 			ScriptExecutionError error;
-			if (!instance.context->ExecuteWithObjects(
+			const bool bound = instance.context->ExecuteWithObjects(
 					*bind,
 					instance.object,
-					instance.owner,
-					instance.owner,
-					error))
+					owner,
+					transform,
+					error);
+			if (owner)
+				owner->Release();
+			if (transform)
+				transform->Release();
+			if (!bound)
 			{
 				RecordExecutionError(error);
 			}
@@ -976,7 +1077,8 @@ shared class EGEBehaviour
 			descriptor.typeName =
 				typeDeclaration ? typeDeclaration : "unknown";
 			descriptor.kind =
-				isReference
+				isReference &&
+					(typeId & asTYPEID_OBJHANDLE) == 0
 					? PropertyKind::Unsupported
 					: ToPropertyKind(*engine, typeId);
 			if (descriptor.kind == PropertyKind::Unsupported &&
@@ -1778,6 +1880,29 @@ shared class EGEBehaviour
 		return true;
 	}
 
+	bool ScriptRuntime::ClearProjectRoot()
+	{
+		if (!impl_->initialized)
+			return false;
+		if (impl_->projectRoot.empty())
+			return true;
+
+		if (impl_->playing)
+			LeavePlayMode();
+		if (impl_->engine)
+			impl_->ClearActiveModule();
+		impl_->instances.clear();
+		impl_->projectRoot.clear();
+		impl_->scriptRoot.clear();
+		impl_->watchedSnapshot.clear();
+		impl_->pendingSnapshot.clear();
+		impl_->diagnostics.clear();
+		impl_->hasPendingSnapshot = false;
+		TypeRegistry::Get().ClearDomain(
+			ScriptReflectionDomain);
+		return true;
+	}
+
 	void ScriptRuntime::SetEditorBuild(bool isEditorBuild)
 	{
 		impl_->isEditorBuild = isEditorBuild;
@@ -1954,14 +2079,14 @@ shared class EGEBehaviour
 		return impl_->Instantiate(instance, false, wasRunning);
 	}
 
-	void ScriptRuntime::SetInstanceOwner(
+	void ScriptRuntime::SetInstanceOwnerId(
 		ScriptInstanceHandle handle,
-		void* owner)
+		std::uint32_t ownerId)
 	{
 		const auto iterator = impl_->instances.find(handle);
 		if (iterator == impl_->instances.end())
 			return;
-		iterator->second.owner = owner;
+		iterator->second.ownerId = ownerId;
 		impl_->BindInstanceOwner(iterator->second);
 	}
 

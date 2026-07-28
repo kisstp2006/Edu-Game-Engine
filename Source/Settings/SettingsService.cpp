@@ -21,7 +21,8 @@ namespace EGE
 		std::string& error)
 	{
 		fallbackRoot_ = fallbackRoot;
-		if (!LoadProject(projectRoot, error))
+		if (!projectRoot.empty() &&
+			!LoadProject(projectRoot, error))
 			return false;
 
 		if (!loadEditorSettings)
@@ -52,9 +53,17 @@ namespace EGE
 		const std::filesystem::path& projectRoot,
 		std::string& error)
 	{
-		if (project_.IsDirty() && !project_.Save(error))
+		if (hasProjectSettings_ &&
+			project_.IsDirty() &&
+			!project_.Save(error))
 			return false;
 		return LoadProject(projectRoot, error);
+	}
+
+	void SettingsService::ClearProject()
+	{
+		project_ = SettingsStore();
+		hasProjectSettings_ = false;
 	}
 
 	bool SettingsService::LoadProject(
@@ -70,6 +79,7 @@ namespace EGE
 			return false;
 
 		project_ = std::move(candidate);
+		hasProjectSettings_ = true;
 		return true;
 	}
 
@@ -88,7 +98,9 @@ namespace EGE
 
 	bool SettingsService::SaveAll(std::string& error)
 	{
-		if (project_.IsDirty() && !project_.Save(error))
+		if (hasProjectSettings_ &&
+			project_.IsDirty() &&
+			!project_.Save(error))
 			return false;
 		if (hasEditorSettings_ && editor_.IsDirty() &&
 			!editor_.Save(error))
@@ -116,6 +128,11 @@ namespace EGE
 	const SettingsStore& SettingsService::Editor() const
 	{
 		return editor_;
+	}
+
+	bool SettingsService::HasProjectSettings() const
+	{
+		return hasProjectSettings_;
 	}
 
 	bool SettingsService::HasEditorSettings() const

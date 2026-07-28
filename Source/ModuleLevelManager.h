@@ -5,6 +5,8 @@
 #include "Module.h"
 #include "Math.h"
 #include "QuadTree.h"
+#include <mutex>
+#include <vector>
 
 class GameObject;
 class IBLData;
@@ -32,6 +34,8 @@ public:
 	GameObject*         GetRoot();
 	const GameObject*   Find(uint uid) const;
 	GameObject*         Find(uint uid);
+	const GameObject*   Find(const char* name) const;
+	GameObject*         Find(const char* name);
 
 	// Manage whole levels
 	bool CreateNewEmpty(const char* name);
@@ -42,7 +46,10 @@ public:
 	// Add or remove from the hierarchy
 	GameObject* CreateGameObject(GameObject * parent, const float3& pos, const float3& scale, const Quat& rot, const char* name = nullptr);
 	GameObject* CreateGameObject(GameObject * parent = nullptr);
+	GameObject* CreateGameObject(const char* name, GameObject* parent = nullptr);
 	GameObject* Duplicate(const GameObject* original);
+	void DestroyGameObject(GameObject* gameObject);
+	void FlushPendingDestructions();
 
 	// Utils
 	GameObject*         Validate                (const GameObject* pointer) const;
@@ -65,7 +72,9 @@ private:
 	void RecursiveFixedUpdate(GameObject* go, float dt) const;
 	void RecursiveUpdate(GameObject* go, float dt) const;
 	void RecursiveLateUpdate(GameObject* go, float dt) const;
-	GameObject* RecursiveFind(uint uid, GameObject* go) const;
+	GameObject* RecursiveFind(
+		uint uid, GameObject* go, bool includePending) const;
+	GameObject* RecursiveFind(const char* name, GameObject* go) const;
 
 	void LoadGameObjects(const Config& config);
 
@@ -75,6 +84,8 @@ public:
 
 private:
 	GameObject* root = nullptr;
+	std::vector<uint> pending_destructions;
+	std::mutex pending_destructions_mutex;
 
 	std::string name;
 

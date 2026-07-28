@@ -92,6 +92,7 @@ public:
 		const std::string& project_name);
 	bool RequestOpenProject(
 		const std::filesystem::path& project_file);
+	const std::filesystem::path& GetFallbackProjectFile() const;
 	EGE::SettingsService* GetSettings();
 	const EGE::SettingsService* GetSettings() const;
 	void ApplySettings();

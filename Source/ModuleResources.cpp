@@ -13,6 +13,7 @@
 #include "ResourceStateMachine.h"
 #include "Config.h"
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 #include "OpenGL.h"
@@ -150,8 +151,11 @@ bool ModuleResources::Init(Config* config)
 	LOG("Loading Resource Manager");
 	bool ret = true;
 
-	LoadUID();
-	LoadResources();
+	if (App->GetActiveProject())
+	{
+		LoadUID();
+		LoadResources();
+	}
     
 	return ret;
 }
@@ -274,6 +278,9 @@ void ModuleResources::SaveTypedResources(Resource::Type type)
 
 void ModuleResources::SaveResources() const
 {
+	if (!App->GetActiveProject())
+		return;
+
 	Config save;
 
 	// Add header info
@@ -669,7 +676,8 @@ ModuleResources::AssetCreationResult ModuleResources::CreateMaterialAsset(
 		return result;
 	}
 
-	SaveResources();
+	if (App->GetActiveProject())
+		SaveResources();
 	result.uid = material->GetUID();
 	result.sourcePath = sourcePath;
 	return result;
@@ -1119,6 +1127,9 @@ void ModuleResources::LoadUID()
 
 void ModuleResources::SaveUID() const
 {
+	if (!App->GetActiveProject())
+		return;
+
 	string file(SETTINGS_FOLDER);
 	file += LAST_UID_FILE;
 
@@ -1181,7 +1192,8 @@ bool ModuleResources::LoadDefaultSkybox()
 	skybox = static_cast<ResourceTexture*>(CreateNewResource(Resource::texture, 3));
 
     char* buffer = nullptr;
-    uint size = App->fs->Load("Assets/Textures/Cubemaps/cubemap.dds", &buffer);
+    uint size = App->fs->Load(
+		"Engine/Textures/Cubemaps/cubemap.dds", &buffer);
 
     if (buffer != nullptr)
     {        
@@ -1204,7 +1216,7 @@ bool ModuleResources::LoadDefaultLoopNoise()
     loopNoise = static_cast<ResourceTexture*>(CreateNewResource(Resource::texture, 8));
 
     char* buffer = nullptr;
-    uint size = App->fs->Load("Assets/Textures/fog.png", &buffer);
+    uint size = App->fs->Load("Engine/Textures/fog.png", &buffer);
 
 
     if (buffer != nullptr)
@@ -1232,7 +1244,9 @@ bool ModuleResources::LoadDefaultBlueNoise()
 
     char* buffer = nullptr;
     //uint size = App->fs->Load("Assets/Textures/BlueNoise/512_512/LDR_LLL1_0.png", &buffer);
-    uint size = App->fs->Load("Assets/Textures/BlueNoise/512_512/LDR_RGB1_0.png", &buffer);
+    uint size = App->fs->Load(
+		"Engine/Textures/BlueNoise/512_512/LDR_RGB1_0.png",
+		&buffer);
 
 
     if (buffer != nullptr)
@@ -1313,7 +1327,10 @@ bool ModuleResources::LoadDefaultLUT()
     uint size = 0;
     float* lutData = nullptr;
     //if(LoadCubeLUT("Assets/LUTs/vibrant.CUBE", lutData, size))
-    if (LoadCubeLUT("Assets/LUTs/purple11-free-luts-pack/Once upon a time.CUBE", lutData, size))    
+    if (LoadCubeLUT(
+			"Engine/LUTs/purple11-free-luts-pack/Once upon a time.CUBE",
+			lutData,
+			size))
     //if (LoadCubeLUT("Assets/LUTs/Shutterstock Free  LUTs/SoftBlackAndWhite.CUBE", lutData, size))        
     {
         lut = std::make_unique<Texture3D>(size, size, size, GL_RGB, GL_RGB, GL_FLOAT, lutData, false);
@@ -1327,59 +1344,65 @@ bool ModuleResources::LoadDefaultLUT()
 
 bool ModuleResources::LoadCubeLUT(const char *file_path, float*& lut_data, uint& size)
 {
-    FILE* file = NULL;
-    fopen_s(&file, file_path, "r");
-    if (file == NULL)
-    {
-        LOG("Could not open %s file \n", file);
-        return false;
-    }
+	char* contents = nullptr;
+	const uint byteCount = App->fs->Load(file_path, &contents);
+	if (!contents || byteCount == 0)
+	{
+		LOG("Could not open LUT file %s", file_path);
+		return false;
+	}
 
-    lut_data = nullptr;
-    size = 0;
+	std::istringstream stream(
+		std::string(contents, static_cast<std::size_t>(byteCount)));
+	RELEASE_ARRAY(contents);
 
-    // Iterate through lines
-    while (!feof(file))
-    {
-        char line[128];
-        if (fscanf(file, "%128[^\n]\n", line) == 0)
-        {
-            break;
-        }
+	lut_data = nullptr;
+	size = 0;
+	std::string line;
+	while (std::getline(stream, line))
+	{
+		std::istringstream header(line);
+		std::string name;
+		if (header >> name && name == "LUT_3D_SIZE" && header >> size)
+			break;
+	}
 
-        //if (strcmp(line, "#LUT size") == 0)
-        if (sscanf(line, "LUT_3D_SIZE %d", &size))
-        {
-            // Read LUT size
-            //fscanf(file, "%s %i\n", &line, &size);
-            lut_data = new float[size * size * size * 3];
-            break;
-        }
-    }
+	if (size == 0)
+	{
+		LOG("LUT file %s does not define LUT_3D_SIZE", file_path);
+		return false;
+	}
 
-    if (size > 0)
-    {
-        uint row = 0;
+	const std::size_t entryCount =
+		static_cast<std::size_t>(size) * size * size;
+	lut_data = new float[entryCount * 3];
+	std::size_t row = 0;
+	while (row < entryCount && std::getline(stream, line))
+	{
+		std::istringstream values(line);
+		float red = 0.0f;
+		float green = 0.0f;
+		float blue = 0.0f;
+		if (!(values >> red >> green >> blue))
+			continue;
 
-        while (!feof(file))
-        {
-            char line[128];
-            if (fscanf(file, "%128[^\n]\n", line) == 0)
-            {
-                break;
-            }
+		lut_data[row * 3] = red;
+		lut_data[row * 3 + 1] = green;
+		lut_data[row * 3 + 2] = blue;
+		++row;
+	}
 
-            float r, g, b;
-            if (sscanf(line, "%f %f %f\n", &r, &g, &b) == 3)
-            {
-                lut_data[row * 3 + 0] = r;
-                lut_data[row * 3 + 1] = g;
-                lut_data[row * 3 + 2] = b;
-                row++;
-            }
-        }
-        fclose(file);
-    }
+	if (row != entryCount)
+	{
+		LOG(
+			"LUT file %s contains %zu entries, expected %zu",
+			file_path,
+			row,
+			entryCount);
+		RELEASE_ARRAY(lut_data);
+		size = 0;
+		return false;
+	}
 
-    return true;
+	return true;
 }

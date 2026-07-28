@@ -12,6 +12,7 @@ class Config;
 class GameObject
 {
 	friend class Component;
+	friend class ModuleLevelManager;
 public:
 
 	GameObject(GameObject* parent, const char* name);
@@ -74,6 +75,7 @@ public:
 
 	bool WasDirty() const;
 	bool WasBBoxDirty() const;
+	bool IsPendingDestroy() const;
 	void Remove();
 	const AABB& GetLocalBBox() const {return local_bbox; }
 
@@ -96,6 +98,9 @@ public:
 	float GetRadius() const;
 
 private:
+	void DestroyImmediate();
+	void SetPendingDestroyRecursively(bool pending);
+
 	AABB local_bbox;
 	Quat rotation = Quat::identity;
 	float3 rotation_editor = float3::zero;
@@ -109,6 +114,7 @@ private:
 	float3 translation = float3::zero;
 	float3 scale = float3::one;
 	bool active = true;
+	bool pending_destroy = false;
 	GameObject* parent = nullptr;
 	float4x4 original_transform;
 	uint uid = 0;

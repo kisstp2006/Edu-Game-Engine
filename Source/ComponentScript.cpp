@@ -1,6 +1,7 @@
 #include "ComponentScript.h"
 
 #include "Application.h"
+#include "GameObject.h"
 #include "ModuleScripting.h"
 #include "Reflection/PropertySerializer.h"
 
@@ -175,7 +176,8 @@ void ComponentScript::EnsureInstance()
 	{
 		instanceHandle_ = runtime->CreateInstance(className_, storedState_);
 		if (instanceHandle_)
-			runtime->SetInstanceOwner(instanceHandle_, game_object);
+			runtime->SetInstanceOwnerId(
+				instanceHandle_, game_object->GetUID());
 		if (instanceHandle_ && App->IsPlay())
 			runtime->StartInstance(instanceHandle_);
 	}

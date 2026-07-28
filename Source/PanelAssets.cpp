@@ -74,6 +74,13 @@ PanelAssets::PanelAssets()
 
 void PanelAssets::Draw()
 {
+	if (!App->GetActiveProject())
+	{
+		ImGui::TextDisabled(
+			"Choose a project to browse its assets.");
+		return;
+	}
+
 	DrawDialogs();
 	EnsureProject();
 	DrawToolbar();
@@ -1298,6 +1305,12 @@ void PanelAssets::DrawImportOptions()
 
 void PanelAssets::EnsureProject()
 {
+	if (!App->GetActiveProject())
+	{
+		browser_.Reset();
+		return;
+	}
+
 	const std::filesystem::path& activeRoot =
 		App->fs->GetProjectRoot();
 	if (browser_.IsOpen() &&

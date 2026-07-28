@@ -29,8 +29,6 @@
 
 using namespace std;
 
-#define USE_THREAD_POOL
-
 ModuleLevelManager::ModuleLevelManager( bool start_enabled) : Module("LevelManager", start_enabled)
 {
 }
@@ -130,7 +128,8 @@ bool ModuleLevelManager::CleanUp()
 {
 	LOG("Freeing Level Manager");
 
-	// This recursively must destroy all gameobjects
+	if (root)
+		root->DestroyImmediate();
 	RELEASE(root);
 
 	return true;
@@ -154,7 +153,7 @@ GameObject * ModuleLevelManager::GetRoot()
 const GameObject * ModuleLevelManager::Find(uint uid) const
 {
 	if (uid > 0)
-		return RecursiveFind(uid, root);
+		return RecursiveFind(uid, root, false);
 
 	return nullptr;
 }
@@ -162,9 +161,23 @@ const GameObject * ModuleLevelManager::Find(uint uid) const
 GameObject * ModuleLevelManager::Find(uint uid)
 {
 	if (uid > 0)
-		return RecursiveFind(uid, root);
+		return RecursiveFind(uid, root, false);
 
 	return nullptr;
+}
+
+const GameObject* ModuleLevelManager::Find(const char* objectName) const
+{
+	return objectName && *objectName
+		? RecursiveFind(objectName, root)
+		: nullptr;
+}
+
+GameObject* ModuleLevelManager::Find(const char* objectName)
+{
+	return objectName && *objectName
+		? RecursiveFind(objectName, root)
+		: nullptr;
 }
 
 bool ModuleLevelManager::CreateNewEmpty(const char * name)
@@ -187,6 +200,59 @@ GameObject * ModuleLevelManager::CreateGameObject(GameObject * parent)
 		parent = root;
 
 	return new GameObject(parent, "Unnamed");
+}
+
+GameObject* ModuleLevelManager::CreateGameObject(
+	const char* objectName,
+	GameObject* parent)
+{
+	if (!parent || parent->IsPendingDestroy())
+		parent = root;
+	return new GameObject(
+		parent,
+		objectName && *objectName ? objectName : "GameObject");
+}
+
+void ModuleLevelManager::DestroyGameObject(GameObject* gameObject)
+{
+	if (!gameObject)
+		return;
+
+	if (gameObject == root)
+	{
+		std::vector<GameObject*> children(
+			root->childs.begin(), root->childs.end());
+		for (GameObject* child : children)
+			DestroyGameObject(child);
+		return;
+	}
+
+	if (gameObject->IsPendingDestroy() ||
+		RecursiveFind(gameObject->GetUID(), root, true) != gameObject)
+	{
+		return;
+	}
+
+	gameObject->SetPendingDestroyRecursively(true);
+	std::scoped_lock lock(pending_destructions_mutex);
+	pending_destructions.push_back(gameObject->GetUID());
+}
+
+void ModuleLevelManager::FlushPendingDestructions()
+{
+	std::vector<uint> pending;
+	{
+		std::scoped_lock lock(pending_destructions_mutex);
+		pending.swap(pending_destructions);
+	}
+
+	for (uint uid : pending)
+	{
+		GameObject* gameObject =
+			RecursiveFind(uid, root, true);
+		if (gameObject && gameObject != root)
+			gameObject->DestroyImmediate();
+	}
 }
 
 GameObject * ModuleLevelManager::Duplicate(const GameObject * original)
@@ -325,6 +391,11 @@ bool ModuleLevelManager::Save(const char * file)
 
 void ModuleLevelManager::UnloadCurrent()
 {
+	{
+		std::scoped_lock lock(pending_destructions_mutex);
+		pending_destructions.clear();
+	}
+
 	if (App->renderer3D && App->camera)
 	{
 		App->renderer3D->active_camera = App->camera->GetDummy();
@@ -332,7 +403,7 @@ void ModuleLevelManager::UnloadCurrent()
 	}
 
 	if (root)
-		root->Remove();
+		root->DestroyImmediate();
 
 	quadtree.Clear();
 	quadtree.SetBoundaries(
@@ -359,6 +430,8 @@ void ModuleLevelManager::RecursiveProcessEvent(GameObject * go, const Event & ev
 
 void ModuleLevelManager::RecursiveUpdate(GameObject * go, float dt) const
 {
+	if (!go || go->IsPendingDestroy())
+		return;
 	go->OnUpdate(dt);
 
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
@@ -367,6 +440,8 @@ void ModuleLevelManager::RecursiveUpdate(GameObject * go, float dt) const
 
 void ModuleLevelManager::RecursiveFixedUpdate(GameObject* go, float dt) const
 {
+	if (!go || go->IsPendingDestroy())
+		return;
 	go->OnFixedUpdate(dt);
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
 		RecursiveFixedUpdate(*it, dt);
@@ -374,22 +449,46 @@ void ModuleLevelManager::RecursiveFixedUpdate(GameObject* go, float dt) const
 
 void ModuleLevelManager::RecursiveLateUpdate(GameObject* go, float dt) const
 {
+	if (!go || go->IsPendingDestroy())
+		return;
 	go->OnLateUpdate(dt);
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
 		RecursiveLateUpdate(*it, dt);
 }
 
-GameObject* ModuleLevelManager::RecursiveFind(uint uid, GameObject * go) const
+GameObject* ModuleLevelManager::RecursiveFind(
+	uint uid,
+	GameObject* go,
+	bool includePending) const
 {
+	if (!go || (!includePending && go->IsPendingDestroy()))
+		return nullptr;
 	if (uid == go->GetUID())
 		return go;
 
 	GameObject* ret = nullptr;
 
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end() && ret == nullptr; ++it)
-		ret = RecursiveFind(uid, *it);
+		ret = RecursiveFind(uid, *it, includePending);
 
 	return ret;
+}
+
+GameObject* ModuleLevelManager::RecursiveFind(
+	const char* objectName,
+	GameObject* go) const
+{
+	if (!go || go->IsPendingDestroy())
+		return nullptr;
+	if (go != root && go->name == objectName)
+		return go;
+
+	for (GameObject* child : go->childs)
+	{
+		if (GameObject* found = RecursiveFind(objectName, child))
+			return found;
+	}
+	return nullptr;
 }
 
 GameObject * ModuleLevelManager::Validate(const GameObject * pointer) const

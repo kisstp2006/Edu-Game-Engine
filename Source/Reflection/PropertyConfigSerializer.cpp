@@ -28,6 +28,23 @@ namespace EGE
 				entry.AddDouble("Value", *value);
 			else if (const auto* value = std::get_if<std::string>(&property.value))
 				entry.AddString("Value", value->c_str());
+			else if (const auto* value =
+				std::get_if<GameObjectReferenceValue>(&property.value))
+			{
+				entry.AddString(
+					"ObjectUID",
+					std::to_string(value->objectId).c_str());
+			}
+			else if (const auto* value =
+				std::get_if<ComponentReferenceValue>(&property.value))
+			{
+				entry.AddString(
+					"ObjectUID",
+					std::to_string(value->objectId).c_str());
+				entry.AddString(
+					"ComponentUID",
+					std::to_string(value->componentId).c_str());
+			}
 			else
 				continue;
 
@@ -105,6 +122,39 @@ namespace EGE
 				case PropertyKind::String:
 					value = std::string(entry.GetString("Value", ""));
 					break;
+				case PropertyKind::GameObjectReference:
+					{
+						std::uint64_t objectId = 0;
+						const char* text =
+							entry.GetString("ObjectUID", "0");
+						const char* end =
+							text + std::char_traits<char>::length(text);
+						std::from_chars(text, end, objectId);
+						value = GameObjectReferenceValue{objectId};
+						break;
+					}
+				case PropertyKind::ComponentReference:
+					{
+						std::uint64_t objectId = 0;
+						std::uint64_t componentId = 0;
+						const char* objectText =
+							entry.GetString("ObjectUID", "0");
+						const char* componentText =
+							entry.GetString("ComponentUID", "0");
+						std::from_chars(
+							objectText,
+							objectText + std::char_traits<char>::length(
+								objectText),
+							objectId);
+						std::from_chars(
+							componentText,
+							componentText + std::char_traits<char>::length(
+								componentText),
+							componentId);
+						value = ComponentReferenceValue{
+							objectId, componentId};
+						break;
+					}
 				default:
 					continue;
 			}

@@ -19,12 +19,14 @@ namespace EGE
 		bool ChangeProject(
 			const std::filesystem::path& projectRoot,
 			std::string& error);
+		void ClearProject();
 		bool SaveAll(std::string& error);
 
 		SettingsStore& Project();
 		const SettingsStore& Project() const;
 		SettingsStore& Editor();
 		const SettingsStore& Editor() const;
+		bool HasProjectSettings() const;
 		bool HasEditorSettings() const;
 
 	private:
@@ -38,6 +40,7 @@ namespace EGE
 		std::filesystem::path fallbackRoot_;
 		SettingsStore project_;
 		SettingsStore editor_;
+		bool hasProjectSettings_ = false;
 		bool hasEditorSettings_ = false;
 	};
 }

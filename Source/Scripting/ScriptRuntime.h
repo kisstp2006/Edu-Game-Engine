@@ -67,6 +67,7 @@ namespace EGE
 			std::string& error);
 
 		bool SetProjectRoot(const std::filesystem::path& projectRoot);
+		bool ClearProjectRoot();
 		void SetEditorBuild(bool isEditorBuild);
 		void SetHotReloadEnabled(bool enabled);
 		[[nodiscard]] bool IsHotReloadEnabled() const;
@@ -91,9 +92,9 @@ namespace EGE
 			ScriptInstanceHandle handle,
 			const std::string& className,
 			PropertyBag initialState = {});
-		void SetInstanceOwner(
+		void SetInstanceOwnerId(
 			ScriptInstanceHandle handle,
-			void* owner);
+			std::uint32_t ownerId);
 		void DestroyInstance(ScriptInstanceHandle handle);
 		void StartInstance(ScriptInstanceHandle handle);
 		void FixedUpdateInstance(ScriptInstanceHandle handle, float deltaTime);

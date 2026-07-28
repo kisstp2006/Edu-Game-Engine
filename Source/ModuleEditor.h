@@ -33,7 +33,12 @@ class TubeLight;
 class IBLData;
 class LocalIBLLight;
 class ComponentMeshRenderer;
-namespace EGE { class AssetEditorManager; }
+namespace EGE
+{
+	class AssetEditorManager;
+	class Project;
+	class RecentProjects;
+}
 
 class ModuleEditor : public Module
 {
@@ -97,6 +102,7 @@ public:
 	void LogFPS(float fps, float ms);
 	void PrepareForProjectChange();
 	void SetProjectStatus(bool success, const std::string& message);
+	void RecordRecentProject(const EGE::Project& project);
 	void ApplyAppearance(const std::string& theme, bool compact);
 	bool OpenAssetEditor(const EGE::EditorAssetSelection& asset);
 
@@ -124,6 +130,9 @@ private:
 	void LoadFile(const char* filter_extension = nullptr, const char* from_dir = nullptr);
 	void DrawDirectoryRecursive(const char* directory, const char* filter_extension) ;
 	void DrawProjectDialogs();
+	bool DrawProjectSelector();
+	bool RequestProjectFromSelector(
+		const std::filesystem::path& projectFile);
 	void DrawSettingsWindow(bool& open, bool editorSettings);
 	void DrawPanelGroup(TabPanelEnum group);
 	void DrawStandalonePanels(TabPanelEnum group);
@@ -167,8 +176,11 @@ private:
 	bool project_status_success = false;
 	bool show_project_settings = false;
 	bool show_editor_settings = false;
+	bool show_project_selector = true;
+	bool project_selection_pending = false;
 	char new_project_name[128] = {};
 	char new_project_location[512] = {};
+	std::string imgui_ini_path;
 	std::string project_status_message;
 	ImGui::FileBrowser open_project_dialog;
 	ImGui::FileBrowser project_location_dialog{
@@ -177,6 +189,7 @@ private:
 
     SelectionVariant selected;
 	std::unique_ptr<EGE::AssetEditorManager> assetEditorManager;
+	std::unique_ptr<EGE::RecentProjects> recentProjects;
 
 };
 

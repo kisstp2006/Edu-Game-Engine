@@ -1,4 +1,7 @@
 #include "Globals.h"
+#include "Application.h"
+#include "EngineAssetPath.h"
+#include "ModuleFileSystem.h"
 #include "OGL.h"
 #include "OpenGL.h"
 
@@ -693,27 +696,18 @@ Shader::Shader(unsigned type, const char** source, unsigned count)
 
 Shader::Shader(unsigned type, const char* path, const char** defines, unsigned count)
 {
-    // Read whole file
-    char* data = nullptr;
-
-	FILE* file = 0;
-
-	fopen_s(&file, path, "rb");
+	char* data = nullptr;
+	const std::string shaderPath =
+		EGE::ResolveEngineShaderPath(path ? path : "");
+	const uint size =
+		App && App->fs
+			? App->fs->Load(shaderPath.c_str(), &data)
+			: 0;
 
     std::string error;
 
-	if(file)
+	if(data && size > 0)
 	{
-		fseek(file, 0, SEEK_END);
-		int size = ftell(file);
-		rewind(file);
-		data = (char*)malloc(size + 1);
-
-		fread(data, 1, size, file);
-		data[size] = 0;
-
-		fclose(file);
-
         // inject defines
         if (count > 0)
         {
@@ -741,14 +735,13 @@ Shader::Shader(unsigned type, const char* path, const char** defines, unsigned c
                 Init(type, final_data, count*2 + 1, error);
             }
 
-
-            free(data);
+            RELEASE_ARRAY(data);
             free(final_data);
         }
         else
         {
             Init(type, (const char**)&data, 1, error);
-            free(data);
+            RELEASE_ARRAY(data);
         }
 	}
     else
@@ -758,7 +751,10 @@ Shader::Shader(unsigned type, const char* path, const char** defines, unsigned c
 
     if(!compiled)
     {
-        LOG("Error compiling shader %s: %s", path, error.c_str());
+        LOG(
+			"Error compiling shader %s: %s",
+			shaderPath.c_str(),
+			error.c_str());
     }
 }
 

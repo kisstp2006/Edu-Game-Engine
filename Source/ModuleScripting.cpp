@@ -4,6 +4,7 @@
 #include "Event.h"
 #include "Globals.h"
 #include "ModuleFileSystem.h"
+#include "Project/Project.h"
 #include "Scripting/ScriptBindings.h"
 
 ModuleScripting::ModuleScripting(bool startEnabled)
@@ -92,5 +93,9 @@ bool ModuleScripting::SynchronizeProject()
 {
 	if (!App || !App->fs)
 		return false;
-	return runtime_.SetProjectRoot(App->fs->GetProjectRoot());
+	const std::shared_ptr<const EGE::Project> project =
+		App->GetActiveProject();
+	return project
+		? runtime_.SetProjectRoot(project->GetProjectDirectory())
+		: runtime_.ClearProjectRoot();
 }
