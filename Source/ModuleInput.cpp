@@ -169,6 +169,16 @@ update_status ModuleInput::PreUpdate(float dt)
 		}
 	}
 
+	if (cursor_locked)
+	{
+		GetCursorLockCenter(mouse_x, mouse_y);
+		if (GetWindowEvent(EventWindow::WE_SHOW))
+		{
+			CenterLockedCursor();
+			SetCursorLocked(true);
+		}
+	}
+
 	if(GetWindowEvent(EventWindow::WE_QUIT) == true || GetKey(SDL_SCANCODE_ESCAPE) == KEY_DOWN)
 		return UPDATE_STOP;
 
@@ -179,6 +189,7 @@ update_status ModuleInput::PreUpdate(float dt)
 bool ModuleInput::CleanUp()
 {
 	LOG("Quitting SDL event subsystem");
+	SetCursorLocked(false);
 	SDL_QuitSubSystem(SDL_INIT_EVENTS);
 	return true;
 }
@@ -204,4 +215,124 @@ void ModuleInput::GetMousePosition(int & x, int & y) const
 int ModuleInput::GetMouseWheel() const
 {
 	return mouse_wheel;
+}
+
+bool ModuleInput::IsCursorLocked() const
+{
+	return cursor_locked &&
+		SDL_GetRelativeMouseMode() == SDL_TRUE;
+}
+
+bool ModuleInput::SetCursorLocked(bool locked)
+{
+	if (locked && IsCursorLocked())
+		return true;
+	if (!locked &&
+		!cursor_locked &&
+		SDL_GetRelativeMouseMode() == SDL_FALSE)
+	{
+		return true;
+	}
+
+	SDL_Window* window = App && App->window
+		? App->window->GetWindow()
+		: nullptr;
+	if (!window)
+		return false;
+
+	if (locked)
+	{
+		CenterLockedCursor();
+		SDL_SetWindowGrab(window, SDL_TRUE);
+		if (SDL_SetRelativeMouseMode(SDL_TRUE) < 0)
+		{
+			SDL_SetWindowGrab(window, SDL_FALSE);
+			cursor_locked = false;
+			LOG("Could not lock cursor: %s", SDL_GetError());
+			return false;
+		}
+
+		cursor_locked = true;
+		int ignored_x = 0;
+		int ignored_y = 0;
+		SDL_GetRelativeMouseState(&ignored_x, &ignored_y);
+		return true;
+	}
+
+	if (SDL_SetRelativeMouseMode(SDL_FALSE) < 0)
+	{
+		LOG("Could not unlock cursor: %s", SDL_GetError());
+		return false;
+	}
+
+	SDL_SetWindowGrab(window, SDL_FALSE);
+	cursor_locked = false;
+	return true;
+}
+
+void ModuleInput::SetCursorLockRegion(
+	int x,
+	int y,
+	int width,
+	int height)
+{
+	if (width <= 0 || height <= 0)
+		return;
+
+	const bool changed =
+		!cursor_lock_region_valid ||
+		cursor_lock_region_x != x ||
+		cursor_lock_region_y != y ||
+		cursor_lock_region_width != width ||
+		cursor_lock_region_height != height;
+
+	cursor_lock_region_valid = true;
+	cursor_lock_region_x = x;
+	cursor_lock_region_y = y;
+	cursor_lock_region_width = width;
+	cursor_lock_region_height = height;
+
+	if (changed && cursor_locked)
+		CenterLockedCursor();
+}
+
+void ModuleInput::CenterLockedCursor()
+{
+	SDL_Window* window = App && App->window
+		? App->window->GetWindow()
+		: nullptr;
+	if (!window ||
+		(SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) == 0)
+	{
+		return;
+	}
+
+	int center_x = 0;
+	int center_y = 0;
+	GetCursorLockCenter(center_x, center_y);
+	SDL_WarpMouseInWindow(window, center_x, center_y);
+	mouse_x = center_x;
+	mouse_y = center_y;
+}
+
+void ModuleInput::GetCursorLockCenter(int& x, int& y) const
+{
+	if (App && App->IsEditor() && cursor_lock_region_valid)
+	{
+		x = cursor_lock_region_x + cursor_lock_region_width / 2;
+		y = cursor_lock_region_y + cursor_lock_region_height / 2;
+		return;
+	}
+
+	int window_width = 0;
+	int window_height = 0;
+	if (App && App->window && App->window->GetWindow())
+	{
+		SDL_GetWindowSize(
+			App->window->GetWindow(),
+			&window_width,
+			&window_height);
+	}
+	x = window_width / 2;
+	y = window_height / 2;
 }

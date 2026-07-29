@@ -60,8 +60,14 @@ public:
 	void GetMouseMotion(int& x, int& y) const;
 	void GetMousePosition(int& x, int& y) const;
 	int GetMouseWheel() const;
+	bool IsCursorLocked() const;
+	bool SetCursorLocked(bool locked);
+	void SetCursorLockRegion(int x, int y, int width, int height);
 
 private:
+	void CenterLockedCursor();
+	void GetCursorLockCenter(int& x, int& y) const;
+
 	bool		windowEvents[WE_COUNT];
 	KeyState*	keyboard = nullptr;
 	KeyState	mouse_buttons[NUM_MOUSE_BUTTONS];
@@ -70,6 +76,12 @@ private:
 	int mouse_x = 0;
 	int mouse_y = 0;
 	int mouse_wheel = 0;
+	bool cursor_locked = false;
+	bool cursor_lock_region_valid = false;
+	int cursor_lock_region_x = 0;
+	int cursor_lock_region_y = 0;
+	int cursor_lock_region_width = 0;
+	int cursor_lock_region_height = 0;
 };
 
 #endif // __MODULEINPUT_H__

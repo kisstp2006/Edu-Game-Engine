@@ -44,6 +44,7 @@ GameObject::GameObject(GameObject* parent, const char * name, const float3 & tra
 	name(name), translation(translation), scale(scale), rotation(rotation)
 {
 	uid = App->random->Int();
+	rotation_editor = rotation.ToEulerXYZ();
 	SetNewParent(parent);
 }
 
@@ -450,9 +451,10 @@ float3 GameObject::GetLocalScale() const
 // ---------------------------------------------------------
 void GameObject::SetLocalRotation(const float3& XYZ_euler_rotation)
 {
-	float3 diff = XYZ_euler_rotation - rotation_editor;
-	Quat mod = Quat::FromEulerXYZ(diff.x, diff.y, diff.z);
-	rotation = rotation * mod;
+	rotation = Quat::FromEulerXYZ(
+		XYZ_euler_rotation.x,
+		XYZ_euler_rotation.y,
+		XYZ_euler_rotation.z);
 	rotation_editor = XYZ_euler_rotation;
 	local_trans_dirty = true;
 }
@@ -460,8 +462,8 @@ void GameObject::SetLocalRotation(const float3& XYZ_euler_rotation)
 // ---------------------------------------------------------
 void GameObject::SetLocalRotation(const Quat& rotation)
 {
-	this->rotation = rotation;
-	rotation_editor = rotation.ToEulerXYZ().Abs();
+	this->rotation = rotation.Normalized();
+	rotation_editor = this->rotation.ToEulerXYZ();
 	local_trans_dirty = true;
 }
 
@@ -476,7 +478,8 @@ void GameObject::SetLocalScale(const float3 & scale)
 void GameObject::SetLocalTransform(const float4x4 & transform)
 {
 	transform.Decompose(translation, rotation, scale);
-	rotation_editor = rotation.ToEulerXYZ().Abs();
+	rotation.Normalize();
+	rotation_editor = rotation.ToEulerXYZ();
 	local_trans_dirty = true;
 }
 

@@ -279,6 +279,13 @@ void SceneViewport::DrawSelection(ComponentCamera* camera, Framebuffer* framebuf
 void SceneViewport::ShowTexture()
 {
     ImVec2 screenPos = ImGui::GetCursorScreenPos();
+	x_pos = static_cast<unsigned>(std::max(0.0f, screenPos.x));
+	y_pos = static_cast<unsigned>(std::max(0.0f, screenPos.y));
+	App->input->SetCursorLockRegion(
+		static_cast<int>(screenPos.x),
+		static_cast<int>(screenPos.y),
+		static_cast<int>(fb_width),
+		static_cast<int>(fb_height));
     
     void *id;
     if (std::get<bool>(App->hints->GetDHint(std::string("Enable Fxaa"), true)))

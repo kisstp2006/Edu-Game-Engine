@@ -515,6 +515,34 @@ void SetLocalEulerAngles(
 		gameObject->SetLocalRotation(ToEngineVector3(eulerAngles));
 }
 
+ScriptVector3 GetLocalEulerAnglesYXZ(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return {};
+
+	const float3 orderedAngles =
+		gameObject->GetLocalRotationQ().ToEulerYXZ();
+	return {
+		orderedAngles.y,
+		orderedAngles.x,
+		orderedAngles.z};
+}
+
+void SetLocalEulerAnglesYXZ(
+	const ScriptVector3& eulerAngles,
+	ScriptGameObjectReference* reference)
+{
+	if (GameObject* gameObject = ResolveGameObject(reference))
+	{
+		gameObject->SetLocalRotation(Quat::FromEulerYXZ(
+			eulerAngles.y,
+			eulerAngles.x,
+			eulerAngles.z));
+	}
+}
+
 ScriptVector3 GetLocalScale(
 	const ScriptGameObjectReference* reference)
 {
@@ -713,6 +741,17 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			asFUNCTION(SetLocalEulerAngles), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform",
+			"Vector3 get_localEulerAnglesYXZ() const property",
+			asFUNCTION(GetLocalEulerAnglesYXZ),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_localEulerAnglesYXZ("
+				"const Vector3 &in) property",
+			asFUNCTION(SetLocalEulerAnglesYXZ),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
 			"Vector3 get_localScale() const property",
 			asFUNCTION(GetLocalScale), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
@@ -835,13 +874,13 @@ bool ScriptGetMouseButtonUp(int button)
 
 bool ScriptGetCursorLocked()
 {
-    return SDL_GetRelativeMouseMode() == SDL_TRUE;
+    return App && App->input && App->input->IsCursorLocked();
 }
 
 void ScriptSetCursorLocked(bool locked)
 {
-    if (SDL_SetRelativeMouseMode(locked ? SDL_TRUE : SDL_FALSE) < 0)
-        LOG("Could not change cursor lock: %s", SDL_GetError());
+    if (App && App->input)
+        App->input->SetCursorLocked(locked);
 }
 
 int ScriptGetMouseX()
@@ -907,13 +946,14 @@ static bool ValidateFlyCameraApi(
 void ValidateFlyCameraApi(Transform@ transform, float deltaTime)
 {
     float lookSensitivity = 0.003f;
-    Vector3 rotation = transform.localEulerAngles;
+    Vector3 rotation = transform.localEulerAnglesYXZ;
     rotation.y -= Input::GetAxis("Mouse X") * lookSensitivity;
     rotation.x = Math::Clamp(
         rotation.x - Input::GetAxis("Mouse Y") * lookSensitivity,
         -89.0f * Math::Deg2Rad,
         89.0f * Math::Deg2Rad);
-    transform.localEulerAngles = rotation;
+    rotation.z = 0.0f;
+    transform.localEulerAnglesYXZ = rotation;
 
     Vector3 movement =
         transform.right * Input::GetAxis("Horizontal") +

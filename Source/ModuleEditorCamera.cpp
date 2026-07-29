@@ -354,7 +354,7 @@ void ModuleEditorCamera::SetFlyMode(bool enabled)
 		return;
 
 	fly_mode = enabled;
-	SDL_SetRelativeMouseMode(enabled ? SDL_TRUE : SDL_FALSE);
+	App->input->SetCursorLocked(enabled);
 }
 
 // -----------------------------------------------------------------
