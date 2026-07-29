@@ -1,6 +1,7 @@
 #include "Globals.h"
 #include "Application.h"
 #include "Component.h"
+#include "GameObject.h"
 
 #include "Leaks.h"
 
@@ -16,6 +17,12 @@ Component::Component(GameObject* container, Component::Types type) : game_object
 Component::~Component()
 {}
 
+void Component::InvalidateBoundingBox()
+{
+	if (game_object)
+		game_object->InvalidateBoundingBox();
+}
+
 // ---------------------------------------------------------
 void Component::SetActive(bool active)
 {
@@ -26,6 +33,7 @@ void Component::SetActive(bool active)
 			OnActivate();
 		else
 			OnDeActivate();
+		InvalidateBoundingBox();
 	}
 }
 
@@ -44,7 +52,7 @@ Component::Types Component::GetType() const
 // ---------------------------------------------------------
 const char * Component::GetTypeStr() const
 {
-	static_assert(Component::Types::Unknown == 17, "String list needs update");
+	static_assert(Component::Types::Unknown == 18, "String list needs update");
 
 	static const char* names[] = {
 	"MeshRenderer",
@@ -62,8 +70,9 @@ const char * Component::GetTypeStr() const
     "Line",
     "Grass",
     "Decal",
-    "SpotCone",
+	"SpotCone",
 	"Script",
+	"Collider",
 	"Invalid" };
 
 	return names[type];

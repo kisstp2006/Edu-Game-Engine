@@ -10,6 +10,7 @@
 #include "ModuleRenderer3D.h"
 #include "ModuleEditorCamera.h"
 #include "ModuleEditor.h"
+#include "ModuleDebugDraw.h"
 #include "ModuleResources.h"
 #include "ModuleHints.h"
 
@@ -316,6 +317,11 @@ update_status ModuleLevelManager::PostUpdate(float dt)
 	return UPDATE_CONTINUE;
 }
 
+void ModuleLevelManager::DrawDebug()
+{
+	RecursiveDebugDraw(root);
+}
+
 // Called before quitting
 bool ModuleLevelManager::CleanUp()
 {
@@ -570,6 +576,91 @@ bool ModuleLevelManager::Load(const char * file)
 	return ret;
 }
 
+bool ModuleLevelManager::RequestLoad(
+	const char* file,
+	std::string* error)
+{
+	std::filesystem::path resolvedPath;
+	std::string pathError;
+	if (!ResolveProjectScenePath(file, resolvedPath, pathError))
+	{
+		last_scene_change_error = pathError;
+		if (error)
+			*error = pathError;
+		return false;
+	}
+	if (!App->fs->Exists(resolvedPath.generic_string().c_str()))
+	{
+		last_scene_change_error = "The scene file does not exist.";
+		if (error)
+			*error = last_scene_change_error;
+		return false;
+	}
+
+	pending_scene_change = PendingSceneChange::Load;
+	pending_scene_path = std::move(resolvedPath);
+	last_scene_change_error.clear();
+	return true;
+}
+
+bool ModuleLevelManager::RequestReload(std::string* error)
+{
+	if (scene_path.empty())
+	{
+		last_scene_change_error =
+			"The current scene has not been saved yet.";
+		if (error)
+			*error = last_scene_change_error;
+		return false;
+	}
+	return RequestLoad(scene_path.generic_string().c_str(), error);
+}
+
+bool ModuleLevelManager::ProcessPendingSceneChange()
+{
+	if (pending_scene_change == PendingSceneChange::None)
+		return true;
+
+	const std::filesystem::path requestedPath =
+		std::move(pending_scene_path);
+	pending_scene_change = PendingSceneChange::None;
+	pending_scene_path.clear();
+
+	if (!Load(requestedPath.generic_string().c_str()))
+	{
+		last_scene_change_error =
+			"The requested scene could not be loaded.";
+		return false;
+	}
+
+	last_scene_change_error.clear();
+	if (App->IsPlay())
+		RecursiveProcessEvent(root, Event(Event::play));
+	else if (App->IsPause())
+	{
+		RecursiveProcessEvent(root, Event(Event::play));
+		RecursiveProcessEvent(root, Event(Event::pause));
+	}
+	if (App->renderer3D)
+		App->renderer3D->RefreshActiveCamera();
+	return true;
+}
+
+bool ModuleLevelManager::HasPendingSceneChange() const
+{
+	return pending_scene_change != PendingSceneChange::None;
+}
+
+const std::string& ModuleLevelManager::GetLastSceneChangeError() const
+{
+	return last_scene_change_error;
+}
+
+const std::string& ModuleLevelManager::GetSceneName() const
+{
+	return name;
+}
+
 bool ModuleLevelManager::Save(const char * file)
 {
 	const char* requestedPath = file;
@@ -694,13 +785,6 @@ GameObject* ModuleLevelManager::InstantiatePrefab(
 	GameObject* parent,
 	std::string* error)
 {
-	if (!App->IsStop())
-	{
-		if (error)
-			*error = "Prefabs can only be instantiated while the game is stopped.";
-		return nullptr;
-	}
-
 	std::filesystem::path resolvedPath;
 	std::string pathError;
 	if (!ResolveProjectPrefabPath(file, resolvedPath, pathError))
@@ -754,6 +838,13 @@ GameObject* ModuleLevelManager::InstantiatePrefab(
 		instance->SetNewParent(parent);
 	root->RecursiveCalcGlobalTransform(root->GetLocalTransform(), true);
 	root->RecursiveCalcBoundingBoxes();
+	if (App->IsPlay())
+		RecursiveProcessEvent(instance, Event(Event::play));
+	else if (App->IsPause())
+	{
+		RecursiveProcessEvent(instance, Event(Event::play));
+		RecursiveProcessEvent(instance, Event(Event::pause));
+	}
 	return instance;
 }
 
@@ -873,7 +964,11 @@ void ModuleLevelManager::OnAssetDeleted(
 
 void ModuleLevelManager::UnloadCurrent()
 {
+	pending_scene_change = PendingSceneChange::None;
+	pending_scene_path.clear();
 	App->GetTime().DiscardPendingFixedSteps();
+	if (App->physics3D)
+		App->physics3D->ResetContactState();
 
 	{
 		std::scoped_lock lock(pending_destructions_mutex);
@@ -939,6 +1034,40 @@ void ModuleLevelManager::RecursiveLateUpdate(GameObject* go, float dt) const
 	go->OnLateUpdate(dt);
 	for (list<GameObject*>::const_iterator it = go->childs.begin(); it != go->childs.end(); ++it)
 		RecursiveLateUpdate(*it, dt);
+}
+
+void ModuleLevelManager::RecursiveDebugDraw(GameObject* go) const
+{
+	if (!go || !go->IsActive() || go->IsPendingDestroy())
+		return;
+
+	const bool selected =
+		App && App->editor &&
+		App->editor->IsGameObjectSelected(go);
+	const bool engineDebugEnabled =
+		App && App->debug_draw &&
+		App->debug_draw->IsChannelEnabled(
+			DebugDrawChannel::Engine);
+	const bool physicsDebugEnabled =
+		App && App->debug_draw &&
+		App->debug_draw->IsChannelEnabled(
+			DebugDrawChannel::Physics);
+	for (Component* component : go->components)
+	{
+		if (component &&
+			component->IsActive() &&
+			!component->flag_for_removal &&
+			(engineDebugEnabled ||
+				(physicsDebugEnabled &&
+					component->GetType() ==
+						Component::Types::Collider)))
+		{
+			component->OnDebugDraw(selected);
+		}
+	}
+
+	for (GameObject* child : go->childs)
+		RecursiveDebugDraw(child);
 }
 
 void ModuleLevelManager::RecursiveFlushPendingComponentRemovals(

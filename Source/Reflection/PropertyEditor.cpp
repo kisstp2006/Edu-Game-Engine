@@ -4,11 +4,14 @@
 #include "../Component.h"
 #include "../GameObject.h"
 #include "../ModuleLevelManager.h"
+#include "../ModuleResources.h"
+#include "../Resource.h"
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -67,8 +70,34 @@ namespace EGE
 				}
 				return current->componentId == 0
 					? "None"
+						: "Missing (" +
+							std::to_string(current->componentId) + ")";
+			}
+			if (const auto* current =
+				std::get_if<ResourceReferenceValue>(&value))
+			{
+				const Resource* resource =
+					App && App->resources
+						? App->resources->Get(current->resourceId)
+						: nullptr;
+				if (resource &&
+					static_cast<int>(resource->GetType()) ==
+						current->resourceType)
+				{
+					const char* name = resource->GetUserResName();
+					return name && *name
+						? name
+						: resource->GetFile();
+				}
+				return current->resourceId == 0
+					? "None"
 					: "Missing (" +
-						std::to_string(current->componentId) + ")";
+						std::to_string(current->resourceId) + ")";
+			}
+			if (const auto* current = std::get_if<Vector2Value>(&value))
+			{
+				return "(" + std::to_string(current->x) + ", " +
+					std::to_string(current->y) + ")";
 			}
 			if (const auto* current = std::get_if<Vector3Value>(&value))
 			{
@@ -82,6 +111,14 @@ namespace EGE
 					std::to_string(current->g) + ", " +
 					std::to_string(current->b) + ", " +
 					std::to_string(current->a) + ")";
+			}
+			if (const auto* current =
+				std::get_if<QuaternionValue>(&value))
+			{
+				return "(" + std::to_string(current->x) + ", " +
+					std::to_string(current->y) + ", " +
+					std::to_string(current->z) + ", " +
+					std::to_string(current->w) + ")";
 			}
 			return {};
 		}
@@ -211,6 +248,63 @@ namespace EGE
 			return changed;
 		}
 
+		bool DrawResourceReference(
+			ResourceReferenceValue& value)
+		{
+			const std::string preview =
+				FormatValue(PropertyValue(value));
+			bool changed = false;
+			if (ImGui::BeginCombo("##Value", preview.c_str()))
+			{
+				if (ImGui::Selectable(
+						"None", value.resourceId == 0))
+				{
+					value.resourceId = 0;
+					changed = true;
+				}
+
+				const bool validType =
+					value.resourceType >=
+						static_cast<int>(Resource::model) &&
+					value.resourceType <
+						static_cast<int>(Resource::unknown);
+				if (App && App->resources && validType)
+				{
+					std::vector<const Resource*> resources;
+					App->resources->GatherResourceType(
+						resources,
+						static_cast<Resource::Type>(
+							value.resourceType));
+					for (const Resource* resource : resources)
+					{
+						if (!resource)
+							continue;
+						const char* name =
+							resource->GetUserResName();
+						const std::string label =
+							(name && *name
+								? name
+								: resource->GetFile()) +
+							std::string("##") +
+							std::to_string(resource->GetUID());
+						const bool selected =
+							value.resourceId == resource->GetUID();
+						if (ImGui::Selectable(
+								label.c_str(), selected))
+						{
+							value.resourceId =
+								resource->GetUID();
+							changed = true;
+						}
+						if (selected)
+							ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+			return changed;
+		}
+
 		bool DrawSigned(
 			const PropertyDescriptor& property,
 			std::int64_t& value)
@@ -331,6 +425,50 @@ namespace EGE
 					"##Value", components, 0.1f);
 			if (changed)
 				value = {components[0], components[1], components[2]};
+			return changed;
+		}
+
+		bool DrawVector2(
+			const PropertyDescriptor& property,
+			Vector2Value& value)
+		{
+			float components[] = {value.x, value.y};
+			const bool changed = property.attributes.range
+				? ImGui::SliderFloat2(
+					"##Value",
+					components,
+					static_cast<float>(
+						property.attributes.range->minimum),
+					static_cast<float>(
+						property.attributes.range->maximum))
+				: ImGui::DragFloat2("##Value", components, 0.1f);
+			if (changed)
+				value = {components[0], components[1]};
+			return changed;
+		}
+
+		bool DrawQuaternion(QuaternionValue& value)
+		{
+			float components[] = {
+				value.x, value.y, value.z, value.w};
+			const bool changed =
+				ImGui::DragFloat4("##Value", components, 0.01f);
+			if (changed)
+			{
+				const float length = std::sqrt(
+					components[0] * components[0] +
+					components[1] * components[1] +
+					components[2] * components[2] +
+					components[3] * components[3]);
+				if (length > 0.00001f)
+				{
+					value = {
+						components[0] / length,
+						components[1] / length,
+						components[2] / length,
+						components[3] / length};
+				}
+			}
 			return changed;
 		}
 
@@ -462,10 +600,32 @@ namespace EGE
 						value = current;
 						break;
 					}
+				case PropertyKind::ResourceReference:
+					{
+						auto current =
+							std::get<ResourceReferenceValue>(value);
+						changed = DrawResourceReference(current);
+						value = current;
+						break;
+					}
 				case PropertyKind::Vector3:
 					{
 						auto current = std::get<Vector3Value>(value);
 						changed = DrawVector3(property, current);
+						value = current;
+					break;
+				}
+				case PropertyKind::Vector2:
+					{
+						auto current = std::get<Vector2Value>(value);
+						changed = DrawVector2(property, current);
+						value = current;
+						break;
+					}
+				case PropertyKind::Quaternion:
+					{
+						auto current = std::get<QuaternionValue>(value);
+						changed = DrawQuaternion(current);
 						value = current;
 						break;
 					}

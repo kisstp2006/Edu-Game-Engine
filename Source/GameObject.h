@@ -36,6 +36,9 @@ public:
 	void OnUpdate(float dt);
 	void OnLateUpdate(float dt);
 	void OnCollision(GameObject* other);
+	void OnPhysicsEvent(
+		EGE::Physics::ContactPhase phase,
+		const EGE::Physics::CollisionInfo& info);
 	void OnStop();
 	void OnPause();
 	void OnUnPause();
@@ -44,6 +47,7 @@ public:
 	uint GetUID() const;
 
 	void RecalculateBoundingBox();
+	void InvalidateBoundingBox();
 
 	Component* CreateComponent(Component::Types type);
 	bool RemoveComponent(Component* component);
@@ -56,19 +60,25 @@ public:
 
 	float3 GetLocalRotation() const;
 	Quat GetLocalRotationQ() const;
+	Quat GetGlobalRotationQ() const;
 	float3 GetLocalScale() const;
+	float3 GetGlobalScale() const;
 
 	void SetLocalPosition(const float3& position);
+	void SetGlobalPosition(const float3& position);
 	void Move(const float3& velocity);
 	void Rotate(float angular_velocity);
 	void SetLocalRotation(const float3& XYZ_euler_rotation);
 	void SetLocalRotation(const Quat& rotation);
+	void SetGlobalRotation(const Quat& rotation);
 	void SetLocalScale(const float3& scale);
+	void SetGlobalScale(const float3& scale);
 	void SetLocalTransform(const float4x4& transform);
     void SetGlobalTransform(const float4x4& transform);
 
 	const float4x4& GetGlobalTransformation() const;
 	const float4x4& GetLocalTransform() const;
+	float4x4 GetCalculatedGlobalTransform() const;
 
 	const float* GetOpenGLGlobalTransform() const;
 
@@ -116,6 +126,7 @@ private:
 	mutable float4x4 transform_cache;
 	float4x4 transform_global;
 	bool calculated_bbox = false;
+	bool bounding_box_dirty = true;
 	bool was_dirty = true;
 	mutable bool local_trans_dirty = true;
 	float3 velocity = float3::zero;

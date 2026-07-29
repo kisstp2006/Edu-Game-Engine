@@ -9,7 +9,7 @@ namespace
 	EGE::EditorDocumentState State(
 		std::string payload,
 		uint selected = 0)
-	tter {
+	{
 		EGE::EditorDocumentState state;
 		state.documentId = "Assets/Scenes/Test.scene";
 		state.payload = std::move(payload);

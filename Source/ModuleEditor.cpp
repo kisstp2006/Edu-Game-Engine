@@ -10,6 +10,7 @@
 #include "ModuleInput.h"
 #include "ModuleResources.h"
 #include "ModuleScripting.h"
+#include "ModulePhysics3D.h"
 #include "GameObject.h"
 #include "DebugDraw.h"
 #include "Config.h"
@@ -1039,6 +1040,8 @@ void ModuleEditor::DrawSettingsWindow(
 		for (const EGE::SettingDefinition& definition :
 			category.settings)
 		{
+			if (definition.editorHidden)
+				continue;
 			const EGE::SettingValue* storedValue =
 				store.FindValue(definition.id);
 			if (!storedValue)
@@ -1175,6 +1178,83 @@ void ModuleEditor::DrawSettingsWindow(
 			}
 			ImGui::Spacing();
 			ImGui::PopID();
+		}
+
+		if (!editorSettings &&
+			category.id == "physics" &&
+			App->physics3D &&
+			store.FindValue("physics.collision_matrix_0"))
+		{
+			ImGui::Separator();
+			ImGui::Text("Collision Matrix");
+			ImGui::TextDisabled(
+				"Checked layer pairs are allowed to collide.");
+			EGE::Physics::CollisionMatrix matrix =
+				App->physics3D->GetCollisionMatrix();
+			const bool matrixVisible = ImGui::BeginChild(
+					"CollisionMatrix",
+					ImVec2(0.0f, 360.0f),
+					true,
+					ImGuiWindowFlags_HorizontalScrollbar);
+			if (matrixVisible)
+			{
+				const float labelWidth = 48.0f;
+				const float cellWidth = 28.0f;
+				ImGui::TextDisabled("Layer");
+				for (std::uint32_t layer = 0;
+					layer < EGE::Physics::CollisionLayerCount;
+					++layer)
+				{
+					ImGui::SameLine(
+						labelWidth + cellWidth * layer);
+					ImGui::TextDisabled("%u", layer);
+				}
+
+				for (std::uint32_t first = 0;
+					first < EGE::Physics::CollisionLayerCount;
+					++first)
+				{
+					ImGui::Text("%u", first);
+					for (std::uint32_t second = 0;
+						second < EGE::Physics::CollisionLayerCount;
+						++second)
+					{
+						ImGui::SameLine(
+							labelWidth + cellWidth * second);
+						if (second < first)
+						{
+							ImGui::TextDisabled("-");
+							continue;
+						}
+
+						ImGui::PushID(
+							static_cast<int>(
+								first *
+								EGE::Physics::CollisionLayerCount +
+								second));
+						bool enabled =
+							matrix.CanCollide(first, second);
+						if (ImGui::Checkbox("##pair", &enabled))
+						{
+							matrix.SetCanCollide(
+								first, second, enabled);
+							const auto& rows = matrix.GetRows();
+							store.SetValue(
+								"physics.collision_matrix_" +
+									std::to_string(first),
+								static_cast<int>(rows[first]));
+							store.SetValue(
+								"physics.collision_matrix_" +
+									std::to_string(second),
+								static_cast<int>(rows[second]));
+							feedback.clear();
+							App->ApplySettings();
+						}
+						ImGui::PopID();
+					}
+				}
+			}
+			ImGui::EndChild();
 		}
 		ImGui::Unindent();
 	}

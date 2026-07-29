@@ -2,6 +2,7 @@
 #include "../Scripting/ScriptAsset.h"
 #include "../Scripting/ScriptCoreHelpers.h"
 #include "../Scripting/ScriptMath.h"
+#include "../Scripting/ScriptPhysics.h"
 #include "../Scripting/ScriptResource.h"
 #include "../Scripting/ScriptTime.h"
 #include "../Project/VsCodeWorkspace.h"
@@ -102,6 +103,19 @@ namespace
 		if (const auto* number = std::get_if<std::uint64_t>(&value))
 			return static_cast<double>(*number);
 		return 0.0;
+	}
+
+	bool ReadBoolean(
+		const EGE::ReflectedScriptObject& object,
+		const char* name)
+	{
+		const EGE::PropertyDescriptor* property =
+			FindProperty(object, name);
+		EGE::PropertyValue value;
+		return property &&
+			property->Read(object.object, value) &&
+			std::holds_alternative<bool>(value) &&
+			std::get<bool>(value);
 	}
 
 	struct NativeSettings
@@ -735,6 +749,12 @@ int main()
 		"    [SerializeField]\n"
 		"    Color tint = Color(0.25f, 0.5f, 0.75f, 1.0f);\n"
 		"\n"
+		"    [SerializeField]\n"
+		"    Vector2 offset = Vector2(1, 2);\n"
+		"\n"
+		"    [SerializeField]\n"
+		"    Quaternion orientation = Quaternion(0, 0, 0.5f, 0.5f);\n"
+		"\n"
 		"    private float result = 0.0f;\n"
 		"\n"
 		"    void OnUpdate(float deltaTime)\n"
@@ -744,8 +764,12 @@ int main()
 		"        direction = Math::Lerp(\n"
 		"            direction, Math::Vector3Forward * 4.0f, 0.5f);\n"
 		"        tint = Math::Lerp(tint, Math::ColorWhite, 0.5f);\n"
+		"        offset = Math::Lerp(offset, Vector2(3, 4), 0.5f);\n"
+		"        orientation.Normalize();\n"
+		"        Vector3 rotated = orientation * Math::Vector3Right;\n"
 		"        result = Math::Dot(sum, Math::Vector3One) +\n"
-		"            Math::Clamp(2.5f, 0.0f, 2.0f) + unit.length;\n"
+		"            Math::Clamp(2.5f, 0.0f, 2.0f) + unit.length +\n"
+		"            rotated.length;\n"
 		"    }\n"
 		"}\n");
 
@@ -792,8 +816,14 @@ int main()
 		FindProperty(mathReflected, "direction");
 	const EGE::PropertyDescriptor* tint =
 		FindProperty(mathReflected, "tint");
+	const EGE::PropertyDescriptor* offset =
+		FindProperty(mathReflected, "offset");
+	const EGE::PropertyDescriptor* orientation =
+		FindProperty(mathReflected, "orientation");
 	EGE::PropertyValue directionValue;
 	EGE::PropertyValue tintValue;
+	EGE::PropertyValue offsetValue;
+	EGE::PropertyValue orientationValue;
 	const EGE::Vector3Value expectedDirection{0.5f, 1.0f, 3.5f};
 	const EGE::ColorValue expectedTint{0.625f, 0.75f, 0.875f, 1.0f};
 	const bool directionRead =
@@ -802,6 +832,30 @@ int main()
 	const bool tintRead =
 		tint &&
 		tint->Read(mathReflected.object, tintValue);
+	const bool offsetRead =
+		offset && offset->Read(mathReflected.object, offsetValue);
+	const bool orientationRead =
+		orientation &&
+		orientation->Read(mathReflected.object, orientationValue);
+	if (!offsetRead ||
+		!std::holds_alternative<EGE::Vector2Value>(offsetValue) ||
+		std::get<EGE::Vector2Value>(offsetValue) !=
+			EGE::Vector2Value{2.0f, 3.0f})
+	{
+		std::cerr
+			<< "Vector2 reflection state: property="
+			<< (offset != nullptr)
+			<< " kind="
+			<< (offset ? static_cast<int>(offset->kind) : -1)
+			<< " read=" << offsetRead
+			<< " value-index=" << offsetValue.index();
+		if (const auto* actual =
+			std::get_if<EGE::Vector2Value>(&offsetValue))
+		{
+			std::cerr << " actual=" << actual->x << ',' << actual->y;
+		}
+		std::cerr << '\n';
+	}
 	if (directionRead &&
 		std::holds_alternative<EGE::Vector3Value>(directionValue))
 	{
@@ -844,7 +898,27 @@ int main()
 				std::get<EGE::ColorValue>(tintValue) == expectedTint,
 			"Color math or reflection returned an unexpected value") ||
 		!Check(
-			std::abs(ReadNumber(mathReflected, "result") - 15.0) < 0.001,
+			offset &&
+				offset->kind == EGE::PropertyKind::Vector2 &&
+				offsetRead &&
+				std::get<EGE::Vector2Value>(offsetValue) ==
+					EGE::Vector2Value{2.0f, 3.0f},
+			"Vector2 math or reflection returned an unexpected value") ||
+		!Check(
+			orientation &&
+				orientation->kind == EGE::PropertyKind::Quaternion &&
+				orientationRead &&
+				std::abs(
+					std::get<EGE::QuaternionValue>(
+						orientationValue).z -
+					0.70710677f) < 0.0001f &&
+				std::abs(
+					std::get<EGE::QuaternionValue>(
+						orientationValue).w -
+					0.70710677f) < 0.0001f,
+			"Quaternion math or reflection returned an unexpected value") ||
+		!Check(
+			std::abs(ReadNumber(mathReflected, "result") - 16.0) < 0.001,
 			"Math scalar or Vector3 functions returned an unexpected value"))
 	{
 		return 1;
@@ -865,9 +939,14 @@ int main()
 		FindState(loadedMathState, "direction");
 	const EGE::PropertyState* loadedTint =
 		FindState(loadedMathState, "tint");
+	const EGE::PropertyState* loadedOffset =
+		FindState(loadedMathState, "offset");
+	const EGE::PropertyState* loadedOrientation =
+		FindState(loadedMathState, "orientation");
 	if (!Check(
-			loadedDirection && loadedTint,
-			"Vector3 and Color serialization did not retain both properties") ||
+			loadedDirection && loadedTint &&
+				loadedOffset && loadedOrientation,
+			"Math serialization did not retain all value properties") ||
 		!Check(
 			std::get<EGE::Vector3Value>(loadedDirection->value) ==
 				expectedDirection,
@@ -875,7 +954,62 @@ int main()
 		!Check(
 			std::get<EGE::ColorValue>(loadedTint->value) ==
 				expectedTint,
-			"Color JSON serialization did not round-trip"))
+			"Color JSON serialization did not round-trip") ||
+		!Check(
+			std::get<EGE::Vector2Value>(loadedOffset->value) ==
+				EGE::Vector2Value{2.0f, 3.0f},
+			"Vector2 JSON serialization did not round-trip") ||
+		!Check(
+			std::abs(
+				std::get<EGE::QuaternionValue>(
+					loadedOrientation->value).z -
+				std::get<EGE::QuaternionValue>(
+					orientationValue).z) < 0.00001f &&
+			std::abs(
+				std::get<EGE::QuaternionValue>(
+					loadedOrientation->value).w -
+				std::get<EGE::QuaternionValue>(
+					orientationValue).w) < 0.00001f,
+			"Quaternion JSON serialization did not round-trip"))
+	{
+		return 1;
+	}
+
+	const EGE::PropertyBag resourceState = {
+		{
+			"meshAsset",
+			EGE::PropertyKind::ResourceReference,
+			EGE::ResourceReferenceValue{8128, 3}},
+		{
+			"materialAsset",
+			EGE::PropertyKind::ResourceReference,
+			EGE::ResourceReferenceValue{4096, 1}}};
+	Config savedResourceProperties;
+	EGE::SavePropertyBag(
+		savedResourceProperties, "Properties", resourceState);
+	char* serializedResourceJson = nullptr;
+	savedResourceProperties.Save(&serializedResourceJson, nullptr);
+	Config loadedResourceProperties(serializedResourceJson);
+	delete[] serializedResourceJson;
+	const EGE::PropertyBag loadedResourceState =
+		EGE::LoadPropertyBag(
+			loadedResourceProperties, "Properties");
+	const EGE::PropertyState* loadedMeshResource =
+		FindState(loadedResourceState, "meshAsset");
+	const EGE::PropertyState* loadedMaterialResource =
+		FindState(loadedResourceState, "materialAsset");
+	if (!Check(
+			loadedMeshResource &&
+				std::get<EGE::ResourceReferenceValue>(
+					loadedMeshResource->value) ==
+					EGE::ResourceReferenceValue{8128, 3},
+			"Mesh resource reference did not round-trip") ||
+		!Check(
+			loadedMaterialResource &&
+				std::get<EGE::ResourceReferenceValue>(
+					loadedMaterialResource->value) ==
+					EGE::ResourceReferenceValue{4096, 1},
+			"Material resource reference did not round-trip"))
 	{
 		return 1;
 	}
@@ -888,6 +1022,10 @@ int main()
 		"    Vector3 direction = Vector3(9, 9, 9);\n"
 		"    [SerializeField]\n"
 		"    Color tint = Math::ColorBlack;\n"
+		"    [SerializeField]\n"
+		"    Vector2 offset = Math::Vector2Zero;\n"
+		"    [SerializeField]\n"
+		"    Quaternion orientation = Quaternion::Identity;\n"
 		"    private float result = -1.0f;\n"
 		"    void OnUpdate(float deltaTime) {}\n"
 		"}\n");
@@ -901,8 +1039,12 @@ int main()
 	mathReflected = mathRuntime.GetReflectedInstance(mathInstance);
 	direction = FindProperty(mathReflected, "direction");
 	tint = FindProperty(mathReflected, "tint");
+	offset = FindProperty(mathReflected, "offset");
+	orientation = FindProperty(mathReflected, "orientation");
 	directionValue = {};
 	tintValue = {};
+	offsetValue = {};
+	orientationValue = {};
 	if (!Check(
 			direction &&
 				direction->Read(mathReflected.object, directionValue) &&
@@ -914,6 +1056,24 @@ int main()
 				tint->Read(mathReflected.object, tintValue) &&
 				std::get<EGE::ColorValue>(tintValue) == expectedTint,
 			"Color state was not preserved during hot reload"))
+	{
+		return 1;
+	}
+	if (!Check(
+			offset &&
+				offset->Read(mathReflected.object, offsetValue) &&
+				std::get<EGE::Vector2Value>(offsetValue) ==
+					EGE::Vector2Value{2.0f, 3.0f},
+			"Vector2 state was not preserved during hot reload") ||
+		!Check(
+			orientation &&
+				orientation->Read(
+					mathReflected.object, orientationValue) &&
+				std::abs(
+					std::get<EGE::QuaternionValue>(
+						orientationValue).w -
+					0.70710677f) < 0.0001f,
+			"Quaternion state was not preserved during hot reload"))
 	{
 		return 1;
 	}
@@ -936,7 +1096,16 @@ int main()
 				"float z = 0);") != std::string::npos &&
 			mathLanguageServerApi.find(
 				"Color(float r = 0, float g = 0, "
-				"float b = 0, float a = 1);") != std::string::npos,
+				"float b = 0, float a = 1);") != std::string::npos &&
+			mathLanguageServerApi.find(
+				"Vector2(float x = 0, float y = 0);") !=
+					std::string::npos &&
+			mathLanguageServerApi.find(
+				"Quaternion(float x = 0, float y = 0, "
+				"float z = 0, float w = 1);") != std::string::npos &&
+			mathLanguageServerApi.find(
+				"namespace Quaternion {\n"
+				"    Quaternion Slerp(") != std::string::npos,
 			"Language-server definitions do not include the Math API"))
 	{
 		return 1;
@@ -1376,6 +1545,194 @@ int main()
 	runtime.DestroyInstance(instance);
 	runtime.Shutdown();
 	EGE::TypeRegistry::Get().ClearDomain("EngineTest");
+
+	TemporaryProject physicsProject;
+	physicsProject.WriteScript(
+		"[ScriptComponent]\n"
+		"class PhysicsProbe : EGEBehaviour\n"
+		"{\n"
+		"    int collisionEnterCount = 0;\n"
+		"    int collisionStayCount = 0;\n"
+		"    int collisionExitCount = 0;\n"
+		"    int triggerEnterCount = 0;\n"
+		"    int triggerStayCount = 0;\n"
+		"    int triggerExitCount = 0;\n"
+		"    bool dataValid = true;\n"
+		"    bool retainedInfoValid = false;\n"
+		"    private CollisionInfo@ retainedInfo;\n"
+		"\n"
+		"    void Validate(CollisionInfo@ info, bool trigger)\n"
+		"    {\n"
+		"        dataValid = dataValid && info !is null &&\n"
+		"            info.gameObject !is null &&\n"
+		"            info.selfCollider !is null &&\n"
+		"            info.collider !is null &&\n"
+		"            info.otherObjectId == 2 &&\n"
+		"            info.selfColliderId == 10 &&\n"
+		"            info.otherColliderId == 20 &&\n"
+		"            info.otherLayer == 4 &&\n"
+		"            info.point.x == 1.0f &&\n"
+		"            info.normal.y == 1.0f &&\n"
+		"            info.separation == -0.25f &&\n"
+		"            info.impulse == 3.5f &&\n"
+		"            info.isTrigger == trigger;\n"
+		"        @retainedInfo = info;\n"
+		"    }\n"
+		"\n"
+		"    void OnCollisionEnter(CollisionInfo@ info)\n"
+		"    {\n"
+		"        ++collisionEnterCount;\n"
+		"        Validate(info, false);\n"
+		"    }\n"
+		"    void OnCollisionStay(CollisionInfo@ info)\n"
+		"    {\n"
+		"        ++collisionStayCount;\n"
+		"        Validate(info, false);\n"
+		"    }\n"
+		"    void OnCollisionExit(CollisionInfo@ info)\n"
+		"    {\n"
+		"        ++collisionExitCount;\n"
+		"        Validate(info, false);\n"
+		"    }\n"
+		"    void OnTriggerEnter(CollisionInfo@ info)\n"
+		"    {\n"
+		"        ++triggerEnterCount;\n"
+		"        Validate(info, true);\n"
+		"    }\n"
+		"    void OnTriggerStay(CollisionInfo@ info)\n"
+		"    {\n"
+		"        ++triggerStayCount;\n"
+		"        Validate(info, true);\n"
+		"    }\n"
+		"    void OnTriggerExit(CollisionInfo@ info)\n"
+		"    {\n"
+		"        ++triggerExitCount;\n"
+		"        Validate(info, true);\n"
+		"    }\n"
+		"\n"
+		"    void OnUpdate(float deltaTime)\n"
+		"    {\n"
+		"        retainedInfoValid = retainedInfo !is null &&\n"
+		"            retainedInfo.isTrigger &&\n"
+		"            retainedInfo.otherObjectId == 2;\n"
+		"    }\n"
+		"}\n");
+
+	EGE::ScriptRuntime physicsRuntime;
+	std::string physicsRegistrationError;
+	if (!Check(
+			physicsRuntime.RegisterApi(
+				"Engine.Math",
+				EGE::RegisterMathApi,
+				physicsRegistrationError),
+			"Physics test Math API registration was rejected") ||
+		!Check(
+			physicsRuntime.RegisterApi(
+				"Engine.Physics",
+				EGE::RegisterPhysicsApi,
+				physicsRegistrationError),
+			"Physics API registration was rejected") ||
+		!Check(
+			physicsRuntime.Initialize(),
+			"Physics script runtime initialization failed") ||
+		!Check(
+			physicsRuntime.SetProjectRoot(physicsProject.Root()),
+			"Physics callback script did not compile"))
+	{
+		std::cerr << physicsRegistrationError << '\n';
+		for (const EGE::ScriptDiagnostic& diagnostic :
+			physicsRuntime.GetDiagnostics())
+		{
+			std::cerr
+				<< diagnostic.file.string() << ':'
+				<< diagnostic.line << ':'
+				<< diagnostic.column << ' '
+				<< diagnostic.message << '\n';
+		}
+		return 1;
+	}
+
+	const EGE::ScriptInstanceHandle physicsInstance =
+		physicsRuntime.CreateInstance("PhysicsProbe");
+	physicsRuntime.EnterPlayMode();
+	physicsRuntime.StartInstance(physicsInstance);
+
+	EGE::Physics::CollisionInfo collisionInfo;
+	collisionInfo.selfObjectId = 1;
+	collisionInfo.otherObjectId = 2;
+	collisionInfo.selfColliderId = 10;
+	collisionInfo.otherColliderId = 20;
+	collisionInfo.otherLayer = 4;
+	collisionInfo.point = float3(1.0f, 2.0f, 3.0f);
+	collisionInfo.normal = float3(0.0f, 1.0f, 0.0f);
+	collisionInfo.separation = -0.25f;
+	collisionInfo.impulse = 3.5f;
+
+	for (EGE::Physics::ContactPhase phase : {
+			EGE::Physics::ContactPhase::Enter,
+			EGE::Physics::ContactPhase::Stay,
+			EGE::Physics::ContactPhase::Exit})
+	{
+		physicsRuntime.PhysicsEventInstance(
+			physicsInstance, phase, collisionInfo);
+	}
+	collisionInfo.isTrigger = true;
+	for (EGE::Physics::ContactPhase phase : {
+			EGE::Physics::ContactPhase::Enter,
+			EGE::Physics::ContactPhase::Stay,
+			EGE::Physics::ContactPhase::Exit})
+	{
+		physicsRuntime.PhysicsEventInstance(
+			physicsInstance, phase, collisionInfo);
+	}
+	physicsRuntime.UpdateInstance(physicsInstance, 1.0f / 60.0f);
+
+	const EGE::ReflectedScriptObject reflectedPhysics =
+		physicsRuntime.GetReflectedInstance(physicsInstance);
+	if (!Check(
+			static_cast<bool>(reflectedPhysics),
+			"Physics script instance was not reflected") ||
+		!Check(
+			ReadNumber(reflectedPhysics, "collisionEnterCount") == 1.0 &&
+				ReadNumber(reflectedPhysics, "collisionStayCount") == 1.0 &&
+				ReadNumber(reflectedPhysics, "collisionExitCount") == 1.0,
+			"AngelScript collision Enter/Stay/Exit callbacks did not run") ||
+		!Check(
+			ReadNumber(reflectedPhysics, "triggerEnterCount") == 1.0 &&
+				ReadNumber(reflectedPhysics, "triggerStayCount") == 1.0 &&
+				ReadNumber(reflectedPhysics, "triggerExitCount") == 1.0,
+			"AngelScript trigger Enter/Stay/Exit callbacks did not run") ||
+		!Check(
+			ReadBoolean(reflectedPhysics, "dataValid"),
+			"AngelScript received incomplete CollisionInfo data") ||
+		!Check(
+			ReadBoolean(reflectedPhysics, "retainedInfoValid"),
+			"CollisionInfo did not remain valid after its callback"))
+	{
+		return 1;
+	}
+
+	std::ifstream physicsDefinitions(
+		physicsProject.Root() / "as.predefined");
+	const std::string physicsLanguageServerApi(
+		(std::istreambuf_iterator<char>(physicsDefinitions)),
+		std::istreambuf_iterator<char>());
+	if (!Check(
+			physicsLanguageServerApi.find(
+				"class CollisionInfo") != std::string::npos,
+			"CollisionInfo is missing from the VS Code declarations") ||
+		!Check(
+			physicsLanguageServerApi.find(
+				"void OnCollisionEnter(CollisionInfo@ info)") !=
+				std::string::npos,
+			"Physics callbacks are missing from the VS Code declarations"))
+	{
+		return 1;
+	}
+
+	physicsRuntime.LeavePlayMode();
+	physicsRuntime.DestroyInstance(physicsInstance);
+	physicsRuntime.Shutdown();
 
 	TemporaryProject brokenProject;
 	brokenProject.WriteScript("void OnStart( {");

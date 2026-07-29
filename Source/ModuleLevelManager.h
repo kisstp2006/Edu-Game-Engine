@@ -26,6 +26,7 @@ public:
 	update_status PreUpdate(float dt) override;
 	update_status Update(float dt) override;
     update_status PostUpdate(float dt) override;
+	void DrawDebug() override;
 
 	bool CleanUp() override;
 
@@ -42,6 +43,12 @@ public:
 	// Manage whole levels
 	bool CreateNewEmpty(const char* name);
 	bool Load(const char* file);
+	bool RequestLoad(const char* file, std::string* error = nullptr);
+	bool RequestReload(std::string* error = nullptr);
+	bool ProcessPendingSceneChange();
+	bool HasPendingSceneChange() const;
+	const std::string& GetLastSceneChangeError() const;
+	const std::string& GetSceneName() const;
 	bool Save(const char* file = nullptr);
 	bool CreateEmptySceneAsset(
 		const char* file,
@@ -88,6 +95,11 @@ public:
 	LightManager* 		GetLightManager() 		{ return lightManager.get(); }
     
 private:
+	enum class PendingSceneChange
+	{
+		None,
+		Load
+	};
 
 	void RecursiveTestRayBBox(const LineSegment& segment, float& dist, float3& normal, GameObject** best_candidate) const;
 	void RecursiveTestRay(const LineSegment& segment, float& dist, GameObject** best_candidate) const;
@@ -96,6 +108,7 @@ private:
 	void RecursiveFixedUpdate(GameObject* go, float dt) const;
 	void RecursiveUpdate(GameObject* go, float dt) const;
 	void RecursiveLateUpdate(GameObject* go, float dt) const;
+	void RecursiveDebugDraw(GameObject* go) const;
 	void RecursiveFlushPendingComponentRemovals(GameObject* go) const;
 	void BuildSceneConfig(
 		Config& config,
@@ -125,6 +138,10 @@ private:
 
 	std::string name;
 	std::filesystem::path scene_path;
+	PendingSceneChange pending_scene_change =
+		PendingSceneChange::None;
+	std::filesystem::path pending_scene_path;
+	std::string last_scene_change_error;
 
     std::unique_ptr<IBLData> skybox;
     std::unique_ptr<LightManager> lightManager;

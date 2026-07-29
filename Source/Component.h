@@ -5,6 +5,7 @@
 
 #include "Config.h"
 #include "Math.h"
+#include "PhysicsCollision.h"
 #include <map>
 
 class GameObject;
@@ -33,6 +34,7 @@ public:
 		Decal,
 		SpotCone,
 		Script,
+		Collider,
 		Unknown
 	};
 
@@ -63,6 +65,9 @@ public:
 	virtual void OnUpdate(float dt) {};
 	virtual void OnLateUpdate(float dt) {};
 	virtual void OnCollision(GameObject* other) {};
+	virtual void OnPhysicsEvent(
+		EGE::Physics::ContactPhase phase,
+		const EGE::Physics::CollisionInfo& info) {};
 	virtual void OnFinish() {};
 
 	virtual void OnPlay() {};
@@ -84,6 +89,7 @@ protected:
 	friend class GameObject;
 
 	void SetUID(uint value);
+	void InvalidateBoundingBox();
 
 	Types type = Types::Unknown;
 	uint uid = 0;

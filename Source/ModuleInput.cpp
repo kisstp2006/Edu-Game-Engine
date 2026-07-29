@@ -179,7 +179,7 @@ update_status ModuleInput::PreUpdate(float dt)
 		}
 	}
 
-	if(GetWindowEvent(EventWindow::WE_QUIT) == true || GetKey(SDL_SCANCODE_ESCAPE) == KEY_DOWN)
+	if (GetWindowEvent(EventWindow::WE_QUIT))
 		return UPDATE_STOP;
 
 	return UPDATE_CONTINUE;

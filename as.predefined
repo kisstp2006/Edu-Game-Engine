@@ -11,6 +11,7 @@ class EGEBehaviour {
     void OnFixedUpdate(float deltaTime);
     void OnUpdate(float deltaTime);
     void OnLateUpdate(float deltaTime);
+    void OnCollision(GameObject@ other);
     void OnDisable();
     void OnStop();
     void OnDestroy();

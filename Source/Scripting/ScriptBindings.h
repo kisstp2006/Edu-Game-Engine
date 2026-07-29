@@ -1,10 +1,12 @@
 #pragma once
 
+#include "../EngineAPI.h"
 #include "ScriptApiRegistry.h"
 
 namespace EGE
 {
-	[[nodiscard]] bool RegisterEngineBindings(
+	[[nodiscard]] EGE_API bool RegisterEngineBindings(
 		asIScriptEngine& engine,
 		std::string& error);
+	[[nodiscard]] EGE_API bool RunEngineBindingsSelfTest();
 }

@@ -316,6 +316,13 @@ void ModuleAudio::UpdateSource(ComponentAudioSource* source)
 	{
 		case ComponentAudioSource::state::playing:
 		{
+			if (ma_sound_is_playing(sound) == MA_FALSE)
+			{
+				source->current_state =
+					ComponentAudioSource::state::stopped;
+				break;
+			}
+
 			// Setup 3D attributes for this gameobject
 			ma_sound_set_spatialization_enabled(sound, source->is_2d ? MA_FALSE : MA_TRUE);
 			ma_sound_set_min_distance(sound, source->min_distance);

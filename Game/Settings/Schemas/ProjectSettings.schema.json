@@ -91,6 +91,150 @@
           "Min": -100.0,
           "Max": 100.0,
           "Step": 0.1
+        },
+        {
+          "Id": "physics.collision_matrix_0",
+          "Label": "Collision Matrix Row 0",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_1",
+          "Label": "Collision Matrix Row 1",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_2",
+          "Label": "Collision Matrix Row 2",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_3",
+          "Label": "Collision Matrix Row 3",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_4",
+          "Label": "Collision Matrix Row 4",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_5",
+          "Label": "Collision Matrix Row 5",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_6",
+          "Label": "Collision Matrix Row 6",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_7",
+          "Label": "Collision Matrix Row 7",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_8",
+          "Label": "Collision Matrix Row 8",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_9",
+          "Label": "Collision Matrix Row 9",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_10",
+          "Label": "Collision Matrix Row 10",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_11",
+          "Label": "Collision Matrix Row 11",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_12",
+          "Label": "Collision Matrix Row 12",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_13",
+          "Label": "Collision Matrix Row 13",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_14",
+          "Label": "Collision Matrix Row 14",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
+        },
+        {
+          "Id": "physics.collision_matrix_15",
+          "Label": "Collision Matrix Row 15",
+          "Type": "integer",
+          "Default": 65535,
+          "Min": 0,
+          "Max": 65535,
+          "EditorHidden": true
         }
       ]
     }

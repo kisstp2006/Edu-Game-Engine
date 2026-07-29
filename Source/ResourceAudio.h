@@ -23,6 +23,18 @@ public:
 
 	Format GetFormat() const;
 	const char* GetFormatStr() const;
+	bool GetLoop() const { return loop; }
+	float GetVolume() const { return volume; }
+	float GetPitch() const { return pitch; }
+	bool GetSpatial() const { return spatial; }
+	float GetMinimumDistance() const { return minimumDistance; }
+	float GetMaximumDistance() const { return maximumDistance; }
+
+	void SetLoop(bool value);
+	void SetVolume(float value);
+	void SetPitch(float value);
+	void SetSpatial(bool value);
+	void SetDistanceRange(float minimum, float maximum);
 
 	bool LoadInMemory() override;
     void ReleaseFromMemory () override;

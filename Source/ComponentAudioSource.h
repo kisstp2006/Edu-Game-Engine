@@ -36,6 +36,7 @@ public:
 	bool IsPaused() const;
 
 	int GetCurrentState() const;
+	void SetMaxDistance(float distance);
 
 public:
 	bool is_2d = false;

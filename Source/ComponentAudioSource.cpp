@@ -6,6 +6,8 @@
 #include "ResourceAudio.h"
 #include "GameObject.h"
 
+#include <algorithm>
+
 #include "Leaks.h"
 
 // ---------------------------------------------------------
@@ -59,39 +61,54 @@ void ComponentAudioSource::OnLoad(Config * config)
 // ---------------------------------------------------------
 bool ComponentAudioSource::SetResource(UID resource)
 {
-	bool ret = false;
+	if (resource == this->resource)
+		return resource == 0 ||
+			current_state != state::unloaded;
 
 	if(current_state != state::unloaded)
 		Unload();
 
-	if (resource != 0 && resource != this->resource)
+	this->resource = 0;
+	InvalidateBoundingBox();
+	if (resource == 0)
+		return true;
+
+	Resource* res = App->resources->Get(resource);
+	if (res != nullptr && res->GetType() == Resource::audio)
 	{
-		Resource* res = App->resources->Get(resource);
-		if (res != nullptr && res->GetType() == Resource::audio)
+		if(res->LoadToMemory() == true)
 		{
-			if(res->LoadToMemory() == true)
-			{
-				this->resource = resource;
-				game_object->RecalculateBoundingBox();
-				current_state = state::stopped;
-				ret = true;
-			}
+			this->resource = resource;
+			InvalidateBoundingBox();
+			current_state = state::stopped;
+			return true;
 		}
 	}
 
-	return ret;
+	return false;
+}
+
+void ComponentAudioSource::SetMaxDistance(float distance)
+{
+	const float clamped = std::max(distance, 0.0f);
+	if (max_distance == clamped)
+		return;
+	max_distance = clamped;
+	InvalidateBoundingBox();
 }
 
 // ---------------------------------------------------------
 void ComponentAudioSource::Unload()
 {
 	// TODO: still not a formal way to unload resources
-	const ResourceAudio* res = (const ResourceAudio*) GetResource();
+	ResourceAudio* res = static_cast<ResourceAudio*>(
+		const_cast<Resource*>(GetResource()));
 	if (res != nullptr && res->sound != nullptr)
 	{
 		App->audio->Unload(res->sound);
-		current_state = state::unloaded;
+		res->sound = nullptr;
 	}
+	current_state = state::unloaded;
 }
 
 // ---------------------------------------------------------
@@ -146,8 +163,12 @@ bool ComponentAudioSource::UnPause()
 // ---------------------------------------------------------
 void ComponentAudioSource::Stop()
 {
-	if (current_state == state::playing)
+	if (current_state != state::unloaded &&
+		current_state != state::stopped &&
+		current_state != state::waiting_to_stop)
+	{
 		current_state = state::waiting_to_stop;
+	}
 }
 
 // ---------------------------------------------------------

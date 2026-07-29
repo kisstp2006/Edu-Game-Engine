@@ -8,6 +8,9 @@
 #include <map>
 #include <string>
 
+class asIScriptObject;
+class asITypeInfo;
+
 class ComponentScript final : public Component
 {
 public:
@@ -25,6 +28,9 @@ public:
 	void OnUpdate(float deltaTime) override;
 	void OnLateUpdate(float deltaTime) override;
 	void OnCollision(GameObject* other) override;
+	void OnPhysicsEvent(
+		EGE::Physics::ContactPhase phase,
+		const EGE::Physics::CollisionInfo& info) override;
 	void OnStop() override;
 	void RemapSerializedReferences(
 		const std::map<uint, uint>& gameObjectIds,
@@ -39,6 +45,8 @@ public:
 	void RefreshScriptReference();
 	[[nodiscard]] EGE::ScriptInstanceHandle GetInstanceHandle() const;
 	[[nodiscard]] bool IsBound() const;
+	[[nodiscard]] asIScriptObject* AcquireScriptObject(
+		const asITypeInfo& requestedType) const;
 
 private:
 	[[nodiscard]] EGE::ScriptRuntime* GetRuntime() const;

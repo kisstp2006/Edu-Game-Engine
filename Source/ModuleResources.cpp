@@ -179,8 +179,12 @@ namespace
 	}
 }
 
-ModuleResources::ModuleResources(bool start_enabled) : Module("Resource Manager", start_enabled), asset_folder(ASSETS_FOLDER)
+ModuleResources::ModuleResources(bool start_enabled)
+	: Module("Resource Manager", start_enabled),
+	  asset_folder(ASSETS_FOLDER),
+	  default_material(std::make_unique<ResourceMaterial>(0))
 {
+	default_material->SetUserResName("Default Material");
 }
 
 // Destructor
@@ -205,6 +209,12 @@ bool ModuleResources::Init(Config* config)
 
 bool ModuleResources::Start(Config * config)
 {
+	if (!default_material)
+	{
+		default_material = std::make_unique<ResourceMaterial>(0);
+		default_material->SetUserResName("Default Material");
+	}
+
 	// Load preset for checkers texture
 	checkers = (ResourceTexture*) CreateNewResource(Resource::Type::texture, 2);
 	checkers->LoadCheckers();
@@ -220,14 +230,12 @@ bool ModuleResources::Start(Config * config)
     LoadDefaultBlueNoise();
 	LoadDefaultSkybox();
     LoadDefaultSphere();
-	LoadDefaultBox();
+	LoadDefaultCube();
 	LoadDefaultPlane();
     LoadDefaultCylinder();
     LoadDefaultCone();
     LoadDefaultLUT();
     //LoadDefaultRedImage();
-
-	//LoadDefaultBox();
 
 	return true;
 }
@@ -238,6 +246,7 @@ bool ModuleResources::CleanUp()
 	LOG("Unloading Resource Manager");
 
 	SaveResources();
+	default_material.reset();
 
 	for (map<UID, Resource*>::iterator it = resources.begin(); it != resources.end(); ++it)
 		RELEASE(it->second);
@@ -1549,10 +1558,10 @@ bool ModuleResources::LoadDefaultRedImage()
     return false;
 }
 
-bool ModuleResources::LoadDefaultBox()
+bool ModuleResources::LoadDefaultCube()
 {
 	cube = static_cast<ResourceMesh*>(
-		Get(ResourceMesh::LoadCube("DefaultBox", 1.0f, UID(8))));
+		Get(ResourceMesh::LoadCube("DefaultCube", 1.0f, UID(10))));
 
 	return cube != nullptr;
 }

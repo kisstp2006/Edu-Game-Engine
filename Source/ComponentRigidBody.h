@@ -5,17 +5,18 @@
 
 #include "Component.h"
 #include "Math.h"
+#include "PhysicsCollisionSettings.h"
+#include "PhysicsRigidBodyDefaults.h"
 #include <LinearMath/btMotionState.h>
 #include <LinearMath/btTransform.h>
 
 class btRigidBody;
+class ComponentCollider;
 
 class ComponentRigidBody : public Component, public btMotionState
 {
 	friend class ModulePhysics3D;
 public:
-	static constexpr int PhysicsUserIndex = 0x45474552;
-
 	enum BodyType
 	{
 		body_sphere,
@@ -83,12 +84,20 @@ public:
 	void SetBoxCenter(const float3& value);
 	const float3& GetBoxHalfExtents() const;
 	void SetBoxHalfExtents(const float3& value);
+	const float3& GetBoxRotation() const;
+	void SetBoxRotation(const float3& eulerRadians);
 	const float3& GetCapsuleStart() const;
 	void SetCapsuleStart(const float3& value);
 	const float3& GetCapsuleEnd() const;
 	void SetCapsuleEnd(const float3& value);
 	float GetCapsuleRadius() const;
 	void SetCapsuleRadius(float value);
+	bool IsTrigger() const;
+	void SetTrigger(bool value);
+	std::uint32_t GetCollisionLayer() const;
+	void SetCollisionLayer(std::uint32_t value);
+	std::uint32_t GetCollisionMask() const;
+	void SetCollisionMask(std::uint32_t value);
 
 	bool HasRuntimeBody() const;
 	float3 GetLinearVelocity() const;
@@ -121,27 +130,32 @@ public:
 	void DrawEditor();
 
 private:
-	void ResetShapes();
+	[[nodiscard]] ComponentCollider* GetPrimaryCollider() const;
+	[[nodiscard]] ComponentCollider* EnsurePrimaryCollider();
 	void CreateBody();
 	void ApplyBodyConfiguration();
-	[[nodiscard]] float3 GetAbsoluteGlobalScale() const;
+	void SynchronizeTriggerBody();
+	[[nodiscard]] float3 GetGlobalScale() const;
+	[[nodiscard]] short GetCollisionGroupBits() const;
 
 private:
 
 	BodyBehaviour behaviour = BodyBehaviour::dynamic;
-	BodyType body_type = BodyType::body_sphere;
 
-	Sphere sphere;
-	OBB box;
-	Capsule capsule;
+	EGE::Physics::CollisionSettings collision_settings;
 
 	btRigidBody* body = nullptr;
-	float mass = 1.0f;
-	float restitution = 1.0f;
-	float friction = 0.5f;
-	float rolling_friction = 0.0f;
-	float linear_damping = 0.0f;
-	float angular_damping = 0.0f;
+	btRigidBody* trigger_body = nullptr;
+	float mass = EGE::Physics::RigidBodyDefaults::Mass;
+	float restitution =
+		EGE::Physics::RigidBodyDefaults::Restitution;
+	float friction = EGE::Physics::RigidBodyDefaults::Friction;
+	float rolling_friction =
+		EGE::Physics::RigidBodyDefaults::RollingFriction;
+	float linear_damping =
+		EGE::Physics::RigidBodyDefaults::LinearDamping;
+	float angular_damping =
+		EGE::Physics::RigidBodyDefaults::AngularDamping;
 	float3 gravity = float3(0.0f, -10.0f, 0.0f);
 	bool use_world_gravity = true;
 	float3 linear_factor = float3::one;

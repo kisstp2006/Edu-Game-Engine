@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <list>
+#include <limits>
 
 class AnimController;
 class ResourceStateMachine;
@@ -29,6 +30,7 @@ public:
 	bool                        SetResource     (UID uid);
     const ResourceStateMachine* GetResource     () const;
     ResourceStateMachine*       GetResource     ();
+    UID                         GetResourceUID  () const { return resource; }
 
     bool                        GetDebugDraw    () const {return debug_draw;}
     void                        SetDebugDraw    (bool enable) { debug_draw = enable; }
@@ -36,23 +38,34 @@ public:
     static Types                GetClassType    () { return Animation; }
 
     HashString                  GetActiveNode   () const;
-    void                        SendTrigger     (const HashString& trigger);
+    bool                        IsPlaying       () const;
+    float                       GetSpeed        () const { return speed; }
+    void                        SetSpeed        (float value);
 
-    void                        ResetState      ();
+    bool                        PlayDefault     ();
+    bool                        PlayState       (
+        const HashString& state,
+        uint blendMilliseconds = 0);
+    bool                        SendTrigger     (const HashString& trigger);
+    bool                        ResetState      ();
+    void                        StopPlayback    ();
+    bool                        IsInState       (const HashString& state) const;
 
     EditorContext*              GetEditorContext();
 
 private:
 
     void                        UpdateGO        (GameObject* go);
-    void                        PlayNode        (const HashString& node, uint blend);
-    void                        PlayNode        (uint node_idx, uint blend);
+    bool                        PlayNode        (const HashString& node, uint blend);
+    bool                        PlayNode        (uint node_idx, uint blend);
 
 private:
 
     UID                      resource    = 0;
     AnimController*          controller  = nullptr;
-    unsigned                 active_node = 0;
+    unsigned                 active_node =
+        (std::numeric_limits<unsigned>::max)();
+    float                    speed       = 1.0f;
     bool                     debug_draw  = false;
     EditorContext*           context     = nullptr;
     std::vector<Component*>  tmp_components;

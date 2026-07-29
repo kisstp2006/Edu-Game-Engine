@@ -117,6 +117,19 @@ void AnimController::Stop()
     }
 }
 
+bool AnimController::IsPlaying() const
+{
+    if (!current || !App || !App->resources)
+        return false;
+    const ResourceAnimation* animation =
+        static_cast<const ResourceAnimation*>(
+            App->resources->Get(current->clip));
+    if (!animation || animation->GetDuration() <= 0.0f)
+        return false;
+    return current->loop ||
+        current->time < animation->GetDuration();
+}
+
 void AnimController::ReleaseInstance(Instance* instance)
 {
 	do
@@ -134,7 +147,8 @@ std::span<const float> AnimController::GetWeights(const std::string& morph_name)
     if (current != nullptr)
     {
         const ResourceAnimation* animation = static_cast<ResourceAnimation*>(App->resources->Get(current->clip));
-        
+        if (!animation)
+            return std::span<const float>(tmpWeights0);
         const ResourceAnimation::MorphChannel* morph_channel = animation->GetMorphChannel(morph_name);
         if (morph_channel)
         {
@@ -206,16 +220,36 @@ bool AnimController::GetWeightsInstance(Instance* instance, const std::string& m
             {
                 assert(instance->fade_duration > 0.0f);
 
-                SDL_assert(static_cast<ResourceAnimation*>(App->resources->Get(instance->next->clip))->GetMorphChannel(morph_name)->numTargets == num_weights);
-                tmpWeights1.resize(num_weights);
-
-                if (GetWeightsInstance(instance->next, morph_name, tmpWeights1.data(), num_weights))
+                const ResourceAnimation* nextAnimation =
+                    static_cast<const ResourceAnimation*>(
+                        App->resources->Get(instance->next->clip));
+                const ResourceAnimation::MorphChannel* nextChannel =
+                    nextAnimation
+                        ? nextAnimation->GetMorphChannel(morph_name)
+                        : nullptr;
+                if (nextChannel &&
+                    nextChannel->numTargets == num_weights)
                 {
-                    float blend_lambda = float(instance->fade_time) / float(instance->fade_duration);
-
-                    for (uint i = 0; i < uint(tmpWeights1.size()); ++i)
+                    tmpWeights1.resize(num_weights);
+                    if (GetWeightsInstance(
+                            instance->next,
+                            morph_name,
+                            tmpWeights1.data(),
+                            num_weights))
                     {
-                        weights[i] = Interpolate(tmpWeights1[i], weights[i], blend_lambda);
+                        const float blend_lambda =
+                            float(instance->fade_time) /
+                            float(instance->fade_duration);
+
+                        for (uint i = 0;
+                            i < uint(tmpWeights1.size());
+                            ++i)
+                        {
+                            weights[i] = Interpolate(
+                                tmpWeights1[i],
+                                weights[i],
+                                blend_lambda);
+                        }
                     }
                 }
             }

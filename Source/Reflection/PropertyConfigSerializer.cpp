@@ -46,11 +46,33 @@ namespace EGE
 					std::to_string(value->componentId).c_str());
 			}
 			else if (const auto* value =
+				std::get_if<ResourceReferenceValue>(&property.value))
+			{
+				entry.AddString(
+					"ResourceUID",
+					std::to_string(value->resourceId).c_str());
+				entry.AddInt("ResourceType", value->resourceType);
+			}
+			else if (const auto* value =
+				std::get_if<Vector2Value>(&property.value))
+			{
+				entry.AddFloat("X", value->x);
+				entry.AddFloat("Y", value->y);
+			}
+			else if (const auto* value =
 				std::get_if<Vector3Value>(&property.value))
 			{
 				entry.AddFloat("X", value->x);
 				entry.AddFloat("Y", value->y);
 				entry.AddFloat("Z", value->z);
+			}
+			else if (const auto* value =
+				std::get_if<QuaternionValue>(&property.value))
+			{
+				entry.AddFloat("X", value->x);
+				entry.AddFloat("Y", value->y);
+				entry.AddFloat("Z", value->z);
+				entry.AddFloat("W", value->w);
 			}
 			else if (const auto* value =
 				std::get_if<ColorValue>(&property.value))
@@ -170,11 +192,37 @@ namespace EGE
 							objectId, componentId};
 						break;
 					}
+				case PropertyKind::ResourceReference:
+					{
+						std::uint64_t resourceId = 0;
+						const char* text =
+							entry.GetString("ResourceUID", "0");
+						std::from_chars(
+							text,
+							text + std::char_traits<char>::length(text),
+							resourceId);
+						value = ResourceReferenceValue{
+							resourceId,
+							entry.GetInt("ResourceType", 0)};
+						break;
+					}
 				case PropertyKind::Vector3:
 					value = Vector3Value{
 						entry.GetFloat("X", 0.0f),
 						entry.GetFloat("Y", 0.0f),
 						entry.GetFloat("Z", 0.0f)};
+					break;
+				case PropertyKind::Vector2:
+					value = Vector2Value{
+						entry.GetFloat("X", 0.0f),
+						entry.GetFloat("Y", 0.0f)};
+					break;
+				case PropertyKind::Quaternion:
+					value = QuaternionValue{
+						entry.GetFloat("X", 0.0f),
+						entry.GetFloat("Y", 0.0f),
+						entry.GetFloat("Z", 0.0f),
+						entry.GetFloat("W", 1.0f)};
 					break;
 				case PropertyKind::Color:
 					value = ColorValue{

@@ -5,6 +5,9 @@
 #include "ResourceModel.h"
 #include "HashString.h"
 
+#include <cstddef>
+#include <vector>
+
 class ResourceMesh;
 class ResourceMaterial;
 class BatchManager;
@@ -29,9 +32,19 @@ public:
     UID                     GetMeshUID              () const { return mesh_resource; }
 
     bool                    SetMaterialRes          (UID uid);
+    bool                    SetMaterialRes          (std::size_t index, UID uid);
+    bool                    AddMaterialRes          (UID uid = 0);
+    bool                    RemoveMaterialRes       (std::size_t index);
+    void                    ClearMaterialResources  ();
+    void                    SetMaterialCount        (std::size_t count);
     const ResourceMaterial* GetMaterialRes          () const;
     ResourceMaterial*       GetMaterialRes          ();
-    UID                     GetMaterialUID          () const {return material_resource; }
+    const ResourceMaterial* GetMaterialRes          (std::size_t index) const;
+    ResourceMaterial*       GetMaterialRes          (std::size_t index);
+    UID                     GetMaterialUID          () const;
+    UID                     GetMaterialUID          (std::size_t index) const;
+    std::size_t             GetMaterialCount        () const;
+    const std::vector<UID>&  GetMaterialUIDs         () const;
 
     bool                    SetSkinInfo             (const ResourceModel::Skin& skin, GameObject** gos);
 
@@ -83,7 +96,7 @@ private:
     bool                     visible            = true;
 
     // material
-    UID                      material_resource  = 0;
+    std::vector<UID>         material_resources { 0 };
     bool                     cast_shadows       = true;
     bool                     recv_shadows       = true;
     bool                     debug_draw_tangent = false;

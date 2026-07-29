@@ -990,6 +990,8 @@ namespace EGE
 			error = "Could not register the Math API.";
 			return false;
 		}
+		if (!RegisterExtendedMathApi(engine, error))
+			return false;
 		return true;
 	}
 }

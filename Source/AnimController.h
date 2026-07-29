@@ -33,6 +33,7 @@ public:
 
 	void                    Play                (UID clip, bool loop, unsigned fade_time);
 	void                    Stop                ();
+    bool                    IsPlaying           () const;
 
     float                   GetSpeed            () const { return current ? current->speed : 0.0f; }
     void                    SetSpeed            (float speed) { if(current) current->speed = speed; }

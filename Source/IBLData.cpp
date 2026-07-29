@@ -38,7 +38,12 @@ void IBLData::Load(const Config& config)
     }
     else
     {
-        SetEnvironmentRes(App->resources->GetDefaultSkybox()->GetUID());
+        const ResourceTexture* defaultSkybox =
+            App && App->resources
+                ? App->resources->GetDefaultSkybox()
+                : nullptr;
+        if (defaultSkybox)
+            SetEnvironmentRes(defaultSkybox->GetUID());
     }
 }
 

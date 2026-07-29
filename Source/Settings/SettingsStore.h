@@ -37,6 +37,7 @@ namespace EGE
 		double step = 1.0;
 		bool hasRange = false;
 		bool restartRequired = false;
+		bool editorHidden = false;
 		std::vector<SettingOption> options;
 	};
 

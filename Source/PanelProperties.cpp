@@ -11,6 +11,7 @@
 #include "ComponentCamera.h"
 #include "ComponentPath.h"
 #include "ComponentRigidBody.h"
+#include "ComponentCollider.h"
 #include "ComponentSteering.h"
 #include "ComponentMeshRenderer.h"
 #include "ComponentAnimation.h"
@@ -1111,6 +1112,16 @@ void PanelProperties::DrawGameObjectSelection(
 // ---------------------------------------------------------
 void PanelProperties::DrawGameObject(GameObject* go, Component* component)
 {
+	const auto addComponent = [go](Component::Types type)
+	{
+		Component* added = go ? go->CreateComponent(type) : nullptr;
+		if (added && App && App->IsPlay())
+		{
+			added->OnStart();
+			added->OnPlay();
+		}
+	};
+
     if (ImGui::BeginMenu("Options"))
     {
         if (ImGui::MenuItem("Reset Transform", nullptr, nullptr, (go != nullptr)))
@@ -1120,43 +1131,49 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
             go->SetLocalRotation(Quat::identity);
         }
 
-        static_assert(Component::Types::Unknown == 17, "code needs update");
+        static_assert(Component::Types::Unknown == 18, "code needs update");
         if (ImGui::BeginMenu("New Component", (go != nullptr)))
         {
             if (ImGui::MenuItem("Audio Listener"))
-                go->CreateComponent(Component::Types::AudioListener);
+                addComponent(Component::Types::AudioListener);
             if (ImGui::MenuItem("Audio Source"))
-                go->CreateComponent(Component::Types::AudioSource);
+                addComponent(Component::Types::AudioSource);
 			if (ImGui::MenuItem("MeshRenderer"))
-				go->CreateComponent(Component::Types::MeshRenderer);
+				addComponent(Component::Types::MeshRenderer);
             if (ImGui::MenuItem("Camera"))
-                go->CreateComponent(Component::Types::Camera);
-            if (ImGui::MenuItem("RigidBody"))
-                go->CreateComponent(Component::Types::RigidBody);
+                addComponent(Component::Types::Camera);
+            if (ImGui::MenuItem(
+					"RigidBody",
+					nullptr,
+					nullptr,
+					!go->HasComponent(Component::Types::RigidBody)))
+                addComponent(Component::Types::RigidBody);
+			if (ImGui::MenuItem("Collider"))
+				addComponent(Component::Types::Collider);
             if (ImGui::MenuItem("Animation"))
-                go->CreateComponent(Component::Types::Animation);
+                addComponent(Component::Types::Animation);
             if (ImGui::MenuItem("Steering"))
-                go->CreateComponent(Component::Types::Steering);
+                addComponent(Component::Types::Steering);
             if (ImGui::MenuItem("Path"))
-                go->CreateComponent(Component::Types::Path);
+                addComponent(Component::Types::Path);
 			if (ImGui::MenuItem("RootMotion"))
-				go->CreateComponent(Component::Types::RootMotion);
+				addComponent(Component::Types::RootMotion);
 			if (ImGui::MenuItem("SimpleCharacter"))
-				go->CreateComponent(Component::Types::CharacterController);
+				addComponent(Component::Types::CharacterController);
 			if (ImGui::MenuItem("ParticleSystem"))
-				go->CreateComponent(Component::Types::ParticleSystem);
+				addComponent(Component::Types::ParticleSystem);
 			if (ImGui::MenuItem("Trail"))
-				go->CreateComponent(Component::Types::Trail);
+				addComponent(Component::Types::Trail);
             if (ImGui::MenuItem("Line"))
-                go->CreateComponent(Component::Types::Line);
+                addComponent(Component::Types::Line);
 			if (ImGui::MenuItem("Grass"))
-				go->CreateComponent(Component::Types::Grass);
+				addComponent(Component::Types::Grass);
 			if (ImGui::MenuItem("Decal"))
-				go->CreateComponent(Component::Types::Decal);
+				addComponent(Component::Types::Decal);
             if (ImGui::MenuItem("SpotCone"))
-                go->CreateComponent(Component::Types::SpotCone);
+                addComponent(Component::Types::SpotCone);
 			if (ImGui::MenuItem("Script"))
-				go->CreateComponent(Component::Types::Script);
+				addComponent(Component::Types::Script);
             ImGui::EndMenu();
         }
 
@@ -1223,7 +1240,7 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
         }
 
         // Iterate all components and draw
-        static_assert(Component::Types::Unknown == 17, "code needs update");
+        static_assert(Component::Types::Unknown == 18, "code needs update");
         for (list<Component*>::iterator it = go->components.begin(); it != go->components.end(); ++it)
         {
             ImGui::PushID(*it);
@@ -1246,6 +1263,9 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
                     case Component::Types::RigidBody:
                         ((ComponentRigidBody*)(*it))->DrawEditor();
                         break;
+					case Component::Types::Collider:
+						static_cast<ComponentCollider*>(*it)->DrawEditor();
+						break;
                     case Component::Types::Animation:
                         DrawAnimationComponent(static_cast<ComponentAnimation*>(*it));
                         break;
@@ -1473,6 +1493,8 @@ UID PanelProperties::PickResource(UID resource, int type)
 	if (ImGui::BeginPopup("Load Resource"))
 	{
         ret = DrawResourceType((Resource::Type) type, false);
+        if (ret != 0)
+            ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
 	}
 
@@ -1697,44 +1719,54 @@ void PanelProperties::DrawBatchProperties(ComponentMeshRenderer* component)
 
 void PanelProperties::DrawMeshRendererComponent(ComponentMeshRenderer* component)
 {
-    // Mesh
+    ImGui::Separator();
+    ImGui::TextDisabled("MESH");
+    ImGui::PushID("MeshResource");
+    UID selectedResource =
+        PickResource(component->GetMeshUID(), Resource::mesh);
+    if (selectedResource != 0)
+        component->SetMeshRes(selectedResource);
+    if (component->GetMeshUID() != 0)
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Clear"))
+            component->SetMeshRes(0);
+    }
+    ImGui::PopID();
 
-	const ResourceMesh* res = component->GetMeshRes();
+	const ResourceMesh* mesh = component->GetMeshRes();
+    DrawMesh(mesh);
 
-    DrawMesh(res);
-
-    DrawBatchProperties(component);
+    if (mesh)
+        DrawBatchProperties(component);
 
     bool visible = component->GetVisible();
     if (ImGui::Checkbox("Visible", &visible))
-    {
         component->SetVisible(visible);
-    }
 
-    if (ImGui::CollapsingHeader("Morph Targets", 0))
+    if (mesh &&
+        mesh->GetNumMorphTargets() > 0 &&
+        ImGui::CollapsingHeader("Morph Targets"))
     {
-        for (uint i = 0; i < res->GetNumMorphTargets(); ++i)
+        for (uint index = 0;
+            index < mesh->GetNumMorphTargets();
+            ++index)
         {
-            float weight = component->GetMorphTargetWeight(i);
-
-            char tmp[128];
-            sprintf_s(tmp, 127, "Morph %d", i);
-
-            if (ImGui::DragFloat(tmp, &weight, 0.01f, 0.0f, 1.0f))
+            float weight =
+                component->GetMorphTargetWeight(index);
+            const std::string label =
+                "Morph " + std::to_string(index);
+            if (ImGui::DragFloat(
+                    label.c_str(),
+                    &weight,
+                    0.01f,
+                    0.0f,
+                    1.0f))
             {
-                component->SetMorphTargetWeight(i, weight);
+                component->SetMorphTargetWeight(index, weight);
             }
         }
     }
-
-    UID new_res = PickResourceModal(Resource::mesh);
-
-    if (new_res > 0)
-    {
-        component->SetMeshRes(new_res);
-    }
-
-    ImGui::Separator();
 
     const char* names[RENDER_COUNT] = { "Opaque", "Transparent" };
 
@@ -1759,20 +1791,63 @@ void PanelProperties::DrawMeshRendererComponent(ComponentMeshRenderer* component
     }
 
     ImGui::Separator();
-
-    // Material
-
-    ResourceMaterial* mat_res = component->GetMaterialRes();
-
-    new_res = PickResourceModal(Resource::material);
-
-    if(new_res > 0)
+    ImGui::TextDisabled("MATERIALS");
+    int materialCount = static_cast<int>(
+        component->GetMaterialCount());
+    if (ImGui::DragInt(
+            "Size",
+            &materialCount,
+            0.1f,
+            1,
+            64))
     {
-		component->SetMaterialRes(new_res);
+        component->SetMaterialCount(
+            static_cast<std::size_t>(
+                std::clamp(materialCount, 1, 64)));
     }
-    else if(mat_res)
-	{
-		DrawMaterialResource(mat_res, component->GetMeshRes());
+    bool removeMaterial = false;
+    std::size_t removeIndex = 0;
+    for (std::size_t index = 0;
+        index < component->GetMaterialCount();
+        ++index)
+    {
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::Text("Element %zu", index);
+        ImGui::Indent();
+        const UID materialUid =
+            component->GetMaterialUID(index);
+        selectedResource =
+            PickResource(materialUid, Resource::material);
+        if (selectedResource != 0)
+            component->SetMaterialRes(index, selectedResource);
+
+        ImGui::SameLine();
+        if (ImGui::Button(
+                index == 0 ? "Clear Slot" : "Remove"))
+        {
+            if (index == 0)
+                component->SetMaterialRes(index, 0);
+            else
+            {
+                removeMaterial = true;
+                removeIndex = index;
+            }
+        }
+        ImGui::Unindent();
+        ImGui::PopID();
+    }
+    if (removeMaterial)
+        component->RemoveMaterialRes(removeIndex);
+
+    if (ImGui::Button("Add Material"))
+        component->AddMaterialRes();
+
+    ResourceMaterial* primaryMaterial =
+        component->GetMaterialRes();
+    if (primaryMaterial &&
+        ImGui::CollapsingHeader("Primary Material Properties"))
+    {
+        DrawMaterialResource(primaryMaterial, component->GetMeshRes());
     }
 }
 
@@ -1799,7 +1874,16 @@ void PanelProperties::DrawAudioSourceComponent(ComponentAudioSource * component)
 	ImGui::SliderFloat("Fade In", (float*)&component->fade_in, 0.0f, 10.0f);
 	ImGui::SliderFloat("Fade Out", (float*)&component->fade_out, 0.0f, 10.0f);
 	ImGui::DragFloat("Min Distance", (float*)&component->min_distance, 0.1f, 0.1f, 10000.0f);
-	ImGui::DragFloat("Max Distance", (float*)&component->max_distance, 0.1f, 0.1f, 10000.0f);
+	float maxDistance = component->max_distance;
+	if (ImGui::DragFloat(
+			"Max Distance",
+			&maxDistance,
+			0.1f,
+			0.1f,
+			10000.0f))
+	{
+		component->SetMaxDistance(maxDistance);
+	}
 	ImGui::SliderInt("Cone In", (int*)&component->cone_angle_in, 0, 360);
 	ImGui::SliderInt("Cone Out", (int*)&component->cone_angle_out, 0, 360);
 	ImGui::SliderFloat("Vol Out Cone", (float*)&component->out_cone_vol, 0.0f, 1.0f);
@@ -3129,6 +3213,7 @@ void PanelProperties::DrawParticleSystemComponent(ComponentParticleSystem* compo
 UID PanelProperties::DrawResourceType(Resource::Type type, bool opened)
 {
     static UID selected = 0;
+    UID chosen = 0;
 	vector<const Resource*> resources;
 
 	static const char* titles[] = {
@@ -3139,31 +3224,26 @@ UID PanelProperties::DrawResourceType(Resource::Type type, bool opened)
     if (open_tree)
     {
         ImGui::PushStyleColor(ImGuiCol_Text, IMGUI_LIGHT_GREY);
-        bool remove = false;
         App->resources->GatherResourceType(resources, type);
-        for (vector<const Resource*>::const_iterator it = resources.begin(); !remove && it != resources.end(); ++it)
+        for (const Resource* info : resources)
         {
-            const Resource* info = (*it);
-
             ImGui::PushID(info->GetExportedFile());
-
-            if (ImGui::TreeNodeEx(info->GetUserResName(), info->GetUID() == selected ? ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_Leaf))
+            if (ImGui::Selectable(
+                    info->GetUserResName(),
+                    info->GetUID() == selected))
             {
-                if (ImGui::IsItemClicked(0) )
-                {
-                    selected = info->GetUID();
-                }
+                selected = info->GetUID();
+                chosen = selected;
+            }
 
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::BeginTooltip();
-                    ImGui::Text("UID: %llu", info->GetUID());
-                    ImGui::Text("Source: %s", info->GetFile());
-                    ImGui::Text("Exported: %s", info->GetExportedFile());
-                    ImGui::Text("References: %u", info->CountReferences());
-                    ImGui::EndTooltip();
-                }
-                ImGui::TreePop();
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::BeginTooltip();
+                ImGui::Text("UID: %llu", info->GetUID());
+                ImGui::Text("Source: %s", info->GetFile());
+                ImGui::Text("Exported: %s", info->GetExportedFile());
+                ImGui::Text("References: %u", info->CountReferences());
+                ImGui::EndTooltip();
             }
             ImGui::PopID();
         }
@@ -3172,6 +3252,6 @@ UID PanelProperties::DrawResourceType(Resource::Type type, bool opened)
         ImGui::PopStyleColor();
     }
 
-    return ImGui::IsMouseDoubleClicked(0) ? selected : 0;
+    return chosen;
 }
 

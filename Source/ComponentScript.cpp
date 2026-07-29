@@ -95,6 +95,20 @@ void ComponentScript::OnCollision(GameObject* other)
 		runtime->CollisionInstance(instanceHandle_, other->GetUID());
 }
 
+void ComponentScript::OnPhysicsEvent(
+	EGE::Physics::ContactPhase phase,
+	const EGE::Physics::CollisionInfo& info)
+{
+	if (EGE::ScriptRuntime* runtime = GetRuntime();
+		runtime && instanceHandle_)
+	{
+		runtime->PhysicsEventInstance(
+			instanceHandle_,
+			phase,
+			info);
+	}
+}
+
 void ComponentScript::OnStop()
 {
 	if (EGE::ScriptRuntime* runtime = GetRuntime(); runtime && instanceHandle_)
@@ -209,6 +223,16 @@ bool ComponentScript::IsBound() const
 	const EGE::ScriptRuntime* runtime = GetRuntime();
 	return runtime && instanceHandle_ &&
 		runtime->IsInstanceBound(instanceHandle_);
+}
+
+asIScriptObject* ComponentScript::AcquireScriptObject(
+	const asITypeInfo& requestedType) const
+{
+	EGE::ScriptRuntime* runtime = GetRuntime();
+	return runtime && instanceHandle_
+		? runtime->AcquireInstanceObject(
+			instanceHandle_, requestedType)
+		: nullptr;
 }
 
 EGE::ScriptRuntime* ComponentScript::GetRuntime() const

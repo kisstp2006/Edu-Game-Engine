@@ -18,6 +18,8 @@
 
 #include "Leaks.h"
 
+#include <algorithm>
+
 ComponentMeshRenderer::ComponentMeshRenderer(GameObject* go) : Component(go, Types::MeshRenderer)
 {
 }
@@ -26,21 +28,32 @@ ComponentMeshRenderer::~ComponentMeshRenderer()
 {
     if (batch_index != UINT_MAX)
     {
-        App->renderer->GetBatchManager()->Remove(this);
+        if (App && App->renderer &&
+            App->renderer->GetBatchManager())
+        {
+            App->renderer->GetBatchManager()->Remove(this);
+        }
         batch_index = UINT_MAX;
     }
 
-	Resource* res = App->resources->Get(mesh_resource);
+	Resource* res =
+        App && App->resources
+            ? App->resources->Get(mesh_resource)
+            : nullptr;
 	if (res != nullptr)
 	{
 		res->Release();
 	}
 
-	res = App->resources->Get(material_resource);
-	if (res != nullptr)
-	{
-		res->Release();
-	}
+    for (UID material : material_resources)
+    {
+        res =
+            App && App->resources
+                ? App->resources->Get(material)
+                : nullptr;
+        if (res != nullptr)
+            res->Release();
+    }
 
     delete [] node_cache;
     node_cache = nullptr;
@@ -53,7 +66,11 @@ void ComponentMeshRenderer::OnSave(Config& config) const
 	config.AddUInt(
 		"Root", rootGO ? rootGO->GetUID() : root_go_uid);
 
-	config.AddUID("MaterialResource", material_resource);
+	config.AddUID("MaterialResource", GetMaterialUID());
+    config.AddArrayUID(
+        "MaterialResources",
+        material_resources.data(),
+        static_cast<int>(material_resources.size()));
 	config.AddBool("DebugDrawTangent", debug_draw_tangent);
 	config.AddBool("CastShadows", cast_shadows);
 	config.AddBool("RecvShadows", recv_shadows);
@@ -85,10 +102,28 @@ void ComponentMeshRenderer::OnLoad(Config* config)
     recv_shadows       = config->GetBool("RecvShadows", true);
     render_mode        = config->GetUInt("RenderMode", RENDER_OPAQUE) == uint(RENDER_OPAQUE) ? RENDER_OPAQUE : RENDER_TRANSPARENT;
 
-	SetMaterialRes(config->GetUID("MaterialResource", 0));
+    ClearMaterialResources();
+    const int materialCount =
+        config->GetArrayCount("MaterialResources");
+    if (materialCount > 0)
+    {
+        SetMaterialCount(
+            static_cast<std::size_t>(materialCount));
+        for (int index = 0; index < materialCount; ++index)
+        {
+            SetMaterialRes(
+                static_cast<std::size_t>(index),
+                config->GetUID("MaterialResources", 0, index));
+        }
+    }
+    else
+    {
+        SetMaterialRes(
+            config->GetUID("MaterialResource", 0));
+    }
 	SetMeshRes(config->GetUID("MeshResource", 0));
 
-    if (GetMeshUID() != 0 && GetMaterialUID() != 0)
+    if (GetMeshUID() != 0 && GetMaterialRes() != nullptr)
     {
         HashString batchName(config->GetString("BatchName"));
         SetBatchName(batchName ? batchName : HashString("default"));
@@ -145,13 +180,22 @@ void ComponentMeshRenderer::SetBatchName(const HashString& name)
 {
     if(batch_index != UINT_MAX)
     {
-        App->renderer->GetBatchManager()->Remove(this);
+        if (App && App->renderer &&
+            App->renderer->GetBatchManager())
+        {
+            App->renderer->GetBatchManager()->Remove(this);
+        }
         batch_index = UINT_MAX;
     }
 
     batch_name = name;
 
-    if(batch_name)
+    if(batch_name &&
+        GetMeshRes() &&
+        GetMaterialRes() &&
+        App &&
+        App->renderer &&
+        App->renderer->GetBatchManager())
     {
         batch_index = App->renderer->GetBatchManager()->Add(this, batch_name);
     }
@@ -159,92 +203,217 @@ void ComponentMeshRenderer::SetBatchName(const HashString& name)
 
 bool ComponentMeshRenderer::SetMeshRes(UID uid) 
 {
+    if (uid == mesh_resource)
+    {
+        if (uid != 0 && batch_index == UINT_MAX)
+        {
+            SetBatchName(
+                batch_name
+                    ? batch_name
+                    : HashString("default"));
+        }
+        return true;
+    }
+
+    ResourceMesh* newMesh = nullptr;
+    if (uid != 0)
+    {
+        Resource* candidate =
+            App && App->resources
+                ? App->resources->Get(uid)
+                : nullptr;
+        if (!candidate || candidate->GetType() != Resource::mesh)
+            return false;
+        newMesh = static_cast<ResourceMesh*>(candidate);
+        if (!newMesh->LoadToMemory())
+            return false;
+    }
+
+    const HashString previousBatch = batch_name;
+    SetBatchName(HashString());
+
     delete [] node_cache;
     node_cache = nullptr;
 
-    morph_weights.release();
+    morph_weights.reset();
 
-    Resource* res = App->resources->Get(mesh_resource);
+    Resource* res =
+        App && App->resources
+            ? App->resources->Get(mesh_resource)
+            : nullptr;
 
-    if(res != nullptr)
-    {
-        assert(res->GetType() == Resource::mesh);
-
-        res->Release();
-    }
-
-	ResourceMesh* mesh = static_cast<ResourceMesh*>(App->resources->Get(uid));
-
-	if (mesh != nullptr)
+	if(res != nullptr)
 	{
-		assert(mesh->GetType() == Resource::mesh);
-		
-		if(mesh->LoadToMemory() == true)
-        {
-            mesh_resource = uid;
+        assert(res->GetType() == Resource::mesh);
+        res->Release();
+	}
 
-#if 0 
-            if(mesh->num_bones > 0)
+    mesh_resource = uid;
+	if (newMesh != nullptr)
+	{
+            if(newMesh->GetNumMorphTargets())
             {
-                node_cache   = new const GameObject* [mesh->num_bones];
-
-                for(uint i=0; i< mesh->num_bones; ++i)
-                {
-                    node_cache[i] = nullptr;
-                }
+                morph_weights =
+                    std::make_unique<float[]>(
+                        newMesh->GetNumMorphTargets());
+                std::fill_n(
+                    morph_weights.get(),
+                    newMesh->GetNumMorphTargets(),
+                    0.0f);
             }
-#endif 
+	}
 
-            if(mesh->GetNumMorphTargets())
-            {
-                morph_weights = std::make_unique<float[]>(mesh->GetNumMorphTargets());
-                for(uint i=0; i< mesh->GetNumMorphTargets(); ++i)
-                {
-                    morph_weights[i] = 0.0f;
-                }
-            }
-
-            return true;
-        }
+    InvalidateBoundingBox();
+    if (uid != 0)
+    {
+        SetBatchName(
+            previousBatch
+                ? previousBatch
+                : HashString("default"));
     }
-
-	return false;
+    else if (previousBatch)
+    {
+        SetBatchName(previousBatch);
+    }
+    return true;
 }
 
 const ResourceMesh* ComponentMeshRenderer::GetMeshRes() const
 {
-	return static_cast<const ResourceMesh*>(App->resources->Get(mesh_resource));
+    const Resource* resource =
+        App && App->resources
+            ? App->resources->Get(mesh_resource)
+            : nullptr;
+	return resource && resource->GetType() == Resource::mesh
+        ? static_cast<const ResourceMesh*>(resource)
+        : nullptr;
 }
 
 ResourceMesh* ComponentMeshRenderer::GetMeshRes() 
 {
-	return static_cast<ResourceMesh*>(App->resources->Get(mesh_resource));
+    Resource* resource =
+        App && App->resources
+            ? App->resources->Get(mesh_resource)
+            : nullptr;
+	return resource && resource->GetType() == Resource::mesh
+        ? static_cast<ResourceMesh*>(resource)
+        : nullptr;
 }
 
 bool ComponentMeshRenderer::SetMaterialRes(UID uid)
 {
-    Resource* res = App->resources->Get(material_resource);
+    if (material_resources.empty())
+        material_resources.push_back(0);
+    return SetMaterialRes(0, uid);
+}
 
-    if(material_resource != 0 && res != nullptr)
+bool ComponentMeshRenderer::SetMaterialRes(
+    std::size_t index,
+    UID uid)
+{
+    if (index >= material_resources.size())
+        return false;
+    if (material_resources[index] == uid)
+        return true;
+
+    ResourceMaterial* newMaterial = nullptr;
+    if (uid != 0)
     {
-        assert(res->GetType() == Resource::material);
-
-        res->Release();
+        Resource* candidate =
+            App && App->resources
+                ? App->resources->Get(uid)
+                : nullptr;
+        if (!candidate ||
+            candidate->GetType() != Resource::material)
+        {
+            return false;
+        }
+        newMaterial = static_cast<ResourceMaterial*>(candidate);
+        if (!newMaterial->LoadToMemory())
+            return false;
     }
 
-    res = App->resources->Get(uid);
+    const bool primaryMaterial = index == 0;
+    const HashString previousBatch = batch_name;
+    if (primaryMaterial)
+        SetBatchName(HashString());
 
-    if (res != nullptr && res->GetType() == Resource::material)
+    Resource* previous =
+        App && App->resources
+            ? App->resources->Get(material_resources[index])
+            : nullptr;
+    if (previous)
     {
-        if(res->LoadToMemory() == true)
-        {
-            material_resource = uid;
+        assert(previous->GetType() == Resource::material);
+        previous->Release();
+    }
+    material_resources[index] = uid;
 
-            return true;
+    if (primaryMaterial && previousBatch)
+        SetBatchName(previousBatch);
+    return true;
+}
+
+bool ComponentMeshRenderer::AddMaterialRes(UID uid)
+{
+    material_resources.push_back(0);
+    if (uid == 0 ||
+        SetMaterialRes(material_resources.size() - 1, uid))
+    {
+        return true;
+    }
+    material_resources.pop_back();
+    return false;
+}
+
+bool ComponentMeshRenderer::RemoveMaterialRes(std::size_t index)
+{
+    if (index >= material_resources.size())
+        return false;
+
+    const bool primaryMaterial = index == 0;
+    const HashString previousBatch = batch_name;
+    if (primaryMaterial)
+        SetBatchName(HashString());
+
+    Resource* resource =
+        App && App->resources
+            ? App->resources->Get(material_resources[index])
+            : nullptr;
+    if (resource)
+        resource->Release();
+    material_resources.erase(material_resources.begin() + index);
+    if (material_resources.empty())
+        material_resources.push_back(0);
+
+    if (primaryMaterial && previousBatch)
+        SetBatchName(previousBatch);
+    return true;
+}
+
+void ComponentMeshRenderer::ClearMaterialResources()
+{
+    const HashString previousBatch = batch_name;
+    SetBatchName(HashString());
+    if (App && App->resources)
+    {
+        for (UID material : material_resources)
+        {
+            if (Resource* resource = App->resources->Get(material))
+                resource->Release();
         }
     }
+    material_resources.assign(1, 0);
+    if (previousBatch)
+        SetBatchName(previousBatch);
+}
 
-    return false;
+void ComponentMeshRenderer::SetMaterialCount(std::size_t count)
+{
+    count = std::max<std::size_t>(count, 1);
+    while (material_resources.size() > count)
+        RemoveMaterialRes(material_resources.size() - 1);
+    material_resources.resize(count, 0);
 }
 
 bool ComponentMeshRenderer::SetSkinInfo(const ResourceModel::Skin& skin, GameObject** gos)
@@ -268,13 +437,65 @@ bool ComponentMeshRenderer::SetSkinInfo(const ResourceModel::Skin& skin, GameObj
 
 const ResourceMaterial* ComponentMeshRenderer::GetMaterialRes () const
 {
-    return static_cast<const ResourceMaterial*>(App->resources->Get(material_resource));
+    return GetMaterialRes(0);
 }
 
 
 ResourceMaterial* ComponentMeshRenderer::GetMaterialRes () 
 {
-    return static_cast<ResourceMaterial*>(App->resources->Get(material_resource));
+    return GetMaterialRes(0);
+}
+
+const ResourceMaterial* ComponentMeshRenderer::GetMaterialRes(
+    std::size_t index) const
+{
+    if (index >= material_resources.size())
+        return nullptr;
+    if (index == 0 && material_resources[index] == 0)
+    {
+        return App && App->resources
+            ? App->resources->GetDefaultMaterial()
+            : nullptr;
+    }
+    const Resource* resource =
+        App && App->resources
+            ? App->resources->Get(material_resources[index])
+            : nullptr;
+    return resource && resource->GetType() == Resource::material
+        ? static_cast<const ResourceMaterial*>(resource)
+        : nullptr;
+}
+
+ResourceMaterial* ComponentMeshRenderer::GetMaterialRes(
+    std::size_t index)
+{
+    return const_cast<ResourceMaterial*>(
+        static_cast<const ComponentMeshRenderer*>(this)
+            ->GetMaterialRes(index));
+}
+
+UID ComponentMeshRenderer::GetMaterialUID() const
+{
+    return GetMaterialUID(0);
+}
+
+UID ComponentMeshRenderer::GetMaterialUID(
+    std::size_t index) const
+{
+    return index < material_resources.size()
+        ? material_resources[index]
+        : 0;
+}
+
+std::size_t ComponentMeshRenderer::GetMaterialCount() const
+{
+    return material_resources.size();
+}
+
+const std::vector<UID>&
+ComponentMeshRenderer::GetMaterialUIDs() const
+{
+    return material_resources;
 }
 
 

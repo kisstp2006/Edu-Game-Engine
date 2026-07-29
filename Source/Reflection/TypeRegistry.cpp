@@ -442,7 +442,11 @@ namespace EGE
 				return "GameObjectReference";
 			case PropertyKind::ComponentReference:
 				return "ComponentReference";
+			case PropertyKind::ResourceReference:
+				return "ResourceReference";
+			case PropertyKind::Vector2: return "Vector2";
 			case PropertyKind::Vector3: return "Vector3";
+			case PropertyKind::Quaternion: return "Quaternion";
 			case PropertyKind::Color: return "Color";
 			default: return "Unsupported";
 		}
@@ -538,9 +542,40 @@ namespace EGE
 			return false;
 		}
 
+		if (targetKind == PropertyKind::ResourceReference)
+		{
+			if (const auto* value =
+				std::get_if<ResourceReferenceValue>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
 		if (targetKind == PropertyKind::Vector3)
 		{
 			if (const auto* value = std::get_if<Vector3Value>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
+		if (targetKind == PropertyKind::Vector2)
+		{
+			if (const auto* value = std::get_if<Vector2Value>(&source))
+			{
+				result = *value;
+				return true;
+			}
+			return false;
+		}
+
+		if (targetKind == PropertyKind::Quaternion)
+		{
+			if (const auto* value = std::get_if<QuaternionValue>(&source))
 			{
 				result = *value;
 				return true;

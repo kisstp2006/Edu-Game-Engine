@@ -33,8 +33,19 @@ namespace EGE
 		Enumeration,
 		GameObjectReference,
 		ComponentReference,
+		ResourceReference,
+		Vector2,
 		Vector3,
+		Quaternion,
 		Color
+	};
+
+	struct Vector2Value
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+
+		bool operator==(const Vector2Value&) const = default;
 	};
 
 	struct Vector3Value
@@ -56,6 +67,16 @@ namespace EGE
 		bool operator==(const ColorValue&) const = default;
 	};
 
+	struct QuaternionValue
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		float z = 0.0f;
+		float w = 1.0f;
+
+		bool operator==(const QuaternionValue&) const = default;
+	};
+
 	struct GameObjectReferenceValue
 	{
 		std::uint64_t objectId = 0;
@@ -71,6 +92,14 @@ namespace EGE
 		bool operator==(const ComponentReferenceValue&) const = default;
 	};
 
+	struct ResourceReferenceValue
+	{
+		std::uint64_t resourceId = 0;
+		int resourceType = 0;
+
+		bool operator==(const ResourceReferenceValue&) const = default;
+	};
+
 	using PropertyValue = std::variant<
 		std::monostate,
 		bool,
@@ -80,7 +109,10 @@ namespace EGE
 		std::string,
 		GameObjectReferenceValue,
 		ComponentReferenceValue,
+		ResourceReferenceValue,
+		Vector2Value,
 		Vector3Value,
+		QuaternionValue,
 		ColorValue>;
 
 	struct PropertyRange
@@ -221,10 +253,16 @@ namespace EGE
 			return PropertyKind::Double;
 		else if constexpr (std::is_same_v<Type, std::string>)
 			return PropertyKind::String;
+		else if constexpr (std::is_same_v<Type, Vector2Value>)
+			return PropertyKind::Vector2;
 		else if constexpr (std::is_same_v<Type, Vector3Value>)
 			return PropertyKind::Vector3;
+		else if constexpr (std::is_same_v<Type, QuaternionValue>)
+			return PropertyKind::Quaternion;
 		else if constexpr (std::is_same_v<Type, ColorValue>)
 			return PropertyKind::Color;
+		else if constexpr (std::is_same_v<Type, ResourceReferenceValue>)
+			return PropertyKind::ResourceReference;
 		else if constexpr (std::is_enum_v<Type>)
 			return PropertyKind::Enumeration;
 		else
@@ -265,8 +303,11 @@ namespace EGE
 			else if constexpr (std::is_same_v<Value, std::string>)
 				value = source;
 			else if constexpr (
+				std::is_same_v<Value, Vector2Value> ||
 				std::is_same_v<Value, Vector3Value> ||
-				std::is_same_v<Value, ColorValue>)
+				std::is_same_v<Value, QuaternionValue> ||
+				std::is_same_v<Value, ColorValue> ||
+				std::is_same_v<Value, ResourceReferenceValue>)
 			{
 				value = source;
 			}
@@ -304,10 +345,20 @@ namespace EGE
 					static_cast<Value>(std::get<double>(converted));
 			else if constexpr (std::is_same_v<Value, std::string>)
 				destination = std::get<std::string>(converted);
+			else if constexpr (std::is_same_v<Value, Vector2Value>)
+				destination = std::get<Vector2Value>(converted);
 			else if constexpr (std::is_same_v<Value, Vector3Value>)
 				destination = std::get<Vector3Value>(converted);
+			else if constexpr (std::is_same_v<Value, QuaternionValue>)
+				destination = std::get<QuaternionValue>(converted);
 			else if constexpr (std::is_same_v<Value, ColorValue>)
 				destination = std::get<ColorValue>(converted);
+			else if constexpr (
+				std::is_same_v<Value, ResourceReferenceValue>)
+			{
+				destination =
+					std::get<ResourceReferenceValue>(converted);
+			}
 			else
 				return false;
 			return true;

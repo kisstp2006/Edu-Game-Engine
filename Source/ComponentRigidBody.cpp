@@ -1,6 +1,7 @@
 #include "Globals.h"
 #include "Application.h"
 #include "ComponentRigidBody.h"
+#include "ComponentCollider.h"
 #include "GameObject.h"
 #include "Component.h"
 #include "ModulePhysics3D.h"
@@ -10,23 +11,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 using namespace std;
 
 // ---------------------------------------------------------
 ComponentRigidBody::ComponentRigidBody(GameObject* container) : Component(container, Types::RigidBody)
 {
-	sphere.r = 1.0f;
-	sphere.pos = float3::zero;
-
-	box.r = float3::one;
-	box.pos = float3::zero;
-	box.axis[0] = float3::unitX;
-	box.axis[1] = float3::unitY;
-	box.axis[2] = float3::unitZ;
-
-	capsule.r = 1.0f;
-	capsule.l = LineSegment(float3::zero, float3::one);
 }
 
 // ---------------------------------------------------------
@@ -34,34 +25,24 @@ ComponentRigidBody::~ComponentRigidBody()
 {
 	if (body != nullptr && App->physics3D != nullptr)
 		App->physics3D->DeleteBody(body);
+	if (trigger_body != nullptr && App->physics3D != nullptr)
+		App->physics3D->DeleteBody(trigger_body);
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::GetBoundingBox(AABB & box) const
 {
-	switch (body_type)
-	{
-		case body_sphere:
-			box.Enclose(sphere);
-		break;
-		case body_box:
-			box.Enclose(this->box);
-		break;
-		case body_capsule:
-			box.Enclose(capsule);
-		break;
-	}
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::OnSave(Config& config) const
 {
 	config.AddInt("Behaviour", behaviour);
-	config.AddInt("Body Type", body_type);
+	config.AddInt("Collider Storage Version", 1);
+	config.AddInt(
+		"RigidBody Defaults Version",
+		EGE::Physics::RigidBodyDefaults::SerializationVersion);
 	config.AddFloat("Mass", mass);
-	config.AddArrayFloat("Sphere", &sphere.pos.x, 4);
-	config.AddArrayFloat("Box", &box.pos.x, 6);
-	config.AddArrayFloat("Capsule", &capsule.l.a.x, 7);
 	config.AddArrayFloat("Linear Factor", &linear_factor.x, 3);
 	config.AddArrayFloat("Angular Factor", &angular_factor.x, 3);
 	config.AddFloat("Restitution", restitution);
@@ -71,43 +52,51 @@ void ComponentRigidBody::OnSave(Config& config) const
 	config.AddFloat("Angular Damping", angular_damping);
 	config.AddBool("Use World Gravity", use_world_gravity);
 	config.AddFloat3("Gravity", gravity);
+	config.AddUInt("Collision Layer", collision_settings.layer);
+	config.AddUInt("Collision Mask", collision_settings.mask);
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::OnLoad(Config * config)
 {
 	behaviour = (BodyBehaviour) config->GetInt("Behaviour", BodyBehaviour::fixed);
-	body_type = (BodyType) config->GetInt("Body Type", BodyType::body_sphere);
-	mass = config->GetFloat("Mass", 1.0f);
+	mass = config->GetFloat(
+		"Mass",
+		EGE::Physics::RigidBodyDefaults::Mass);
+	collision_settings.Load(*config);
 
-	sphere.pos.x = config->GetFloat("Sphere", 0.f, 0);
-	sphere.pos.y = config->GetFloat("Sphere", 0.f, 1);
-	sphere.pos.z = config->GetFloat("Sphere", 0.f, 2);
-	sphere.r = config->GetFloat("Sphere", 1.f, 3);
-
-	capsule.l.a.x = config->GetFloat("Capsule", 0.f, 0);
-	capsule.l.a.y = config->GetFloat("Capsule", 0.f, 1);
-	capsule.l.a.z = config->GetFloat("Capsule", 0.f, 2);
-	capsule.l.b.x = config->GetFloat("Capsule", 0.f, 3);
-	capsule.l.b.y = config->GetFloat("Capsule", 1.f, 4);
-	capsule.l.b.z = config->GetFloat("Capsule", 0.f, 5);
-	capsule.r = config->GetFloat("Capsule", 1.f, 6);
-
-	box.pos.x = config->GetFloat("Box", 0.f, 0);
-	box.pos.y = config->GetFloat("Box", 0.f, 1);
-	box.pos.z = config->GetFloat("Box", 0.f, 2);
-	box.r.x = config->GetFloat("Box", 1.f, 3);
-	box.r.y = config->GetFloat("Box", 1.f, 4);
-	box.r.z = config->GetFloat("Box", 1.f, 5);
-
-	restitution = config->GetFloat("Restitution", 1.0f);
-	friction = config->GetFloat("Friction", 0.5f);
+	restitution = config->GetFloat(
+		"Restitution",
+		EGE::Physics::RigidBodyDefaults::Restitution);
+	friction = config->GetFloat(
+		"Friction",
+		EGE::Physics::RigidBodyDefaults::Friction);
 	rolling_friction =
-		config->GetFloat("Rolling Friction", 0.0f);
+		config->GetFloat(
+			"Rolling Friction",
+			EGE::Physics::RigidBodyDefaults::RollingFriction);
 	linear_damping =
-		config->GetFloat("Linear Damping", 0.0f);
+		config->GetFloat(
+			"Linear Damping",
+			EGE::Physics::RigidBodyDefaults::LinearDamping);
 	angular_damping =
-		config->GetFloat("Angular Damping", 0.0f);
+		config->GetFloat(
+			"Angular Damping",
+			EGE::Physics::RigidBodyDefaults::AngularDamping);
+	const int defaultsVersion = config->GetInt(
+		"RigidBody Defaults Version", 0);
+	const bool hasLegacyPerfectBounceDefaults =
+		defaultsVersion == 0 &&
+		restitution >= 0.999f &&
+		linear_damping <= 0.0001f &&
+		angular_damping <= 0.0001f;
+	if (hasLegacyPerfectBounceDefaults)
+	{
+		restitution =
+			EGE::Physics::RigidBodyDefaults::Restitution;
+		angular_damping =
+			EGE::Physics::RigidBodyDefaults::AngularDamping;
+	}
 	gravity = config->GetFloat3(
 		"Gravity", float3(0.0f, -10.0f, 0.0f));
 	const bool hasLegacyCustomGravity =
@@ -142,6 +131,11 @@ void ComponentRigidBody::OnDeActivate()
 		App->physics3D->DeleteBody(body);
 		body = nullptr;
 	}
+	if (trigger_body && App && App->physics3D)
+	{
+		App->physics3D->DeleteBody(trigger_body);
+		trigger_body = nullptr;
+	}
 }
 
 // ---------------------------------------------------------
@@ -151,14 +145,15 @@ void ComponentRigidBody::OnPlay()
 		CreateBody();
 }
 
-void ComponentRigidBody::OnFixedUpdate(float deltaTime)
+void ComponentRigidBody::OnFixedUpdate(float)
 {
 	if (!body)
 		return;
 
-	const float3 currentScale = GetAbsoluteGlobalScale();
+	const float3 currentScale = GetGlobalScale();
 	if (!currentScale.Equals(collision_scale, 0.0001f))
 		RebuildBody();
+	SynchronizeTriggerBody();
 }
 
 // ---------------------------------------------------------
@@ -169,80 +164,30 @@ void ComponentRigidBody::OnStop()
 		App->physics3D->DeleteBody(body);
 		body = nullptr;
 	}
+	if (trigger_body != nullptr)
+	{
+		App->physics3D->DeleteBody(trigger_body);
+		trigger_body = nullptr;
+	}
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::OnDebugDraw(bool selected) const
 {
-	if (selected == false)
-		return;
-
-	const float4x4& globalTransform =
-		game_object->GetGlobalTransformation();
-	const float3 globalScale = GetAbsoluteGlobalScale();
-	const float radiusScale = std::max({
-		globalScale.x,
-		globalScale.y,
-		globalScale.z});
-	const Quat globalRotation =
-		globalTransform.RotatePart().ToQuat().Normalized();
-	switch (body_type)
-	{
-		case body_sphere:
-		{
-			dd::sphere(
-				globalTransform.TransformPos(sphere.pos),
-				dd::colors::Green,
-				sphere.r * radiusScale);
-		}
-		break;
-		case body_box:
-		{
-			OBB worldBox;
-			worldBox.pos = globalTransform.TransformPos(box.pos);
-			worldBox.r = float3(
-				box.r.x * globalScale.x,
-				box.r.y * globalScale.y,
-				box.r.z * globalScale.z);
-			for (int axis = 0; axis < 3; ++axis)
-			{
-				worldBox.axis[axis] =
-					globalRotation.Transform(box.axis[axis]).Normalized();
-			}
-			float3 corners[8];
-			worldBox.GetCornerPoints(corners);
-			dd::box(corners, dd::colors::Green);
-		}
-		break;
-		case body_capsule:
-        {
-			const float3 worldStart =
-				globalTransform.TransformPos(capsule.l.a);
-			const float3 worldEnd =
-				globalTransform.TransformPos(capsule.l.b);
-            float3 pos = (worldStart + worldEnd) * 0.5f;
-            float3 dir = worldEnd - worldStart;
-            float len = dir.Length();
-
-			if (len > 0.0001f)
-			{
-				dd::capsule(
-					pos,
-					dd::colors::Green,
-					capsule.r * radiusScale,
-					dir / len,
-					len);
-			}
-        }
-		break;
-	}
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::getWorldTransform(btTransform & worldTrans) const
 {
-	worldTrans.setOrigin(game_object->GetGlobalTransformation().TranslatePart());
-	worldTrans.setRotation(game_object->GetGlobalTransformation().RotatePart().ToQuat());
+	float3 position;
+	float3 scale;
+	Quat rotation;
+	game_object->GetGlobalTransformation().Decompose(
+		position,
+		rotation,
+		scale);
+	worldTrans.setOrigin(position);
+	worldTrans.setRotation(rotation.Normalized());
 }
 
 // ---------------------------------------------------------
@@ -274,6 +219,8 @@ void ComponentRigidBody::setWorldTransform(const btTransform & worldTrans)
 
 	game_object->SetLocalPosition(localPosition);
 	game_object->SetLocalRotation(localRotation);
+	if (trigger_body)
+		trigger_body->setWorldTransform(worldTrans);
 }
 
 // ---------------------------------------------------------
@@ -283,24 +230,21 @@ void ComponentRigidBody::CreateBody()
 		return;
 
 	if (body != nullptr)
-		App->physics3D->DeleteBody(body);
-
-	switch (body_type)
 	{
-		case body_sphere:
-			body = App->physics3D->AddBody(sphere, this);
-		break;
-		case body_box:
-			body = App->physics3D->AddBody(box, this);
-		break;
-		case body_capsule:
-			body = App->physics3D->AddBody(capsule, this);
-		break;
+		App->physics3D->DeleteBody(body);
+		body = nullptr;
 	}
+	if (trigger_body != nullptr)
+	{
+		App->physics3D->DeleteBody(trigger_body);
+		trigger_body = nullptr;
+	}
+
+	body = App->physics3D->AddBody(this, &trigger_body);
 
 	if (body != nullptr)
 	{
-		collision_scale = GetAbsoluteGlobalScale();
+		collision_scale = GetGlobalScale();
 		ApplyBodyConfiguration();
 	}
 }
@@ -309,19 +253,23 @@ void ComponentRigidBody::CreateBody()
 void ComponentRigidBody::SetBodyType(BodyType new_type)
 {
 	if (new_type >= body_sphere &&
-		new_type <= body_capsule &&
-		new_type != body_type)
+		new_type <= body_capsule)
 	{
-		body_type = new_type;
-		if (body)
-			RebuildBody();
+		if (ComponentCollider* collider = EnsurePrimaryCollider())
+		{
+			collider->SetShapeType(
+				static_cast<ComponentCollider::ShapeType>(new_type));
+		}
 	}
 }
 
 // ---------------------------------------------------------
 ComponentRigidBody::BodyType ComponentRigidBody::GetBodyType() const
 {
-	return body_type;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider
+		? static_cast<BodyType>(collider->GetShapeType())
+		: body_unknown;
 }
 
 // ---------------------------------------------------------
@@ -441,87 +389,147 @@ void ComponentRigidBody::SetAngularFactor(const float3& value)
 
 const float3& ComponentRigidBody::GetSphereCenter() const
 {
-	return sphere.pos;
+	static const float3 fallback = float3::zero;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetSphereCenter() : fallback;
 }
 
 void ComponentRigidBody::SetSphereCenter(const float3& value)
 {
-	sphere.pos = value;
-	if (body)
-		RebuildBody();
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetSphereCenter(value);
 }
 
 float ComponentRigidBody::GetSphereRadius() const
 {
-	return sphere.r;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetSphereRadius() : 0.0f;
 }
 
 void ComponentRigidBody::SetSphereRadius(float value)
 {
-	sphere.r = std::max(value, 0.001f);
-	if (body)
-		RebuildBody();
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetSphereRadius(value);
 }
 
 const float3& ComponentRigidBody::GetBoxCenter() const
 {
-	return box.pos;
+	static const float3 fallback = float3::zero;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetBoxCenter() : fallback;
 }
 
 void ComponentRigidBody::SetBoxCenter(const float3& value)
 {
-	box.pos = value;
-	if (body)
-		RebuildBody();
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetBoxCenter(value);
 }
 
 const float3& ComponentRigidBody::GetBoxHalfExtents() const
 {
-	return box.r;
+	static const float3 fallback = float3::one;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetBoxHalfExtents() : fallback;
+}
+
+const float3& ComponentRigidBody::GetBoxRotation() const
+{
+	static const float3 fallback = float3::zero;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetBoxRotation() : fallback;
+}
+
+void ComponentRigidBody::SetBoxRotation(
+	const float3& eulerRadians)
+{
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetBoxRotation(eulerRadians);
 }
 
 void ComponentRigidBody::SetBoxHalfExtents(const float3& value)
 {
-	box.r = float3(
-		std::max(value.x, 0.001f),
-		std::max(value.y, 0.001f),
-		std::max(value.z, 0.001f));
-	if (body)
-		RebuildBody();
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetBoxHalfExtents(value);
 }
 
 const float3& ComponentRigidBody::GetCapsuleStart() const
 {
-	return capsule.l.a;
+	static const float3 fallback = float3::zero;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetCapsuleStart() : fallback;
 }
 
 void ComponentRigidBody::SetCapsuleStart(const float3& value)
 {
-	capsule.l.a = value;
-	if (body)
-		RebuildBody();
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetCapsuleStart(value);
 }
 
 const float3& ComponentRigidBody::GetCapsuleEnd() const
 {
-	return capsule.l.b;
+	static const float3 fallback = float3::unitY;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetCapsuleEnd() : fallback;
 }
 
 void ComponentRigidBody::SetCapsuleEnd(const float3& value)
 {
-	capsule.l.b = value;
-	if (body)
-		RebuildBody();
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetCapsuleEnd(value);
 }
 
 float ComponentRigidBody::GetCapsuleRadius() const
 {
-	return capsule.r;
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider ? collider->GetCapsuleRadius() : 0.0f;
 }
 
 void ComponentRigidBody::SetCapsuleRadius(float value)
 {
-	capsule.r = std::max(value, 0.001f);
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetCapsuleRadius(value);
+}
+
+bool ComponentRigidBody::IsTrigger() const
+{
+	const ComponentCollider* collider = GetPrimaryCollider();
+	return collider && collider->IsTrigger();
+}
+
+void ComponentRigidBody::SetTrigger(bool value)
+{
+	if (ComponentCollider* collider = EnsurePrimaryCollider())
+		collider->SetTrigger(value);
+}
+
+std::uint32_t ComponentRigidBody::GetCollisionLayer() const
+{
+	return collision_settings.layer;
+}
+
+void ComponentRigidBody::SetCollisionLayer(std::uint32_t value)
+{
+	value = std::min(
+		value,
+		EGE::Physics::CollisionLayerCount - 1);
+	if (collision_settings.layer == value)
+		return;
+	collision_settings.layer = value;
+	if (body)
+		RebuildBody();
+}
+
+std::uint32_t ComponentRigidBody::GetCollisionMask() const
+{
+	return collision_settings.mask;
+}
+
+void ComponentRigidBody::SetCollisionMask(std::uint32_t value)
+{
+	value &= EGE::Physics::AllCollisionLayers;
+	if (collision_settings.mask == value)
+		return;
+	collision_settings.mask = value;
 	if (body)
 		RebuildBody();
 }
@@ -692,6 +700,24 @@ void ComponentRigidBody::ApplyTorqueImpulse(
 	}
 }
 
+ComponentCollider* ComponentRigidBody::GetPrimaryCollider() const
+{
+	if (!game_object)
+		return nullptr;
+	return static_cast<ComponentCollider*>(
+		game_object->FindFirstComponent(Component::Collider));
+}
+
+ComponentCollider* ComponentRigidBody::EnsurePrimaryCollider()
+{
+	if (ComponentCollider* collider = GetPrimaryCollider())
+		return collider;
+	if (!game_object)
+		return nullptr;
+	return static_cast<ComponentCollider*>(
+		game_object->CreateComponent(Component::Collider));
+}
+
 void ComponentRigidBody::RebuildBody()
 {
 	if (!body)
@@ -704,7 +730,7 @@ void ComponentRigidBody::RebuildBody()
 	SetAngularVelocity(angularVelocity);
 }
 
-float3 ComponentRigidBody::GetAbsoluteGlobalScale() const
+float3 ComponentRigidBody::GetGlobalScale() const
 {
 	if (!game_object)
 		return float3::one;
@@ -716,10 +742,22 @@ float3 ComponentRigidBody::GetAbsoluteGlobalScale() const
 		position,
 		rotation,
 		scale);
+	const auto preserveSign = [](float value)
+	{
+		if (std::abs(value) >= 0.0001f)
+			return value;
+		return value < 0.0f ? -0.0001f : 0.0001f;
+	};
 	return {
-		std::max(std::abs(scale.x), 0.0001f),
-		std::max(std::abs(scale.y), 0.0001f),
-		std::max(std::abs(scale.z), 0.0001f)};
+		preserveSign(scale.x),
+		preserveSign(scale.y),
+		preserveSign(scale.z)};
+}
+
+short ComponentRigidBody::GetCollisionGroupBits() const
+{
+	return static_cast<short>(
+		1u << collision_settings.layer);
 }
 
 void ComponentRigidBody::ApplyBodyConfiguration()
@@ -730,7 +768,8 @@ void ComponentRigidBody::ApplyBodyConfiguration()
 	int flags = body->getCollisionFlags();
 	flags &= ~(
 		btCollisionObject::CF_STATIC_OBJECT |
-		btCollisionObject::CF_KINEMATIC_OBJECT);
+		btCollisionObject::CF_KINEMATIC_OBJECT |
+		btCollisionObject::CF_NO_CONTACT_RESPONSE);
 
 	float runtimeMass = 0.0f;
 	if (behaviour == BodyBehaviour::dynamic)
@@ -739,7 +778,6 @@ void ComponentRigidBody::ApplyBodyConfiguration()
 		flags |= btCollisionObject::CF_STATIC_OBJECT;
 	else
 		flags |= btCollisionObject::CF_KINEMATIC_OBJECT;
-
 	btVector3 inertia(0.0f, 0.0f, 0.0f);
 	if (runtimeMass > 0.0f && body->getCollisionShape())
 	{
@@ -755,6 +793,11 @@ void ComponentRigidBody::ApplyBodyConfiguration()
 	body->setFriction(friction);
 	body->setRollingFriction(rolling_friction);
 	body->setDamping(linear_damping, angular_damping);
+	body->setSleepingThresholds(
+		EGE::Physics::RigidBodyDefaults::LinearSleepingThreshold,
+		EGE::Physics::RigidBodyDefaults::AngularSleepingThreshold);
+	body->setDeactivationTime(
+		EGE::Physics::RigidBodyDefaults::DeactivationTime);
 	int rigidBodyFlags = body->getFlags();
 	if (use_world_gravity)
 	{
@@ -773,7 +816,28 @@ void ComponentRigidBody::ApplyBodyConfiguration()
 	if (behaviour == BodyBehaviour::kinematic)
 		body->setActivationState(DISABLE_DEACTIVATION);
 	else
+	{
+		body->forceActivationState(ACTIVE_TAG);
 		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::SynchronizeTriggerBody()
+{
+	if (!body || !trigger_body)
+		return;
+
+	btTransform transform;
+	if (behaviour == BodyBehaviour::dynamic)
+		transform = body->getWorldTransform();
+	else
+		getWorldTransform(transform);
+
+	trigger_body->setWorldTransform(transform);
+	trigger_body->setInterpolationWorldTransform(transform);
+	trigger_body->setLinearVelocity(body->getLinearVelocity());
+	trigger_body->setAngularVelocity(body->getAngularVelocity());
+	trigger_body->activate(true);
 }
 
 // ---------------------------------------------------------
@@ -785,30 +849,54 @@ void ComponentRigidBody::DrawEditor()
 	if (ImGui::Combo("Behaviour", &behaviour_type, behaviours, 3))
 		SetBehaviour(static_cast<BodyBehaviour>(behaviour_type));
 
-	static const char* types[] = { "Sphere", "Box", "Capsule" };
-
-	int type = static_cast<int>(body_type);
-	if (ImGui::Combo("Type", &type, types, 3))
-		SetBodyType(static_cast<BodyType>(type));
-
-	switch (type)
+	int colliderCount = 0;
+	for (Component* component : game_object->components)
 	{
-		case BodyType::body_sphere:
-			ImGui::DragFloat3(
-				"Center", &sphere.pos.x, 0.05f);
-			ImGui::DragFloat("Radius", &sphere.r, 0.1f, 0.1f);
-		break;
-		case BodyType::body_box:
-			ImGui::DragFloat3(
-				"Center", &box.pos.x, 0.05f);
-			ImGui::DragFloat3(
-				"Half Extents", &box.r.x, 0.1f, 0.1f);
-		break;
-		case BodyType::body_capsule:
-			ImGui::DragFloat3("Top", &capsule.l.a.x, 0.1f, 0.1f);
-			ImGui::DragFloat3("Bottom", &capsule.l.b.x, 0.1f, 0.1f);
-			ImGui::DragFloat("Radius", &capsule.r, 0.1f, 0.1f);
-		break;
+		if (component &&
+			!component->flag_for_removal &&
+			component->GetType() == Component::Collider)
+		{
+			++colliderCount;
+		}
+	}
+	ImGui::TextDisabled(
+		"%d active collider component(s) build this body.",
+		colliderCount);
+
+	int collisionLayer =
+		static_cast<int>(GetCollisionLayer());
+	if (ImGui::SliderInt(
+			"Collision Layer",
+			&collisionLayer,
+			0,
+			static_cast<int>(
+				EGE::Physics::CollisionLayerCount - 1)))
+	{
+		SetCollisionLayer(
+			static_cast<std::uint32_t>(collisionLayer));
+	}
+
+	if (ImGui::TreeNode("Collision Mask"))
+	{
+		std::uint32_t collisionMask = GetCollisionMask();
+		for (std::uint32_t layer = 0;
+			layer < EGE::Physics::CollisionLayerCount;
+			++layer)
+		{
+			const std::string label =
+				"Layer " + std::to_string(layer);
+			bool enabled =
+				(collisionMask & (1u << layer)) != 0;
+			if (ImGui::Checkbox(label.c_str(), &enabled))
+			{
+				if (enabled)
+					collisionMask |= 1u << layer;
+				else
+					collisionMask &= ~(1u << layer);
+			}
+		}
+		SetCollisionMask(collisionMask);
+		ImGui::TreePop();
 	}
 
 	float value = GetMass();
@@ -834,9 +922,6 @@ void ComponentRigidBody::DrawEditor()
 	value = GetAngularDamping();
 	if (ImGui::DragFloat("Angular Damping", &value, 0.01f, 0.0f, 1.0f))
 		SetAngularDamping(value);
-
-	if (ImGui::Button("Commit Changes to Physics Engine"))
-		RebuildBody();
 
 	float3 vector = GetLinearFactor();
 	if (ImGui::DragFloat3(

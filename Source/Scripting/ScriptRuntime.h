@@ -2,6 +2,7 @@
 #define EGE_SCRIPT_RUNTIME_H
 
 #include "../Reflection/TypeRegistry.h"
+#include "../PhysicsCollision.h"
 #include "ScriptApiRegistry.h"
 
 #include <cstdint>
@@ -9,6 +10,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+class asIScriptObject;
+class asITypeInfo;
 
 namespace EGE
 {
@@ -103,6 +107,10 @@ namespace EGE
 		void CollisionInstance(
 			ScriptInstanceHandle handle,
 			std::uint32_t otherObjectId);
+		void PhysicsEventInstance(
+			ScriptInstanceHandle handle,
+			Physics::ContactPhase phase,
+			const Physics::CollisionInfo& info);
 		void StopInstance(ScriptInstanceHandle handle);
 		void EnableInstance(ScriptInstanceHandle handle);
 		void DisableInstance(ScriptInstanceHandle handle);
@@ -115,6 +123,9 @@ namespace EGE
 			ScriptInstanceHandle handle) const;
 		[[nodiscard]] std::string GetInstanceClassName(
 			ScriptInstanceHandle handle) const;
+		[[nodiscard]] asIScriptObject* AcquireInstanceObject(
+			ScriptInstanceHandle handle,
+			const asITypeInfo& requestedType) const;
 
 		[[nodiscard]] bool HasLoadedScripts() const;
 		[[nodiscard]] bool WasLastReloadSuccessful() const;

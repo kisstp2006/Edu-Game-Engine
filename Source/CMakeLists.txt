@@ -153,6 +153,9 @@ if(EGE_BUILD_TESTS)
 		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptInstanceContext.h"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptMath.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptMath.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptExtendedMath.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptPhysics.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptPhysics.h"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptResource.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptResource.h"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Scripting/ScriptTime.cpp"
@@ -162,7 +165,9 @@ if(EGE_BUILD_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/Tests/ScriptRuntimeTests.cpp")
     target_compile_features(ScriptingBackendTests PRIVATE cxx_std_20)
     target_compile_definitions(ScriptingBackendTests
-        PRIVATE EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+        PRIVATE
+			EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
+			NOMINMAX)
     target_link_libraries(ScriptingBackendTests
         PRIVATE
             EGE::AngelScriptAddons
@@ -220,4 +225,104 @@ if(EGE_BUILD_TESTS)
 	add_test(
 		NAME ModelImportCoordinates
 		COMMAND ModelImportCoordinatesTests)
+
+	add_executable(PhysicsCollisionShapeTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollisionShape.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollisionShape.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsQuery.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsQuery.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/PhysicsCollisionShapeTests.cpp")
+	target_compile_features(
+		PhysicsCollisionShapeTests PRIVATE cxx_std_20)
+	target_compile_definitions(
+		PhysicsCollisionShapeTests PRIVATE NOMINMAX)
+	target_include_directories(
+		PhysicsCollisionShapeTests PRIVATE "${bullet_SOURCE_DIR}/src")
+	target_link_libraries(
+		PhysicsCollisionShapeTests
+		PRIVATE
+			BulletDynamics
+			BulletCollision
+			LinearMath
+			EGE::MathGeoLib)
+	set_target_properties(PhysicsCollisionShapeTests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME PhysicsCollisionShape
+		COMMAND PhysicsCollisionShapeTests)
+
+	add_executable(PhysicsInteractionTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/Config.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Config.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/parson.c"
+		"${CMAKE_CURRENT_SOURCE_DIR}/parson.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollision.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsColliderData.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsColliderData.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollisionMatrix.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollisionMatrix.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollisionSettings.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsCollisionSettings.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsContactTracker.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/PhysicsContactTracker.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Settings/SettingsStore.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Settings/SettingsStore.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/PhysicsInteractionTests.cpp")
+	target_compile_features(
+		PhysicsInteractionTests PRIVATE cxx_std_20)
+	target_compile_definitions(
+		PhysicsInteractionTests
+		PRIVATE
+			NOMINMAX
+			EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+	target_include_directories(
+		PhysicsInteractionTests PRIVATE "${bullet_SOURCE_DIR}/src")
+	target_link_libraries(
+		PhysicsInteractionTests
+		PRIVATE
+			BulletDynamics
+			BulletCollision
+			LinearMath
+			EGE::MathGeoLib)
+	set_target_properties(PhysicsInteractionTests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME PhysicsInteraction
+		COMMAND PhysicsInteractionTests)
+
+	add_executable(EngineAngelScriptApiTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/EngineAngelScriptApiTests.cpp")
+	target_compile_features(
+		EngineAngelScriptApiTests PRIVATE cxx_std_20)
+	target_compile_definitions(
+		EngineAngelScriptApiTests PRIVATE NOMINMAX)
+	target_link_libraries(
+		EngineAngelScriptApiTests
+		PRIVATE
+			Engine)
+	set_target_properties(EngineAngelScriptApiTests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME EngineAngelScriptApi
+		COMMAND EngineAngelScriptApiTests)
+
+	add_executable(PhysicsSceneScriptingE2ETests
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/PhysicsSceneScriptingE2ETests.cpp")
+	target_compile_features(
+		PhysicsSceneScriptingE2ETests PRIVATE cxx_std_20)
+	target_compile_definitions(
+		PhysicsSceneScriptingE2ETests PRIVATE NOMINMAX)
+	target_link_libraries(
+		PhysicsSceneScriptingE2ETests
+		PRIVATE
+			Engine)
+	set_target_properties(PhysicsSceneScriptingE2ETests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME PhysicsSceneScriptingE2E
+		COMMAND PhysicsSceneScriptingE2ETests)
 endif()

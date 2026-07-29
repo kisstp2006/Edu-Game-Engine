@@ -5,6 +5,9 @@
 #include "Globals.h"
 #include <list>
 #include "Primitive.h"
+#include "PhysicsContactTracker.h"
+#include "PhysicsCollisionMatrix.h"
+#include "PhysicsQuery.h"
 #include <LinearMath/btIDebugDraw.h>
 #include "Math.h"
 
@@ -23,6 +26,7 @@ class DebugDrawer;
 
 class DebugDrawer;
 class ComponentRigidBody;
+class ComponentCollider;
 
 struct PhysBody3D;
 struct PhysVehicle3D;
@@ -51,12 +55,38 @@ public:
 
 	void SetGravity(const float3& gravity);
 	float3 GetGravity() const;
+	void SetCollisionMatrix(
+		const EGE::Physics::CollisionMatrix& matrix);
+	[[nodiscard]] const EGE::Physics::CollisionMatrix&
+		GetCollisionMatrix() const;
+	[[nodiscard]] bool Raycast(
+		const float3& origin,
+		const float3& direction,
+		float maxDistance,
+		const EGE::Physics::QueryFilter& filter,
+		EGE::Physics::QueryHit& hit) const;
+	[[nodiscard]] std::vector<EGE::Physics::QueryHit> RaycastAll(
+		const float3& origin,
+		const float3& direction,
+		float maxDistance,
+		const EGE::Physics::QueryFilter& filter) const;
+	[[nodiscard]] bool SphereCast(
+		const float3& origin,
+		float radius,
+		const float3& direction,
+		float maxDistance,
+		const EGE::Physics::QueryFilter& filter,
+		EGE::Physics::QueryHit& hit) const;
+	[[nodiscard]] std::vector<EGE::Physics::QueryHit> OverlapSphere(
+		const float3& center,
+		float radius,
+		const EGE::Physics::QueryFilter& filter);
 
 	// Bodies ---
 
-	btRigidBody*	AddBody(const OBB & cube, ComponentRigidBody * component);
-	btRigidBody*	AddBody(const Sphere& sphere, ComponentRigidBody* component);
-	btRigidBody*	AddBody(const Capsule& capsule, ComponentRigidBody* component);
+	btRigidBody* AddBody(
+		ComponentRigidBody* component,
+		btRigidBody** triggerBody);
 	PhysBody3D*		AddBody(const PCylinder& cylinder, float mass = 1.0f);
 	PhysBody3D*		AddBody(const PPlane& plane);
 	PhysBody3D*		AddHeighField(const char* filename, int width, int height);
@@ -65,17 +95,21 @@ public:
 	void DeleteBody(PhysBody3D* body);
 	void DeleteBody(btRigidBody* body);
 	void Step(float fixed_delta_time);
+	void ResetContactState();
 
 	uint GetDebugMode() const;
 	void SetDebugMode(uint mode);
+	bool IsDebugEnabled() const;
+	void SetDebugEnabled(bool enabled);
 
 public:
-	bool debug = false;
 	bool paused = true;
 
 private:
 	void DeleteCollisionShape(btCollisionShape* shape);
 	void DispatchCollisions();
+	[[nodiscard]] short GetCollisionMaskBits(
+		const ComponentRigidBody& component) const;
 
 	btDefaultCollisionConfiguration*	collision_conf = nullptr;
 	btCollisionDispatcher*				dispatcher = nullptr;
@@ -84,6 +118,9 @@ private:
 	btDiscreteDynamicsWorld*			world = nullptr;
 	btDefaultVehicleRaycaster*			vehicle_raycaster = nullptr;
 	DebugDrawer*						debug_draw = nullptr;
+	EGE::Physics::ContactTracker		contact_tracker;
+	EGE::Physics::CollisionMatrix collision_matrix;
+	bool debug_enabled = false;
 
 	std::list<btCollisionShape*> shapes;
 	std::list<PhysBody3D*> bodies;
@@ -94,6 +131,8 @@ class DebugDrawer : public btIDebugDraw
 {
 public:
 	DebugDrawer()
+		: mode(static_cast<DebugDrawModes>(
+			DBG_DrawWireframe | DBG_DrawContactPoints))
 	{}
 
 	void drawLine(const btVector3& from, const btVector3& to, const btVector3& color);

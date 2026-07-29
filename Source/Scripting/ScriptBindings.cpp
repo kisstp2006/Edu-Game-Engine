@@ -8,17 +8,25 @@
 #include "../ModuleLevelManager.h"
 #include "../Globals.h"
 #include "ScriptMath.h"
+#include "ScriptPhysics.h"
+#include "ScriptPhysicsQueries.h"
 #include "ScriptCoreHelpers.h"
 #include "ScriptComponentBindings.h"
+#include "ScriptDebugDraw.h"
 #include "ScriptObjectReference.h"
+#include "ScriptSceneBindings.h"
 
 #include <angelscript.h>
 #include <SDL_mouse.h>
 #include <SDL_scancode.h>
+#include <scriptarray/scriptarray.h>
+#include <scriptstdstring/scriptstdstring.h>
 
 #include <charconv>
 #include <cctype>
+#include <cstdio>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -30,6 +38,21 @@ namespace EGE
 {
 namespace {
 
+void SelfTestMessageCallback(
+	const asSMessageInfo* message,
+	void*)
+{
+	if (!message || message->type == asMSGTYPE_INFORMATION)
+		return;
+	std::fprintf(
+		stderr,
+		"%s:%d:%d %s\n",
+		message->section ? message->section : "script",
+		message->row,
+		message->col,
+		message->message ? message->message : "AngelScript error");
+}
+
 ScriptVector3 ToScriptVector3(const float3& value)
 {
 	return {value.x, value.y, value.z};
@@ -38,6 +61,16 @@ ScriptVector3 ToScriptVector3(const float3& value)
 float3 ToEngineVector3(const ScriptVector3& value)
 {
 	return {value.x, value.y, value.z};
+}
+
+ScriptQuaternion ToScriptQuaternion(const Quat& value)
+{
+	return {value.x, value.y, value.z, value.w};
+}
+
+Quat ToEngineQuaternion(const ScriptQuaternion& value)
+{
+	return Quat(value.x, value.y, value.z, value.w).Normalized();
 }
 
 std::string Trim(std::string_view value)
@@ -159,6 +192,19 @@ std::string ConvertToString(const ScriptVector3& value)
 		FormatDouble(value.y) + ", " + FormatDouble(value.z) + ")";
 }
 
+std::string ConvertToString(const ScriptVector2& value)
+{
+	return "(" + FormatDouble(value.x) + ", " +
+		FormatDouble(value.y) + ")";
+}
+
+std::string ConvertToString(const ScriptQuaternion& value)
+{
+	return "(" + FormatDouble(value.x) + ", " +
+		FormatDouble(value.y) + ", " + FormatDouble(value.z) + ", " +
+		FormatDouble(value.w) + ")";
+}
+
 std::string ConvertToString(const ScriptColor& value)
 {
 	return "(" + FormatDouble(value.r) + ", " +
@@ -191,6 +237,66 @@ bool TryParseVector3(const std::string& value, ScriptVector3& result)
 		TryParseFloat(text.substr(first + 1, second - first - 1), parsed.y) &&
 		TryParseFloat(text.substr(second + 1), parsed.z) &&
 		(result = parsed, true);
+}
+
+bool TryParseVector2(const std::string& value, ScriptVector2& result)
+{
+	std::string text = Trim(value);
+	if (text.size() >= 2 &&
+		((text.front() == '(' && text.back() == ')') ||
+			(text.front() == '[' && text.back() == ']')))
+	{
+		text = text.substr(1, text.size() - 2);
+	}
+	const std::size_t separator = text.find(',');
+	if (separator == std::string::npos ||
+		text.find(',', separator + 1) != std::string::npos)
+	{
+		return false;
+	}
+	ScriptVector2 parsed;
+	return TryParseFloat(text.substr(0, separator), parsed.x) &&
+		TryParseFloat(text.substr(separator + 1), parsed.y) &&
+		(result = parsed, true);
+}
+
+bool TryParseQuaternion(
+	const std::string& value,
+	ScriptQuaternion& result)
+{
+	std::string text = Trim(value);
+	if (text.size() >= 2 &&
+		((text.front() == '(' && text.back() == ')') ||
+			(text.front() == '[' && text.back() == ']')))
+	{
+		text = text.substr(1, text.size() - 2);
+	}
+	float components[4] = {};
+	std::size_t begin = 0;
+	for (int index = 0; index < 4; ++index)
+	{
+		const std::size_t separator = text.find(',', begin);
+		if (index < 3 && separator == std::string::npos)
+			return false;
+		if (index == 3 && separator != std::string::npos)
+			return false;
+		const std::size_t end =
+			separator == std::string::npos ? text.size() : separator;
+		if (!TryParseFloat(
+				text.substr(begin, end - begin), components[index]))
+		{
+			return false;
+		}
+		begin = end + 1;
+	}
+	Quat rotation{
+		components[0], components[1], components[2], components[3]};
+	if (rotation.LengthSq() <= 0.0000001f)
+		return false;
+	rotation.Normalize();
+	result = {
+		rotation.x, rotation.y, rotation.z, rotation.w};
+	return true;
 }
 
 bool TryParseColor(const std::string& value, ScriptColor& result)
@@ -288,6 +394,34 @@ ScriptVector3 ConvertToVector3(const std::string& value)
 	return ConvertToVector3(value, {});
 }
 
+ScriptVector2 ConvertToVector2(
+	const std::string& value,
+	const ScriptVector2& fallback)
+{
+	ScriptVector2 result = fallback;
+	TryParseVector2(value, result);
+	return result;
+}
+
+ScriptVector2 ConvertToVector2(const std::string& value)
+{
+	return ConvertToVector2(value, {});
+}
+
+ScriptQuaternion ConvertToQuaternion(
+	const std::string& value,
+	const ScriptQuaternion& fallback)
+{
+	ScriptQuaternion result = fallback;
+	TryParseQuaternion(value, result);
+	return result;
+}
+
+ScriptQuaternion ConvertToQuaternion(const std::string& value)
+{
+	return ConvertToQuaternion(value, {});
+}
+
 ScriptColor ConvertToColor(
 	const std::string& value,
 	const ScriptColor& fallback)
@@ -378,7 +512,9 @@ bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
 		engine.RegisterGlobalFunction("string ToString(double value)", asFUNCTIONPR(ConvertToString, (double), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(float value)", asFUNCTIONPR(ConvertToString, (float), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(bool value)", asFUNCTIONPR(ConvertToString, (bool), std::string), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("string ToString(const Vector2 &in value)", asFUNCTIONPR(ConvertToString, (const ScriptVector2&), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(const Vector3 &in value)", asFUNCTIONPR(ConvertToString, (const ScriptVector3&), std::string), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("string ToString(const Quaternion &in value)", asFUNCTIONPR(ConvertToString, (const ScriptQuaternion&), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(const Color &in value)", asFUNCTIONPR(ConvertToString, (const ScriptColor&), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(GameObject@+ object)", asFUNCTIONPR(ConvertToString, (const ScriptGameObjectReference*), std::string), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("string ToString(Transform@+ transform)", asFUNCTION(ConvertTransformToString), asCALL_CDECL) >= 0 &&
@@ -388,15 +524,21 @@ bool RegisterConvertApi(asIScriptEngine& engine, std::string& error)
 		engine.RegisterGlobalFunction("bool TryParseDouble(const string &in text, double &out value)", asFUNCTION(TryParseDouble), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseFloat(const string &in text, float &out value)", asFUNCTION(TryParseFloat), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseBool(const string &in text, bool &out value)", asFUNCTION(TryParseBool), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("bool TryParseVector2(const string &in text, Vector2 &out value)", asFUNCTION(TryParseVector2), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseVector3(const string &in text, Vector3 &out value)", asFUNCTION(TryParseVector3), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("bool TryParseQuaternion(const string &in text, Quaternion &out value)", asFUNCTION(TryParseQuaternion), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool TryParseColor(const string &in text, Color &out value)", asFUNCTION(TryParseColor), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("int ToInt(const string &in text, int fallback = 0)", asFUNCTION(ConvertToInt), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("uint ToUInt(const string &in text, uint fallback = 0)", asFUNCTION(ConvertToUInt), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("double ToDouble(const string &in text, double fallback = 0)", asFUNCTION(ConvertToDouble), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("float ToFloat(const string &in text, float fallback = 0)", asFUNCTION(ConvertToFloat), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("bool ToBool(const string &in text, bool fallback = false)", asFUNCTION(ConvertToBool), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("Vector2 ToVector2(const string &in text)", asFUNCTIONPR(ConvertToVector2, (const std::string&), ScriptVector2), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("Vector2 ToVector2(const string &in text, const Vector2 &in fallback)", asFUNCTIONPR(ConvertToVector2, (const std::string&, const ScriptVector2&), ScriptVector2), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("Vector3 ToVector3(const string &in text)", asFUNCTIONPR(ConvertToVector3, (const std::string&), ScriptVector3), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("Vector3 ToVector3(const string &in text, const Vector3 &in fallback)", asFUNCTIONPR(ConvertToVector3, (const std::string&, const ScriptVector3&), ScriptVector3), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("Quaternion ToQuaternion(const string &in text)", asFUNCTIONPR(ConvertToQuaternion, (const std::string&), ScriptQuaternion), asCALL_CDECL) >= 0 &&
+		engine.RegisterGlobalFunction("Quaternion ToQuaternion(const string &in text, const Quaternion &in fallback)", asFUNCTIONPR(ConvertToQuaternion, (const std::string&, const ScriptQuaternion&), ScriptQuaternion), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("Color ToColor(const string &in text)", asFUNCTIONPR(ConvertToColor, (const std::string&), ScriptColor), asCALL_CDECL) >= 0 &&
 		engine.RegisterGlobalFunction("Color ToColor(const string &in text, const Color &in fallback)", asFUNCTIONPR(ConvertToColor, (const std::string&, const ScriptColor&), ScriptColor), asCALL_CDECL) >= 0;
 	engine.SetDefaultNamespace("");
@@ -560,6 +702,40 @@ void SetLocalScale(
 		gameObject->SetLocalScale(ToEngineVector3(scale));
 }
 
+ScriptQuaternion GetLocalRotation(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptQuaternion(gameObject->GetLocalRotationQ())
+		: ScriptQuaternion{};
+}
+
+void SetLocalRotation(
+	const ScriptQuaternion& rotation,
+	ScriptGameObjectReference* reference)
+{
+	if (GameObject* gameObject = ResolveGameObject(reference))
+		gameObject->SetLocalRotation(ToEngineQuaternion(rotation));
+}
+
+ScriptQuaternion GetRotation(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptQuaternion(gameObject->GetGlobalRotationQ())
+		: ScriptQuaternion{};
+}
+
+void SetRotation(
+	const ScriptQuaternion& rotation,
+	ScriptGameObjectReference* reference)
+{
+	if (GameObject* gameObject = ResolveGameObject(reference))
+		gameObject->SetGlobalRotation(ToEngineQuaternion(rotation));
+}
+
 ScriptVector3 GetPosition(
 	const ScriptGameObjectReference* reference)
 {
@@ -567,6 +743,43 @@ ScriptVector3 GetPosition(
 	return gameObject
 		? ToScriptVector3(gameObject->GetGlobalPosition())
 		: ScriptVector3{};
+}
+
+void SetPosition(
+	const ScriptVector3& position,
+	ScriptGameObjectReference* reference)
+{
+	if (GameObject* gameObject = ResolveGameObject(reference))
+		gameObject->SetGlobalPosition(ToEngineVector3(position));
+}
+
+ScriptVector3 GetEulerAngles(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(gameObject->GetGlobalRotationQ().ToEulerXYZ())
+		: ScriptVector3{};
+}
+
+void SetEulerAngles(
+	const ScriptVector3& angles,
+	ScriptGameObjectReference* reference)
+{
+	if (GameObject* gameObject = ResolveGameObject(reference))
+	{
+		gameObject->SetGlobalRotation(Quat::FromEulerXYZ(
+			angles.x, angles.y, angles.z));
+	}
+}
+
+ScriptVector3 GetLossyScale(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(gameObject->GetGlobalScale())
+		: ScriptVector3{1.0f, 1.0f, 1.0f};
 }
 
 void Translate(
@@ -577,15 +790,299 @@ void Translate(
 		gameObject->Move(ToEngineVector3(translation));
 }
 
+void TranslateInSpace(
+	const ScriptVector3& translation,
+	int space,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return;
+
+	float3 delta = ToEngineVector3(translation);
+	if (space == 1)
+		delta = gameObject->GetGlobalRotationQ().Transform(delta);
+	gameObject->SetGlobalPosition(gameObject->GetGlobalPosition() + delta);
+}
+
+void RotateTransform(
+	const ScriptVector3& eulerAngles,
+	int space,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return;
+
+	const Quat delta = Quat::FromEulerXYZ(
+		eulerAngles.x, eulerAngles.y, eulerAngles.z);
+	if (space == 1)
+		gameObject->SetLocalRotation(
+			gameObject->GetLocalRotationQ() * delta);
+	else
+		gameObject->SetGlobalRotation(
+			delta * gameObject->GetGlobalRotationQ());
+}
+
+void RotateAround(
+	const ScriptVector3& point,
+	const ScriptVector3& axis,
+	float radians,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	const float3 nativeAxis = ToEngineVector3(axis);
+	if (!gameObject || nativeAxis.LengthSq() <= 0.0000001f)
+		return;
+
+	const Quat delta = Quat::RotateAxisAngle(
+		nativeAxis.Normalized(), radians);
+	const float3 nativePoint = ToEngineVector3(point);
+	gameObject->SetGlobalPosition(
+		nativePoint +
+			delta.Transform(gameObject->GetGlobalPosition() - nativePoint));
+	gameObject->SetGlobalRotation(
+		delta * gameObject->GetGlobalRotationQ());
+}
+
+void LookAt(
+	const ScriptVector3& target,
+	const ScriptVector3& worldUp,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return;
+	const float3 direction =
+		ToEngineVector3(target) - gameObject->GetGlobalPosition();
+	const float3 up = ToEngineVector3(worldUp);
+	if (direction.LengthSq() <= 0.0000001f ||
+		up.LengthSq() <= 0.0000001f)
+	{
+		return;
+	}
+	gameObject->SetGlobalRotation(Quat::LookAt(
+		-float3::unitZ,
+		direction.Normalized(),
+		float3::unitY,
+		up.Normalized()));
+}
+
+ScriptVector3 TransformPoint(
+	const ScriptVector3& point,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetCalculatedGlobalTransform().TransformPos(
+				ToEngineVector3(point)))
+		: ScriptVector3{};
+}
+
+ScriptVector3 InverseTransformPoint(
+	const ScriptVector3& point,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetCalculatedGlobalTransform().Inverted().
+				TransformPos(ToEngineVector3(point)))
+		: ScriptVector3{};
+}
+
+ScriptVector3 TransformVector(
+	const ScriptVector3& vector,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetCalculatedGlobalTransform().TransformDir(
+				ToEngineVector3(vector)))
+		: ScriptVector3{};
+}
+
+ScriptVector3 InverseTransformVector(
+	const ScriptVector3& vector,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetCalculatedGlobalTransform().Inverted().
+				TransformDir(ToEngineVector3(vector)))
+		: ScriptVector3{};
+}
+
+ScriptVector3 TransformDirection(
+	const ScriptVector3& direction,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(gameObject->GetGlobalRotationQ().Transform(
+			ToEngineVector3(direction)))
+		: ScriptVector3{};
+}
+
+ScriptVector3 InverseTransformDirection(
+	const ScriptVector3& direction,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(gameObject->GetGlobalRotationQ().Inverted().
+			Transform(ToEngineVector3(direction)))
+		: ScriptVector3{};
+}
+
+ScriptGameObjectReference* GetTransformParent(
+	const ScriptGameObjectReference* reference)
+{
+	return GetParent(reference);
+}
+
+void SetTransformParent(
+	ScriptGameObjectReference* parentReference,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	GameObject* newParent = ResolveGameObject(parentReference, false);
+	if (!gameObject || !App || !App->level)
+		return;
+	gameObject->SetNewParent(
+		newParent ? newParent : App->level->GetRoot(),
+		true);
+}
+
+void SetParent(
+	ScriptGameObjectReference* parentReference,
+	bool worldPositionStays,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	GameObject* newParent = ResolveGameObject(parentReference, false);
+	if (!gameObject || !App || !App->level)
+		return;
+	gameObject->SetNewParent(
+		newParent ? newParent : App->level->GetRoot(),
+		worldPositionStays);
+}
+
+unsigned int GetChildCount(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? static_cast<unsigned int>(gameObject->childs.size())
+		: 0;
+}
+
+ScriptGameObjectReference* GetChild(
+	unsigned int index,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject || index >= gameObject->childs.size())
+		return nullptr;
+	auto child = gameObject->childs.begin();
+	std::advance(child, index);
+	return *child
+		? MakeGameObjectReference((*child)->GetUID())
+		: nullptr;
+}
+
+bool IsChildOf(
+	const ScriptGameObjectReference* parentReference,
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	const GameObject* possibleParent =
+		ResolveGameObject(parentReference, false);
+	return gameObject && possibleParent &&
+		gameObject->IsUnder(possibleParent);
+}
+
+void SetPositionAndRotation(
+	const ScriptVector3& position,
+	const ScriptQuaternion& rotation,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return;
+	gameObject->SetGlobalTransform(float4x4::FromTRS(
+		ToEngineVector3(position),
+		ToEngineQuaternion(rotation),
+		gameObject->GetGlobalScale()));
+}
+
+void SetLocalPositionAndRotation(
+	const ScriptVector3& position,
+	const ScriptQuaternion& rotation,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject)
+		return;
+	gameObject->SetLocalPosition(ToEngineVector3(position));
+	gameObject->SetLocalRotation(ToEngineQuaternion(rotation));
+}
+
 ScriptVector3 GetForward(
 	const ScriptGameObjectReference* reference)
 {
 	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(
-			gameObject->GetLocalRotationQ().Transform(
+			gameObject->GetGlobalRotationQ().Transform(
 				-float3::unitZ).Normalized())
 		: ScriptVector3{0.0f, 0.0f, -1.0f};
+}
+
+void SetForward(
+	const ScriptVector3& direction,
+	ScriptGameObjectReference* reference)
+{
+	GameObject* gameObject = ResolveGameObject(reference);
+	const float3 forward = ToEngineVector3(direction);
+	if (!gameObject || forward.LengthSq() <= 0.0000001f)
+		return;
+	float3 up = gameObject->GetGlobalRotationQ().
+		Transform(float3::unitY).Normalized();
+	if (std::abs(up.Dot(forward.Normalized())) > 0.999f)
+		up = float3::unitY;
+	gameObject->SetGlobalRotation(Quat::LookAt(
+		-float3::unitZ,
+		forward.Normalized(),
+		float3::unitY,
+		up));
+}
+
+ScriptGameObjectReference* GetTransformGameObject(
+	ScriptGameObjectReference* reference)
+{
+	if (!ResolveGameObject(reference))
+		return nullptr;
+	reference->AddRef();
+	return reference;
+}
+
+ScriptGameObjectReference* GetTransformRoot(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	if (!gameObject || !App || !App->level)
+		return nullptr;
+	const GameObject* root = gameObject;
+	while (root->GetParent() &&
+		root->GetParent() != App->level->GetRoot())
+	{
+		root = root->GetParent();
+	}
+	return MakeGameObjectReference(root->GetUID());
 }
 
 ScriptVector3 GetRight(
@@ -594,7 +1091,7 @@ ScriptVector3 GetRight(
 	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(
-			gameObject->GetLocalRotationQ().Transform(
+			gameObject->GetGlobalRotationQ().Transform(
 				float3::unitX).Normalized())
 		: ScriptVector3{1.0f, 0.0f, 0.0f};
 }
@@ -605,7 +1102,7 @@ ScriptVector3 GetUp(
 	const GameObject* gameObject = ResolveGameObject(reference);
 	return gameObject
 		? ToScriptVector3(
-			gameObject->GetLocalRotationQ().Transform(
+			gameObject->GetGlobalRotationQ().Transform(
 				float3::unitY).Normalized())
 		: ScriptVector3{0.0f, 1.0f, 0.0f};
 }
@@ -682,6 +1179,14 @@ bool ComponentsEqual(
 
 bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 {
+	if (engine.RegisterEnum("Space") < 0 ||
+		engine.RegisterEnumValue("Space", "World", 0) < 0 ||
+		engine.RegisterEnumValue("Space", "Self", 1) < 0)
+	{
+		error = "Could not register the Transform Space enum.";
+		return false;
+	}
+
 	const bool registered =
 		engine.RegisterObjectMethod(
 			"GameObject", "uint get_id() const property",
@@ -752,6 +1257,14 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform",
+			"Quaternion get_localRotation() const property",
+			asFUNCTION(GetLocalRotation), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_localRotation(const Quaternion &in) property",
+			asFUNCTION(SetLocalRotation), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
 			"Vector3 get_localScale() const property",
 			asFUNCTION(GetLocalScale), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
@@ -762,17 +1275,127 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			"Transform", "Vector3 get_position() const property",
 			asFUNCTION(GetPosition), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_position(const Vector3 &in) property",
+			asFUNCTION(SetPosition), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Quaternion get_rotation() const property",
+			asFUNCTION(GetRotation), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_rotation(const Quaternion &in) property",
+			asFUNCTION(SetRotation), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Vector3 get_eulerAngles() const property",
+			asFUNCTION(GetEulerAngles), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_eulerAngles(const Vector3 &in) property",
+			asFUNCTION(SetEulerAngles), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Vector3 get_lossyScale() const property",
+			asFUNCTION(GetLossyScale), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
 			"Transform", "void Translate(const Vector3 &in)",
 			asFUNCTION(Translate), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
+			"Transform",
+			"void Translate(const Vector3 &in, Space)",
+			asFUNCTION(TranslateInSpace), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void Rotate(const Vector3 &in radians, Space space = Space::Self)",
+			asFUNCTION(RotateTransform), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void RotateAround(const Vector3 &in point, "
+				"const Vector3 &in axis, float radians)",
+			asFUNCTION(RotateAround), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void LookAt(const Vector3 &in target, "
+				"const Vector3 &in worldUp = Math::Vector3Up)",
+			asFUNCTION(LookAt), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"Vector3 TransformPoint(const Vector3 &in) const",
+			asFUNCTION(TransformPoint), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"Vector3 InverseTransformPoint(const Vector3 &in) const",
+			asFUNCTION(InverseTransformPoint), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"Vector3 TransformVector(const Vector3 &in) const",
+			asFUNCTION(TransformVector), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"Vector3 InverseTransformVector(const Vector3 &in) const",
+			asFUNCTION(InverseTransformVector), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"Vector3 TransformDirection(const Vector3 &in) const",
+			asFUNCTION(TransformDirection), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"Vector3 InverseTransformDirection(const Vector3 &in) const",
+			asFUNCTION(InverseTransformDirection),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Transform@ get_parent() const property",
+			asFUNCTION(GetTransformParent), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_parent(Transform@+ parent) property",
+			asFUNCTION(SetTransformParent), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void SetParent(Transform@+ parent, "
+				"bool worldPositionStays = true)",
+			asFUNCTION(SetParent), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "uint get_childCount() const property",
+			asFUNCTION(GetChildCount), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Transform@ GetChild(uint index) const",
+			asFUNCTION(GetChild), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "bool IsChildOf(Transform@+ parent) const",
+			asFUNCTION(IsChildOf), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void SetPositionAndRotation(const Vector3 &in position, "
+				"const Quaternion &in rotation)",
+			asFUNCTION(SetPositionAndRotation),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void SetLocalPositionAndRotation("
+				"const Vector3 &in position, "
+				"const Quaternion &in rotation)",
+			asFUNCTION(SetLocalPositionAndRotation),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
 			"Transform", "Vector3 get_forward() const property",
 			asFUNCTION(GetForward), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"void set_forward(const Vector3 &in) property",
+			asFUNCTION(SetForward), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform", "Vector3 get_right() const property",
 			asFUNCTION(GetRight), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform", "Vector3 get_up() const property",
 			asFUNCTION(GetUp), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform",
+			"GameObject@ get_gameObject() const property",
+			asFUNCTION(GetTransformGameObject),
+			asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Transform@ get_root() const property",
+			asFUNCTION(GetTransformRoot), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform", "bool get_valid() const property",
 			asMETHOD(ScriptGameObjectReference, IsValid),
@@ -995,6 +1618,75 @@ void ValidateFlyCameraApi(Transform@ transform, float deltaTime)
 	return true;
 }
 
+static bool ValidateExpandedEngineApi(
+	asIScriptEngine& engine,
+	std::string& error)
+{
+	constexpr const char* ModuleName =
+		"__EGE_ExpandedEngineApiValidation";
+	constexpr const char* Source = R"(
+class ExpandedApiValidation
+{
+    Vector2 viewportOffset = Vector2(0.25f, 0.5f);
+    Quaternion spawnRotation =
+        Quaternion::Euler(Vector3(0.0f, 1.0f, 0.0f));
+    Camera@ camera;
+
+    void Exercise(GameObject@ owner, Transform@ transform)
+    {
+        Vector2 direction = Math::Vector2Right + Math::Vector2Up;
+        direction.Normalize();
+        Quaternion look = Quaternion::LookRotation(
+            Vector3(0.0f, 0.0f, -1.0f));
+        transform.localRotation = look;
+        transform.position = transform.position + Vector3(1.0f, 0.0f, 0.0f);
+        transform.rotation = Quaternion::Slerp(
+            transform.rotation, spawnRotation, 0.5f);
+        transform.Rotate(Vector3(0.0f, 0.1f, 0.0f), Space::Self);
+        transform.LookAt(Vector3(0.0f, 0.0f, 0.0f));
+        Vector3 world = transform.TransformPoint(Vector3(1.0f, 0.0f, 0.0f));
+        Vector3 local = transform.InverseTransformPoint(world);
+        transform.SetPositionAndRotation(world, look);
+        uint children = transform.childCount;
+        if (children > 0)
+            transform.GetChild(0).SetParent(transform, true);
+
+        Camera@ typedCamera = owner.GetComponent<Camera>();
+        if (typedCamera !is null)
+        {
+            typedCamera.fieldOfView = 70.0f;
+            Vector3 screen = typedCamera.WorldToScreenPoint(world);
+            typedCamera.ScreenToWorldPoint(screen);
+            typedCamera.ScreenPointToDirection(viewportOffset);
+        }
+        Camera@ mainCamera = Camera::main;
+
+        bool pending = Scene::loadPending;
+        string sceneName = Scene::name;
+        Prefab::Instantiate(
+            "Assets/Test.egeprefab", world, look, owner);
+        Scene::Load("Assets/Test.eduscene");
+        Scene::Reload();
+    }
+}
+)";
+
+	asIScriptModule* module =
+		engine.GetModule(ModuleName, asGM_ALWAYS_CREATE);
+	if (!module ||
+		module->AddScriptSection("ExpandedEngineApiValidation", Source) < 0 ||
+		module->Build() < 0)
+	{
+		engine.DiscardModule(ModuleName);
+		error =
+			"The Vector2, Quaternion, Transform, Camera, Scene and Prefab "
+			"APIs did not pass AngelScript compile validation.";
+		return false;
+	}
+	engine.DiscardModule(ModuleName);
+	return true;
+}
+
 static bool RegisterKeyCodeEnum(
     asIScriptEngine* engine,
     std::string& error)
@@ -1118,9 +1810,17 @@ bool RegisterEngineBindings(
     error.clear();
 	if (!RegisterMathApi(engine, error))
 		return false;
+	if (!RegisterDebugDrawApi(engine, error))
+		return false;
 	if (!RegisterCoreHelpersApi(engine, error))
 		return false;
 	if (!RegisterGameObjectApi(engine, error))
+		return false;
+	if (!RegisterSceneApi(engine, error))
+		return false;
+	if (!RegisterPhysicsApi(engine, error))
+		return false;
+	if (!RegisterPhysicsQueryApi(engine, error))
 		return false;
 	if (!RegisterConvertApi(engine, error))
 		return false;
@@ -1149,7 +1849,188 @@ bool RegisterEngineBindings(
         error = "Could not register the Input API.";
         return false;
     }
-    return ValidateFlyCameraApi(engine, error);
+    return ValidateFlyCameraApi(engine, error) &&
+		ValidateExpandedEngineApi(engine, error);
+}
+
+bool RunEngineBindingsSelfTest()
+{
+	asIScriptEngine* engine = asCreateScriptEngine();
+	if (!engine)
+		return false;
+	engine->SetMessageCallback(
+		asFUNCTION(SelfTestMessageCallback),
+		nullptr,
+		asCALL_CDECL);
+
+	std::string error;
+	RegisterStdString(engine);
+	RegisterScriptArray(engine, true);
+	bool passed =
+		engine->RegisterObjectType(
+			"GameObject", 0, asOBJ_REF) >= 0 &&
+		engine->RegisterObjectType(
+			"Transform", 0, asOBJ_REF) >= 0 &&
+		engine->RegisterObjectType(
+			"Component", 0, asOBJ_REF) >= 0 &&
+		engine->RegisterObjectBehaviour(
+			"GameObject", asBEHAVE_ADDREF, "void f()",
+			asMETHOD(ScriptGameObjectReference, AddRef),
+			asCALL_THISCALL) >= 0 &&
+		engine->RegisterObjectBehaviour(
+			"GameObject", asBEHAVE_RELEASE, "void f()",
+			asMETHOD(ScriptGameObjectReference, Release),
+			asCALL_THISCALL) >= 0 &&
+		engine->RegisterObjectBehaviour(
+			"Transform", asBEHAVE_ADDREF, "void f()",
+			asMETHOD(ScriptGameObjectReference, AddRef),
+			asCALL_THISCALL) >= 0 &&
+		engine->RegisterObjectBehaviour(
+			"Transform", asBEHAVE_RELEASE, "void f()",
+			asMETHOD(ScriptGameObjectReference, Release),
+			asCALL_THISCALL) >= 0 &&
+		engine->RegisterObjectBehaviour(
+			"Component", asBEHAVE_ADDREF, "void f()",
+			asMETHOD(ScriptComponentReference, AddRef),
+			asCALL_THISCALL) >= 0 &&
+		engine->RegisterObjectBehaviour(
+			"Component", asBEHAVE_RELEASE, "void f()",
+			asMETHOD(ScriptComponentReference, Release),
+			asCALL_THISCALL) >= 0;
+	if (passed)
+		passed = RegisterEngineBindings(*engine, error);
+	if (passed)
+	{
+		constexpr const char* source = R"(
+shared class EGEBehaviour
+{
+    GameObject@ gameObject;
+    Transform@ transform;
+    bool enabled = true;
+}
+
+class CompoundCollisionProbe : EGEBehaviour
+{
+    void OnCollisionEnter(CollisionInfo@ info)
+    {
+        Collider@ self = cast<Collider>(info.selfCollider);
+        Collider@ other = cast<Collider>(info.collider);
+        uint selfId = info.selfColliderId;
+        uint otherId = info.otherColliderId;
+        bool trigger = info.isTrigger;
+        if (self !is null)
+            self.enabled = self.enabled;
+        if (other !is null)
+            other.isTrigger = other.isTrigger;
+    }
+
+    void OnCollisionStay(CollisionInfo@ info) {}
+    void OnCollisionExit(CollisionInfo@ info) {}
+    void OnTriggerEnter(CollisionInfo@ info) {}
+    void OnTriggerStay(CollisionInfo@ info) {}
+    void OnTriggerExit(CollisionInfo@ info) {}
+
+    void BuildCompound()
+    {
+        Collider@ first = gameObject.AddComponent<Collider>();
+        Collider@ second = gameObject.AddComponent<Collider>();
+        first.shape = ColliderShape::Box;
+        second.shape = ColliderShape::Sphere;
+        second.isTrigger = true;
+    }
+
+    void DrawDebugApi()
+    {
+        Debug::enabled = true;
+        Debug::DrawPoint(Vector3(0, 0, 0));
+        Debug::DrawPoint(Vector3(0, 0, 0), Math::ColorYellow, 4, 0.1f, false);
+        Debug::DrawLine(Math::Vector3Zero, Math::Vector3One);
+        Debug::DrawLine(Math::Vector3Zero, Math::Vector3One, Math::ColorGreen);
+        Debug::DrawRay(Math::Vector3Zero, Math::Vector3Forward, Math::ColorCyan);
+        Debug::DrawArrow(Math::Vector3Zero, Math::Vector3Up, Math::ColorRed);
+        Debug::DrawCross(Math::Vector3Zero, Math::ColorWhite);
+        Debug::DrawCircle(
+            Math::Vector3Zero, Math::Vector3Up, Math::ColorBlue, 2);
+        Debug::DrawSphere(Math::Vector3Zero, Math::ColorYellow, 1);
+        Debug::DrawCapsule(
+            Math::Vector3Zero, Math::Vector3Up, Math::ColorMagenta, 0.5f, 2);
+        Debug::DrawCone(
+            Math::Vector3Zero, Math::Vector3Up, Math::ColorWhite, 1);
+        Debug::DrawBox(Math::Vector3Zero, Math::Vector3One, Math::ColorGreen);
+        Debug::DrawBounds(
+            Vector3(-1, -1, -1), Math::Vector3One, Math::ColorYellow);
+        Debug::DrawPlane(
+            Math::Vector3Zero, Math::Vector3Up, Math::ColorWhite, 4);
+        Debug::DrawAxes(Math::Vector3Zero);
+        Debug::DrawScreenText(
+            "Debug API", Vector3(16, 16, 0), Math::ColorWhite);
+    }
+
+    void QueryPhysics()
+    {
+        RaycastHit@ hit;
+        bool rayHit = Physics::Raycast(
+            Math::Vector3Zero,
+            Math::Vector3Forward,
+            hit,
+            100.0f,
+            uint(1) << 3,
+            false);
+        array<RaycastHit@>@ rayHits = Physics::RaycastAll(
+            Math::Vector3Zero,
+            Math::Vector3Forward);
+        bool sphereHit = Physics::SphereCast(
+            Math::Vector3Zero,
+            0.5f,
+            Math::Vector3Forward,
+            hit);
+        array<RaycastHit@>@ overlaps = Physics::OverlapSphere(
+            Math::Vector3Zero,
+            2.0f);
+        if (rayHit && sphereHit && hit !is null)
+        {
+            GameObject@ object = hit.gameObject;
+            RigidBody@ body = hit.rigidBody;
+            Collider@ collider = hit.collider;
+            Vector3 point = hit.point;
+            Vector3 normal = hit.normal;
+            float distance = hit.distance;
+            float fraction = hit.fraction;
+            uint layer = hit.layer;
+            bool trigger = hit.isTrigger;
+        }
+    }
+}
+
+class ScriptPeer : EGEBehaviour
+{
+    int value = 42;
+}
+
+class ScriptConsumer : EGEBehaviour
+{
+    void ResolvePeer()
+    {
+        ScriptPeer@ first = gameObject.GetComponent<ScriptPeer>();
+        bool hasPeer = gameObject.HasComponent<ScriptPeer>();
+        ScriptPeer@ tried;
+        bool foundPeer =
+            gameObject.TryGetComponent<ScriptPeer>(tried);
+        array<ScriptPeer@>@ peers =
+            gameObject.GetComponents<ScriptPeer@>();
+    }
+}
+)";
+		asIScriptModule* module = engine->GetModule(
+			"EnginePhysicsApi", asGM_ALWAYS_CREATE);
+		passed =
+			module &&
+			module->AddScriptSection(
+				"EnginePhysicsApi.as", source) >= 0 &&
+			module->Build() >= 0;
+	}
+	engine->ShutDownAndRelease();
+	return passed;
 }
 
 }

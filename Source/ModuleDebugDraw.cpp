@@ -9,7 +9,10 @@
 #include "ComponentCamera.h"
 
 #include "GL/glew.h"
+#include <algorithm>
 #include <assert.h>
+#include <cmath>
+#include <limits>
 
 #include "Leaks.h"
 
@@ -569,7 +572,7 @@ const char * DDRenderInterfaceCoreGL::textFragShaderSrc = "\n"
 
 DDRenderInterfaceCoreGL* ModuleDebugDraw::implementation = 0;
 
-ModuleDebugDraw::ModuleDebugDraw() : Module("File System", true)
+ModuleDebugDraw::ModuleDebugDraw() : Module("Debug Draw", true)
 {
 }
 
@@ -581,6 +584,7 @@ bool ModuleDebugDraw::Init(Config* config)
 {
     implementation = new DDRenderInterfaceCoreGL;
     dd::initialize(implementation);
+    clockStarted_ = false;
     return true;
 }
 
@@ -597,6 +601,9 @@ bool ModuleDebugDraw::CleanUp()
 
 void ModuleDebugDraw::Draw(ComponentCamera* camera, unsigned fbo, unsigned fb_width, unsigned fb_height)
 {
+    if (!camera || !implementation)
+        return;
+
     glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, "DebugDraw");
 
 	math::float4x4 view = camera->GetViewMatrix();
@@ -607,9 +614,350 @@ void ModuleDebugDraw::Draw(ComponentCamera* camera, unsigned fbo, unsigned fb_wi
     implementation->mvpMatrix = proj * view;
 
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    dd::flush();
+    if (!clockStarted_)
+    {
+        clockOrigin_ = std::chrono::steady_clock::now();
+        clockStarted_ = true;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - clockOrigin_);
+    dd::flush(elapsed.count());
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glPopDebugGroup();
+}
+
+void ModuleDebugDraw::Clear()
+{
+    dd::clear();
+}
+
+void ModuleDebugDraw::SetChannelEnabled(
+    DebugDrawChannel channel,
+    bool enabled)
+{
+    channelEnabled_[ChannelIndex(channel)] = enabled;
+}
+
+bool ModuleDebugDraw::IsChannelEnabled(
+    DebugDrawChannel channel) const
+{
+    return channelEnabled_[ChannelIndex(channel)];
+}
+
+void ModuleDebugDraw::DrawPoint(
+    const float3& position,
+    const float3& color,
+    float size,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::point(
+            position,
+            color,
+            std::max(size, 1.0f),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawLine(
+    const float3& from,
+    const float3& to,
+    const float3& color,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::line(
+            from,
+            to,
+            color,
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawRay(
+    const float3& origin,
+    const float3& direction,
+    const float3& color,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    DrawLine(
+        origin,
+        origin + direction,
+        color,
+        duration,
+        depthTest,
+        channel);
+}
+
+void ModuleDebugDraw::DrawArrow(
+    const float3& from,
+    const float3& to,
+    const float3& color,
+    float headSize,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::arrow(
+            from,
+            to,
+            color,
+            std::max(headSize, 0.001f),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawCross(
+    const float3& center,
+    const float3& color,
+    float size,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    const float halfSize = std::max(size, 0.0f) * 0.5f;
+    DrawLine(
+        center - float3::unitX * halfSize,
+        center + float3::unitX * halfSize,
+        color,
+        duration,
+        depthTest,
+        channel);
+    DrawLine(
+        center - float3::unitY * halfSize,
+        center + float3::unitY * halfSize,
+        color,
+        duration,
+        depthTest,
+        channel);
+    DrawLine(
+        center - float3::unitZ * halfSize,
+        center + float3::unitZ * halfSize,
+        color,
+        duration,
+        depthTest,
+        channel);
+}
+
+void ModuleDebugDraw::DrawCircle(
+    const float3& center,
+    const float3& normal,
+    const float3& color,
+    float radius,
+    int segments,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::circle(
+            center,
+            normal.Normalized(),
+            color,
+            std::max(radius, 0.0f),
+            static_cast<float>(std::max(segments, 3)),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawSphere(
+    const float3& center,
+    const float3& color,
+    float radius,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::sphere(
+            center,
+            color,
+            std::max(radius, 0.0f),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawCapsule(
+    const float3& center,
+    const float3& direction,
+    const float3& color,
+    float radius,
+    float height,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        const float3 safeDirection = direction.LengthSq() > 0.000001f
+            ? direction.Normalized()
+            : float3::unitY;
+        dd::capsule(
+            center,
+            color,
+            std::max(radius, 0.0f),
+            safeDirection,
+            std::max(height, 0.0f),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawCone(
+    const float3& apex,
+    const float3& direction,
+    const float3& color,
+    float baseRadius,
+    float apexRadius,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::cone(
+            apex,
+            direction,
+            color,
+            std::max(baseRadius, 0.0f),
+            std::max(apexRadius, 0.0f),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawBox(
+    const float3& center,
+    const float3& size,
+    const float3& color,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::box(
+            center,
+            color,
+            std::abs(size.x),
+            std::abs(size.y),
+            std::abs(size.z),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawBox(
+    const std::array<float3, 8>& corners,
+    const float3& color,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::box(
+            corners.data(),
+            color,
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawBounds(
+    const float3& minimum,
+    const float3& maximum,
+    const float3& color,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::aabb(
+            minimum.Min(maximum),
+            minimum.Max(maximum),
+            color,
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawPlane(
+    const float3& center,
+    const float3& normal,
+    const float3& color,
+    float size,
+    float normalSize,
+    float duration,
+    bool depthTest,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel))
+    {
+        dd::plane(
+            center,
+            normal.Normalized(),
+            color,
+            color,
+            std::max(size, 0.0f),
+            std::max(normalSize, 0.0f),
+            DurationMilliseconds(duration),
+            depthTest);
+    }
+}
+
+void ModuleDebugDraw::DrawScreenText(
+    const std::string& text,
+    const float2& position,
+    const float3& color,
+    float scale,
+    float duration,
+    DebugDrawChannel channel)
+{
+    if (IsChannelEnabled(channel) && !text.empty())
+    {
+        dd::screenText(
+            text.c_str(),
+            float3(position.x, position.y, 0.0f),
+            color,
+            std::max(scale, 0.01f),
+            DurationMilliseconds(duration));
+    }
+}
+
+int ModuleDebugDraw::DurationMilliseconds(float duration)
+{
+    if (!std::isfinite(duration) || duration <= 0.0f)
+        return 0;
+    constexpr float maximum =
+        static_cast<float>(std::numeric_limits<int>::max()) / 1000.0f;
+    return static_cast<int>(std::min(duration, maximum) * 1000.0f);
+}
+
+std::size_t ModuleDebugDraw::ChannelIndex(DebugDrawChannel channel)
+{
+    const std::size_t index = static_cast<std::size_t>(channel);
+    return std::min(
+        index,
+        static_cast<std::size_t>(DebugDrawChannel::Count) - 1);
 }
 
 

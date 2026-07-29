@@ -10,10 +10,11 @@
 #include <string>
 #include <vector>
 
-#define RESERVED_RESOURCES 9 // Engine-owned meshes and fallback textures.
+#define RESERVED_RESOURCES 10 // Engine-owned meshes and fallback textures.
 
 class Resource;
 class LoaderAnimation;
+class ResourceMaterial;
 class ResourceMesh;
 class ResourceTexture;
 class Texture3D;
@@ -150,11 +151,20 @@ public:
     const ResourceTexture* GetDefaultLoopNoise() const { return loopNoise;  }
     const Texture3D*       GetDefaultLUT() const { return lut.get();}
 
-	const ResourceMesh*    GetDefaultBox() const { return cube; }
+	const ResourceMesh*    GetDefaultCube() const { return cube; }
+	const ResourceMesh*    GetDefaultBox() const { return GetDefaultCube(); }
 	const ResourceMesh*    GetDefaultSphere() const { return sphere; }
 	const ResourceMesh*    GetDefaultPlane() const { return plane; }
 	const ResourceMesh*    GetDefaultCylinder() const { return cylinder; }
     const ResourceMesh*    GetDefaultCone() const {return cone; }
+    const ResourceMaterial* GetDefaultMaterial() const
+    {
+        return default_material.get();
+    }
+    ResourceMaterial* GetDefaultMaterial()
+    {
+        return default_material.get();
+    }
 
     const char* GetDirByType(Resource::Type type) const;
 
@@ -166,7 +176,7 @@ private:
     bool LoadDefaultBlueNoise();
     bool LoadDefaultLoopNoise();
     bool LoadDefaultSkybox();
-    bool LoadDefaultBox();
+    bool LoadDefaultCube();
 	bool LoadDefaultSphere();
     bool LoadDefaultRedImage();
 	bool LoadDefaultPlane();
@@ -179,7 +189,7 @@ private:
 
 private:
 	std::string asset_folder;
-	UID last_uid = RESERVED_RESOURCES + 1; // reserve 1 for standard cube mesh
+	UID last_uid = RESERVED_RESOURCES + 1;
 	std::map<UID, Resource*> resources;
 	std::vector<Resource*> removed;
 
@@ -197,6 +207,7 @@ private:
     ResourceTexture* black_fallback = nullptr;
     ResourceTexture* blueNoise = nullptr;
     ResourceTexture* loopNoise = nullptr;
+    std::unique_ptr<ResourceMaterial> default_material;
     std::unique_ptr<Texture3D> lut;
 };
 

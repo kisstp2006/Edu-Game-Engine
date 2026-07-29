@@ -812,7 +812,9 @@ void PanelConfiguration::DrawModulePhysics(ModulePhysics3D * module)
 	if (ImGui::DragFloat3("Gravity", &gravity.x, 0.1f))
 		App->physics3D->SetGravity(gravity);
 
-	ImGui::Checkbox("Debug Draw", &App->physics3D->debug);
+	bool debugEnabled = App->physics3D->IsDebugEnabled();
+	if (ImGui::Checkbox("Debug Draw", &debugEnabled))
+		App->physics3D->SetDebugEnabled(debugEnabled);
 
 	ImGui::Text("Debug Draw Flags:");
 	uint mode = App->physics3D->GetDebugMode();

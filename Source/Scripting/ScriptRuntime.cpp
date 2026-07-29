@@ -1,9 +1,11 @@
 #include "../Globals.h"
+#include "../Resource.h"
 
 #include "ScriptRuntime.h"
 #include "ScriptInstanceContext.h"
 #include "ScriptMath.h"
 #include "ScriptObjectReference.h"
+#include "ScriptPhysics.h"
 #include "ScriptResource.h"
 
 #include "../Reflection/PropertySerializer.h"
@@ -373,8 +375,25 @@ shared class EGEBehaviour
 				{
 					return PropertyKind::GameObjectReference;
 				}
-				if (typeName == "Component")
+				if (typeName == "Component" ||
+					typeName == "Camera" ||
+					typeName == "MeshRenderer" ||
+					typeName == "Animation" ||
+					typeName == "AudioSource" ||
+					typeName == "AudioListener" ||
+					typeName == "RigidBody" ||
+					typeName == "Collider")
 					return PropertyKind::ComponentReference;
+				if (typeName == "Model" ||
+					typeName == "Material" ||
+					typeName == "Texture" ||
+					typeName == "Mesh" ||
+					typeName == "AudioClip" ||
+					typeName == "AnimationClip" ||
+					typeName == "AnimationStateMachine")
+				{
+					return PropertyKind::ResourceReference;
+				}
 				return PropertyKind::Unsupported;
 			}
 			if ((type->GetFlags() & asOBJ_ENUM) != 0)
@@ -382,8 +401,12 @@ shared class EGEBehaviour
 			const std::string typeName = type->GetName();
 			if (typeName == "string")
 				return PropertyKind::String;
+			if (typeName == "Vector2")
+				return PropertyKind::Vector2;
 			if (typeName == "Vector3")
 				return PropertyKind::Vector3;
+			if (typeName == "Quaternion")
+				return PropertyKind::Quaternion;
 			if (typeName == "Color")
 				return PropertyKind::Color;
 			return PropertyKind::Unsupported;
@@ -393,6 +416,7 @@ shared class EGEBehaviour
 			const void* rawObject,
 			asUINT propertyIndex,
 			PropertyKind kind,
+			int resourceType,
 			PropertyValue& value)
 		{
 			if (!rawObject)
@@ -462,12 +486,40 @@ shared class EGEBehaviour
 								: 0};
 						return true;
 					}
+				case PropertyKind::ResourceReference:
+					{
+						auto* reference =
+							*static_cast<
+								ScriptResourceReference**>(address);
+						value = ResourceReferenceValue{
+							reference
+								? reference->GetResourceId()
+								: 0,
+							resourceType};
+						return true;
+					}
 				case PropertyKind::Vector3:
 					{
 						const auto& vector =
 							*static_cast<ScriptVector3*>(address);
 						value = Vector3Value{
 							vector.x, vector.y, vector.z};
+						return true;
+					}
+				case PropertyKind::Vector2:
+					{
+						const auto& vector =
+							*static_cast<ScriptVector2*>(address);
+						value = Vector2Value{vector.x, vector.y};
+						return true;
+					}
+				case PropertyKind::Quaternion:
+					{
+						const auto& rotation =
+							*static_cast<ScriptQuaternion*>(address);
+						value = QuaternionValue{
+							rotation.x, rotation.y,
+							rotation.z, rotation.w};
 						return true;
 					}
 				case PropertyKind::Color:
@@ -487,6 +539,7 @@ shared class EGEBehaviour
 			void* rawObject,
 			asUINT propertyIndex,
 			PropertyKind kind,
+			int resourceType,
 			const PropertyValue& value)
 		{
 			if (!rawObject)
@@ -582,11 +635,40 @@ shared class EGEBehaviour
 								reference.componentId));
 						return true;
 					}
+				case PropertyKind::ResourceReference:
+					{
+						auto*& destination =
+							*static_cast<
+								ScriptResourceReference**>(address);
+						if (destination)
+							destination->Release();
+						const auto reference =
+							std::get<ResourceReferenceValue>(value);
+						destination = MakeResourceReference(
+							reference.resourceId,
+							resourceType);
+						return true;
+					}
 				case PropertyKind::Vector3:
 					{
 						const auto source = std::get<Vector3Value>(value);
 						*static_cast<ScriptVector3*>(address) = {
 							source.x, source.y, source.z};
+						return true;
+					}
+				case PropertyKind::Vector2:
+					{
+						const auto source = std::get<Vector2Value>(value);
+						*static_cast<ScriptVector2*>(address) = {
+							source.x, source.y};
+						return true;
+					}
+				case PropertyKind::Quaternion:
+					{
+						const auto source =
+							std::get<QuaternionValue>(value);
+						*static_cast<ScriptQuaternion*>(address) = {
+							source.x, source.y, source.z, source.w};
 						return true;
 					}
 				case PropertyKind::Color:
@@ -634,6 +716,12 @@ shared class EGEBehaviour
 			asIScriptFunction* update = nullptr;
 			asIScriptFunction* lateUpdate = nullptr;
 			asIScriptFunction* collision = nullptr;
+			asIScriptFunction* collisionEnter = nullptr;
+			asIScriptFunction* collisionStay = nullptr;
+			asIScriptFunction* collisionExit = nullptr;
+			asIScriptFunction* triggerEnter = nullptr;
+			asIScriptFunction* triggerStay = nullptr;
+			asIScriptFunction* triggerExit = nullptr;
 			asIScriptFunction* stop = nullptr;
 			asIScriptFunction* destroy = nullptr;
 			asIScriptFunction* enable = nullptr;
@@ -1276,17 +1364,53 @@ shared class EGEBehaviour
 			if (descriptor.kind != PropertyKind::Unsupported)
 			{
 				const PropertyKind kind = descriptor.kind;
-				descriptor.reader = [propertyIndex, kind](
+				int resourceType = static_cast<int>(Resource::unknown);
+				if (descriptor.kind == PropertyKind::ResourceReference)
+				{
+					const asITypeInfo* propertyType =
+						engine->GetTypeInfoById(typeId);
+					const std::string propertyTypeName =
+						propertyType ? propertyType->GetName() : "";
+					if (propertyTypeName == "Model")
+						resourceType = Resource::model;
+					else if (propertyTypeName == "Material")
+						resourceType = Resource::material;
+					else if (propertyTypeName == "Texture")
+						resourceType = Resource::texture;
+					else if (propertyTypeName == "Mesh")
+						resourceType = Resource::mesh;
+					else if (propertyTypeName == "AudioClip")
+						resourceType = Resource::audio;
+					else if (propertyTypeName == "AnimationClip")
+						resourceType = Resource::animation;
+					else if (
+						propertyTypeName ==
+							"AnimationStateMachine")
+					{
+						resourceType = Resource::state_machine;
+					}
+				}
+				descriptor.reader = [
+					propertyIndex, kind, resourceType](
 					const void* object, PropertyValue& value)
 				{
 					return ReadScriptProperty(
-						object, propertyIndex, kind, value);
+						object,
+						propertyIndex,
+						kind,
+						resourceType,
+						value);
 				};
-				descriptor.writer = [propertyIndex, kind](
+				descriptor.writer = [
+					propertyIndex, kind, resourceType](
 					void* object, const PropertyValue& value)
 				{
 					return WriteScriptProperty(
-						object, propertyIndex, kind, value);
+						object,
+						propertyIndex,
+						kind,
+						resourceType,
+						value);
 				};
 			}
 			return descriptor;
@@ -1341,6 +1465,24 @@ shared class EGEBehaviour
 				binding.collision =
 					type->GetMethodByDecl(
 						"void OnCollision(GameObject@)");
+				binding.collisionEnter =
+					type->GetMethodByDecl(
+						"void OnCollisionEnter(CollisionInfo@)");
+				binding.collisionStay =
+					type->GetMethodByDecl(
+						"void OnCollisionStay(CollisionInfo@)");
+				binding.collisionExit =
+					type->GetMethodByDecl(
+						"void OnCollisionExit(CollisionInfo@)");
+				binding.triggerEnter =
+					type->GetMethodByDecl(
+						"void OnTriggerEnter(CollisionInfo@)");
+				binding.triggerStay =
+					type->GetMethodByDecl(
+						"void OnTriggerStay(CollisionInfo@)");
+				binding.triggerExit =
+					type->GetMethodByDecl(
+						"void OnTriggerExit(CollisionInfo@)");
 				binding.stop =
 					type->GetMethodByDecl("void OnStop()");
 				binding.destroy =
@@ -1359,7 +1501,14 @@ shared class EGEBehaviour
 				const bool hasLifecycle =
 					binding.awake || binding.start || binding.fixedUpdate ||
 					binding.update || binding.lateUpdate ||
-					binding.collision || binding.stop ||
+					binding.collision ||
+					binding.collisionEnter ||
+					binding.collisionStay ||
+					binding.collisionExit ||
+					binding.triggerEnter ||
+					binding.triggerStay ||
+					binding.triggerExit ||
+					binding.stop ||
 					binding.destroy ||
 					binding.enable || binding.disable ||
 					binding.beforeReload || binding.afterReload;
@@ -1722,7 +1871,18 @@ shared class EGEBehaviour
 				<< "    void OnFixedUpdate(float deltaTime);\n"
 				<< "    void OnUpdate(float deltaTime);\n"
 				<< "    void OnLateUpdate(float deltaTime);\n"
-				<< "    void OnCollision(GameObject@ other);\n"
+				<< "    void OnCollision(GameObject@ other);\n";
+			if (engine->GetTypeInfoByName("CollisionInfo"))
+			{
+				definitions
+					<< "    void OnCollisionEnter(CollisionInfo@ info);\n"
+					<< "    void OnCollisionStay(CollisionInfo@ info);\n"
+					<< "    void OnCollisionExit(CollisionInfo@ info);\n"
+					<< "    void OnTriggerEnter(CollisionInfo@ info);\n"
+					<< "    void OnTriggerStay(CollisionInfo@ info);\n"
+					<< "    void OnTriggerExit(CollisionInfo@ info);\n";
+			}
+			definitions
 				<< "    void OnDisable();\n"
 				<< "    void OnStop();\n"
 				<< "    void OnDestroy();\n"
@@ -1809,6 +1969,7 @@ shared class EGEBehaviour
 					}
 				}
 				definitions << " {\n";
+				bool emitAnalyzerEulerYxzProperty = false;
 
 				for (asUINT behaviorIndex = 0;
 					behaviorIndex < type->GetBehaviourCount();
@@ -1847,6 +2008,10 @@ shared class EGEBehaviour
 					asIScriptFunction* method = type->GetMethodByIndex(m);
 					if (method)
 					{
+						emitAnalyzerEulerYxzProperty |=
+							method->IsProperty() &&
+							std::string_view(method->GetName()) ==
+								"get_localEulerAnglesYXZ";
 						definitions
 							<< "    "
 							<< method->GetDeclaration(false, true, true);
@@ -1855,6 +2020,9 @@ shared class EGEBehaviour
 						definitions << ";\n";
 					}
 				}
+				if (emitAnalyzerEulerYxzProperty)
+				definitions
+					<< "    Vector3 localEulerAnglesYXZ;\n";
 
 				// Properties
 				for (asUINT p = 0; p < type->GetPropertyCount(); ++p)
@@ -2469,6 +2637,71 @@ shared class EGEBehaviour
 			instance.executionFaulted = true;
 	}
 
+	void ScriptRuntime::PhysicsEventInstance(
+		ScriptInstanceHandle handle,
+		Physics::ContactPhase phase,
+		const Physics::CollisionInfo& info)
+	{
+		const auto iterator = impl_->instances.find(handle);
+		if (iterator == impl_->instances.end())
+			return;
+
+		Impl::ScriptInstance& instance = iterator->second;
+		if (!instance.object || !instance.running || !instance.enabled ||
+			!impl_->IsScriptEnabled(instance) || instance.executionFaulted)
+		{
+			return;
+		}
+
+		const auto binding = impl_->classes.find(instance.className);
+		if (binding == impl_->classes.end())
+			return;
+
+		asIScriptFunction* function = nullptr;
+		if (info.isTrigger)
+		{
+			switch (phase)
+			{
+				case Physics::ContactPhase::Enter:
+					function = binding->second.triggerEnter;
+					break;
+				case Physics::ContactPhase::Stay:
+					function = binding->second.triggerStay;
+					break;
+				case Physics::ContactPhase::Exit:
+					function = binding->second.triggerExit;
+					break;
+			}
+		}
+		else
+		{
+			switch (phase)
+			{
+				case Physics::ContactPhase::Enter:
+					function = binding->second.collisionEnter;
+					break;
+				case Physics::ContactPhase::Stay:
+					function = binding->second.collisionStay;
+					break;
+				case Physics::ContactPhase::Exit:
+					function = binding->second.collisionExit;
+					break;
+			}
+		}
+
+		if (!function)
+			return;
+
+		auto* collision = new ScriptCollisionInfo(info);
+		const bool succeeded = impl_->InvokeInstanceWithObject(
+			instance,
+			function,
+			collision);
+		collision->Release();
+		if (!succeeded)
+			instance.executionFaulted = true;
+	}
+
 	void ScriptRuntime::StopInstance(ScriptInstanceHandle handle)
 	{
 		const auto iterator = impl_->instances.find(handle);
@@ -2568,6 +2801,31 @@ shared class EGEBehaviour
 		return iterator != impl_->instances.end()
 			? iterator->second.className
 			: std::string();
+	}
+
+	asIScriptObject* ScriptRuntime::AcquireInstanceObject(
+		ScriptInstanceHandle handle,
+		const asITypeInfo& requestedType) const
+	{
+		std::lock_guard lock(impl_->executionMutex);
+		const auto iterator = impl_->instances.find(handle);
+		if (iterator == impl_->instances.end() ||
+			!iterator->second.object)
+		{
+			return nullptr;
+		}
+
+		asIScriptObject* object = iterator->second.object;
+		asITypeInfo* actualType = object->GetObjectType();
+		if (!actualType ||
+			(actualType != &requestedType &&
+				!actualType->DerivesFrom(&requestedType)))
+		{
+			return nullptr;
+		}
+
+		object->AddRef();
+		return object;
 	}
 
 	bool ScriptRuntime::HasLoadedScripts() const

@@ -498,7 +498,9 @@ void GeometryBatch::CreateMaterialBuffer()
         for (const std::pair<const ComponentMeshRenderer *, uint> &object : objects)
         {
             MaterialData &out = matData[object.second];
-            const ResourceMaterial *material = reinterpret_cast<const ResourceMaterial *>(App->resources->Get(object.first->GetMaterialRes()->GetUID()));
+            out = {};
+            const ResourceMaterial* material =
+                object.first->GetMaterialRes();
 
             const SpecularGlossData &data = material->GetSpecularGlossData();
 
@@ -549,7 +551,9 @@ void GeometryBatch::CreateMaterialBuffer()
         for (const std::pair<const ComponentMeshRenderer *, uint> &object : objects)
         {
             MaterialData &out = matData[object.second];
-            const ResourceMaterial *material = reinterpret_cast<const ResourceMaterial *>(App->resources->Get(object.first->GetMaterialRes()->GetUID()));
+            out = {};
+            const ResourceMaterial* material =
+                object.first->GetMaterialRes();
 
             const MetallicRoughData &data = material->GetMetallicRoughData();
 

@@ -577,7 +577,7 @@ namespace EGE
 		const ResourceMesh* mesh =
 			shape_ == Shape::Sphere
 				? App->resources->GetDefaultSphere()
-				: App->resources->GetDefaultBox();
+				: App->resources->GetDefaultCube();
 		if (mesh)
 		{
 			const float previewScale =

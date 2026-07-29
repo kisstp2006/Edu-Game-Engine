@@ -7,6 +7,11 @@
 
 #include "Leaks.h"
 
+namespace
+{
+	constexpr float DefaultNearPlaneDistance = 0.6f;
+}
+
 // ---------------------------------------------------------
 ComponentCamera::ComponentCamera(GameObject* container) : Component(container, Types::Camera)
 {
@@ -16,7 +21,7 @@ ComponentCamera::ComponentCamera(GameObject* container) : Component(container, T
 	frustum.front = float3::unitZ;
 	frustum.up = float3::unitY;
 
-	frustum.nearPlaneDistance = 100.0f;
+	frustum.nearPlaneDistance = DefaultNearPlaneDistance;
 	frustum.farPlaneDistance = 10000.0f;
 	frustum.verticalFov = DEGTORAD * 60.0f;
 	SetAspectRatio(1.3f);
@@ -70,7 +75,8 @@ void ComponentCamera::OnLoad(Config * config)
 	frustum.up.y = config->GetFloat("Frustum", 1.f, 7);
 	frustum.up.z = config->GetFloat("Frustum", 0.f, 8);
 
-	frustum.nearPlaneDistance = config->GetFloat("Frustum", 100.0f, 9);
+	frustum.nearPlaneDistance =
+		config->GetFloat("Frustum", DefaultNearPlaneDistance, 9);
 	frustum.farPlaneDistance = config->GetFloat("Frustum", 10000.f, 10);
 
 	frustum.horizontalFov = config->GetFloat("Frustum", 1.f, 11);
@@ -80,7 +86,7 @@ void ComponentCamera::OnLoad(Config * config)
 // -----------------------------------------------------------------
 void ComponentCamera::OnUpdateTransform()
 {
-	float4x4 trans = game_object->GetGlobalTransformation();
+	float4x4 trans = game_object->GetCalculatedGlobalTransform();
 
 	frustum.pos = trans.TranslatePart();
 	frustum.front = -trans.WorldZ();

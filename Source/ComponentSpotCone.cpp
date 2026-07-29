@@ -141,6 +141,7 @@ void ComponentSpotCone::setHeight(float newHeight)
     {
         height = newHeight;
         reCreateMesh();
+		InvalidateBoundingBox();
     }
 }
 
@@ -150,6 +151,7 @@ void ComponentSpotCone::setRadius(float newRadius)
     {
         radius = newRadius;
         reCreateMesh();
+		InvalidateBoundingBox();
     }
 }
 

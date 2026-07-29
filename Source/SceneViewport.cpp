@@ -13,6 +13,7 @@
 #include "ModulePrograms.h"
 #include "ModuleResources.h"
 #include "ModuleLevelManager.h"
+#include "ModulePhysics3D.h"
 #include "Postprocess.h"
 #include "DepthPrepass.h"
 #include "GBufferExportPass.h"
@@ -110,7 +111,16 @@ void SceneViewport::Draw(ComponentCamera* camera, ComponentCamera* culling)
             dd::xzSquareGrid(-100.0f, 100.0f, 0.0f, 1.0f, dd::colors::Gray);
         }
 
-        if (debug_draw == true)
+        App->debug_draw->SetChannelEnabled(
+            DebugDrawChannel::Engine,
+            debug_draw);
+        const bool physicsDebug =
+            App->physics3D->IsDebugEnabled();
+        App->debug_draw->SetChannelEnabled(
+            DebugDrawChannel::Physics,
+            physicsDebug);
+
+        if (debug_draw || physicsDebug)
         {
             App->DebugDraw();
         }
@@ -426,7 +436,7 @@ void SceneViewport::DrawQuickBar(ComponentCamera* camera)
 
     if (ImGui::BeginChild(
 			"ToolCanvas",
-			ImVec2(405.0f, toolbarHeight),
+			ImVec2(500.0f, toolbarHeight),
 			true,
 			ImGuiWindowFlags_NoMove))
     {
@@ -460,6 +470,10 @@ void SceneViewport::DrawQuickBar(ComponentCamera* camera)
         ImGui::Checkbox("Axis", &draw_axis);
         ImGui::SameLine();
         ImGui::Checkbox("Dbg Draw", &debug_draw);
+        ImGui::SameLine();
+        bool physicsDebug = App->physics3D->IsDebugEnabled();
+        if (ImGui::Checkbox("Physics", &physicsDebug))
+            App->physics3D->SetDebugEnabled(physicsDebug);
 
         ImGui::EndChild();
 

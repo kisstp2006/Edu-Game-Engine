@@ -307,6 +307,8 @@ namespace EGE
 					definition.step = 1.0;
 				definition.restartRequired = ReadBool(
 					settingObject, "RestartRequired", false);
+				definition.editorHidden = ReadBool(
+					settingObject, "EditorHidden", false);
 
 				if (definition.type == SettingType::Enumeration)
 				{

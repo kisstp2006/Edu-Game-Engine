@@ -26,6 +26,7 @@
 #include "OpenGL.h"
 
 #include <filesystem>
+#include <array>
 
 using namespace std;
 
@@ -411,6 +412,7 @@ update_status Application::Update()
 // ---------------------------------------------
 void Application::FinishUpdate()
 {
+	level->ProcessPendingSceneChange();
 	level->FlushPendingDestructions();
 	if (editor)
 		editor->SynchronizeSceneHistory();
@@ -735,6 +737,24 @@ void Application::ApplySettings()
 				project.GetNumber("physics.gravity_y", -10.0)),
 			static_cast<float>(
 				project.GetNumber("physics.gravity_z", 0.0))));
+
+		std::array<
+			std::uint32_t,
+			EGE::Physics::CollisionLayerCount> collisionRows;
+		for (std::uint32_t layer = 0;
+			layer < EGE::Physics::CollisionLayerCount;
+			++layer)
+		{
+			collisionRows[layer] = static_cast<std::uint32_t>(
+				project.GetInt(
+					"physics.collision_matrix_" +
+						std::to_string(layer),
+					static_cast<int>(
+						EGE::Physics::AllCollisionLayers)));
+		}
+		EGE::Physics::CollisionMatrix collisionMatrix;
+		collisionMatrix.SetRows(collisionRows);
+		physics3D->SetCollisionMatrix(collisionMatrix);
 	}
 
 	if (scripting)

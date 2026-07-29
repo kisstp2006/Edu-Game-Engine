@@ -8,6 +8,7 @@
 #include "ComponentMeshRenderer.h"
 #include "ComponentCamera.h"
 #include "ComponentRigidBody.h"
+#include "ComponentCollider.h"
 #include "ComponentSteering.h"
 #include "ComponentPath.h"
 #include "ComponentAnimation.h"
@@ -174,9 +175,19 @@ void GameObject::LoadComponents(
 			if (regeneratedComponentIds)
 				(*regeneratedComponentIds)[serializedUid] =
 					component->GetUID();
-			else
+            else
 				component->SetUID(serializedUid);
             component->OnLoad(&component_conf);
+
+			if (type == Component::Types::RigidBody &&
+				component_conf.GetInt(
+					"Collider Storage Version", 0) == 0)
+			{
+				auto* collider = static_cast<ComponentCollider*>(
+					CreateComponent(Component::Types::Collider));
+				if (collider)
+					collider->LoadLegacyRigidBody(component_conf);
+			}
         }
         else
             LOG("Cannot load component type UNKNOWN for gameobject %s", name.c_str());
@@ -267,6 +278,24 @@ void GameObject::OnCollision(GameObject* other)
 	}
 }
 
+void GameObject::OnPhysicsEvent(
+	EGE::Physics::ContactPhase phase,
+	const EGE::Physics::CollisionInfo& info)
+{
+	if (pending_destroy)
+		return;
+
+	for (Component* component : components)
+	{
+		if (component &&
+			component->IsActive() &&
+			!component->flag_for_removal)
+		{
+			component->OnPhysicsEvent(phase, info);
+		}
+	}
+}
+
 // ---------------------------------------------------------
 void GameObject::OnStop()
 {
@@ -317,10 +346,15 @@ void GameObject::RecalculateBoundingBox()
 	}
 }
 
+void GameObject::InvalidateBoundingBox()
+{
+	bounding_box_dirty = true;
+}
+
 // ---------------------------------------------------------
 Component* GameObject::CreateComponent(Component::Types type)
 {
-	static_assert(Component::Types::Unknown == 17, "code needs update");
+	static_assert(Component::Types::Unknown == 18, "code needs update");
 
 	Component* ret = nullptr;
 
@@ -377,10 +411,16 @@ Component* GameObject::CreateComponent(Component::Types type)
 		case Component::Types::Script:
 			ret = new ComponentScript(this);
 			break;
+		case Component::Types::Collider:
+			ret = new ComponentCollider(this);
+			break;
 	}
 
 	if (ret != nullptr)
+	{
 		components.push_back(ret);
+		InvalidateBoundingBox();
+	}
 
 	return ret;
 }
@@ -397,17 +437,19 @@ bool GameObject::RemoveComponent(Component* component)
 
 	component->SetActive(false);
 	component->flag_for_removal = true;
-	local_trans_dirty = true;
+	InvalidateBoundingBox();
 	return true;
 }
 
 // ---------------------------------------------------------
 void GameObject::SetNewParent(GameObject * new_parent, bool recalc_transformation)
 {
-	float4x4 current_global = GetGlobalTransformation();
-
 	if (new_parent == parent)
 		return;
+	if (new_parent == this || (new_parent && new_parent->IsUnder(this)))
+		return;
+
+	const float4x4 current_global = GetCalculatedGlobalTransform();
 
 	if (parent)
 		parent->childs.remove(this);
@@ -422,7 +464,13 @@ void GameObject::SetNewParent(GameObject * new_parent, bool recalc_transformatio
 	// we want to keep the same global transformation even if we are somewhere else in
 	// transformation hierarchy
 	if (recalc_transformation == true)
-		SetLocalTransform(current_global * new_parent->GetLocalTransform().Inverted());
+	{
+		SetLocalTransform(
+			new_parent
+				? new_parent->GetCalculatedGlobalTransform().Inverted() *
+					current_global
+				: current_global);
+	}
 }
 
 // ---------------------------------------------------------
@@ -440,7 +488,7 @@ float3 GameObject::GetLocalPosition() const
 // ---------------------------------------------------------
 float3 GameObject::GetGlobalPosition() const
 {
-	return transform_global.TranslatePart();
+	return GetCalculatedGlobalTransform().TranslatePart();
 }
 
 // ---------------------------------------------------------
@@ -459,9 +507,31 @@ Quat GameObject::GetLocalRotationQ() const
 }
 
 // ---------------------------------------------------------
+Quat GameObject::GetGlobalRotationQ() const
+{
+	float3 position;
+	Quat worldRotation;
+	float3 worldScale;
+	GetCalculatedGlobalTransform().Decompose(
+		position, worldRotation, worldScale);
+	return worldRotation.Normalized();
+}
+
+// ---------------------------------------------------------
 float3 GameObject::GetLocalScale() const
 {
 	return scale;
+}
+
+// ---------------------------------------------------------
+float3 GameObject::GetGlobalScale() const
+{
+	float3 position;
+	Quat worldRotation;
+	float3 worldScale;
+	GetCalculatedGlobalTransform().Decompose(
+		position, worldRotation, worldScale);
+	return worldScale;
 }
 
 // ---------------------------------------------------------
@@ -504,9 +574,8 @@ void GameObject::SetGlobalTransform(const float4x4 &transform)
 {
 	if(parent)
 	{
-		float4x4 parentTransf = parent->GetGlobalTransformation();
-		parentTransf.InverseColOrthogonal();
-		SetLocalTransform(parentTransf*transform);
+		SetLocalTransform(
+			parent->GetCalculatedGlobalTransform().Inverted() * transform);
 	}
 	else
 	{
@@ -519,6 +588,42 @@ void GameObject::SetLocalPosition(const float3 & position)
 {
 	translation = position;
 	local_trans_dirty = true;
+}
+
+// ---------------------------------------------------------
+void GameObject::SetGlobalPosition(const float3& position)
+{
+	float3 currentPosition;
+	Quat currentRotation;
+	float3 currentScale;
+	GetCalculatedGlobalTransform().Decompose(
+		currentPosition, currentRotation, currentScale);
+	SetGlobalTransform(float4x4::FromTRS(
+		position, currentRotation, currentScale));
+}
+
+// ---------------------------------------------------------
+void GameObject::SetGlobalRotation(const Quat& rotation)
+{
+	float3 currentPosition;
+	Quat currentRotation;
+	float3 currentScale;
+	GetCalculatedGlobalTransform().Decompose(
+		currentPosition, currentRotation, currentScale);
+	SetGlobalTransform(float4x4::FromTRS(
+		currentPosition, rotation.Normalized(), currentScale));
+}
+
+// ---------------------------------------------------------
+void GameObject::SetGlobalScale(const float3& scale)
+{
+	float3 currentPosition;
+	Quat currentRotation;
+	float3 currentScale;
+	GetCalculatedGlobalTransform().Decompose(
+		currentPosition, currentRotation, currentScale);
+	SetGlobalTransform(float4x4::FromTRS(
+		currentPosition, currentRotation, scale));
 }
 
 // ---------------------------------------------------------
@@ -544,7 +649,25 @@ const float4x4& GameObject::GetGlobalTransformation() const
 // ---------------------------------------------------------
 const float4x4& GameObject::GetLocalTransform() const
 {
+	if (local_trans_dirty)
+	{
+		transform_cache = float4x4::FromTRS(
+			translation, rotation, scale);
+	}
 	return transform_cache;
+}
+
+// ---------------------------------------------------------
+float4x4 GameObject::GetCalculatedGlobalTransform() const
+{
+	float4x4 result = GetLocalTransform();
+	for (const GameObject* ancestor = parent;
+		ancestor;
+		ancestor = ancestor->parent)
+	{
+		result = ancestor->GetLocalTransform() * result;
+	}
+	return result;
 }
 
 // ---------------------------------------------------------
@@ -577,7 +700,8 @@ void GameObject::RecursiveCalcGlobalTransform(const float4x4& parent, bool force
 // ---------------------------------------------------------
 void GameObject::RecursiveCalcBoundingBoxes()
 {
-	if (was_dirty == true)
+	calculated_bbox = false;
+	if (was_dirty || bounding_box_dirty)
 	{
 		RecalculateBoundingBox();
 
@@ -589,6 +713,8 @@ void GameObject::RecursiveCalcBoundingBoxes()
 
 		App->level->quadtree.Erase(this);
 		App->level->quadtree.Insert(this);
+		bounding_box_dirty = false;
+		calculated_bbox = true;
 	}
 
 	for (list<GameObject*>::iterator it = childs.begin(); it != childs.end(); ++it)
