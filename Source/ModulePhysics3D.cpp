@@ -5,6 +5,7 @@
 #include "PhysBody3D.h"
 #include "PhysVehicle3D.h"
 #include "ComponentRigidBody.h"
+#include "GameObject.h"
 #include "Config.h"
 #include "DebugDraw.h"
 #include "Event.h"
@@ -21,7 +22,56 @@
 #include <btBulletDynamicsCommon.h>
 #include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 using namespace std;
+
+namespace
+{
+	float3 MultiplyComponents(const float3& left, const float3& right)
+	{
+		return {
+			left.x * right.x,
+			left.y * right.y,
+			left.z * right.z};
+	}
+
+	float3 GetGlobalScale(const ComponentRigidBody& component)
+	{
+		const GameObject* gameObject = component.GetGameObject();
+		if (!gameObject)
+			return float3::one;
+
+		float3 translation;
+		float3 scale;
+		Quat rotation;
+		gameObject->GetGlobalTransformation().Decompose(
+			translation, rotation, scale);
+		const auto preserveSign = [](float value)
+		{
+			if (std::abs(value) >= 0.0001f)
+				return value;
+			return value < 0.0f ? -0.0001f : 0.0001f;
+		};
+		return {
+			preserveSign(scale.x),
+			preserveSign(scale.y),
+			preserveSign(scale.z)};
+	}
+
+	btTransform MakeChildTransform(
+		const float3& center,
+		const Quat& rotation = Quat::identity)
+	{
+		btTransform transform;
+		transform.setIdentity();
+		transform.setOrigin(center);
+		transform.setRotation(rotation);
+		return transform;
+	}
+}
  
 ModulePhysics3D::ModulePhysics3D(bool start_enabled) : Module("Physics", start_enabled)
 {
@@ -71,9 +121,24 @@ bool ModulePhysics3D::Start(Config* config)
 btRigidBody* ModulePhysics3D::AddBody(const OBB& cube, ComponentRigidBody* component)
 {
 	float mass = (component->behaviour == ComponentRigidBody::BodyBehaviour::dynamic) ? component->mass : 0.0f;
+	const float3 scale = GetGlobalScale(*component);
+	const float3 absoluteScale(
+		std::abs(scale.x),
+		std::abs(scale.y),
+		std::abs(scale.z));
+	const float3 halfExtents =
+		MultiplyComponents(cube.r, absoluteScale);
+	const float3 center = MultiplyComponents(cube.pos, scale);
 
-	btCollisionShape* colShape = new btBoxShape(cube.r);
+	auto* childShape = new btBoxShape(halfExtents);
+	auto* colShape = new btCompoundShape();
+	const Quat localRotation =
+		float3x3(cube.axis[0], cube.axis[1], cube.axis[2]).ToQuat();
+	colShape->addChildShape(
+		MakeChildTransform(center, localRotation),
+		childShape);
 
+	shapes.push_back(childShape);
 	shapes.push_back(colShape);
 
 	btVector3 localInertia(0.f, 0.f, 0.f);
@@ -83,6 +148,8 @@ btRigidBody* ModulePhysics3D::AddBody(const OBB& cube, ComponentRigidBody* compo
 	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, component, colShape, localInertia);
 
 	btRigidBody* body = new btRigidBody(rbInfo);
+	body->setUserPointer(component);
+	body->setUserIndex(ComponentRigidBody::PhysicsUserIndex);
 	world->addRigidBody(body);
 
 	return body;
@@ -92,7 +159,18 @@ btRigidBody* ModulePhysics3D::AddBody(const OBB& cube, ComponentRigidBody* compo
 btRigidBody* ModulePhysics3D::AddBody(const Sphere& sphere, ComponentRigidBody* component)
 {
 	float mass = (component->behaviour == ComponentRigidBody::BodyBehaviour::dynamic) ? component->mass : 0.0f;
-	btCollisionShape* colShape = new btSphereShape(sphere.r);
+	const float3 scale = GetGlobalScale(*component);
+	const float radiusScale = std::max({
+		std::abs(scale.x),
+		std::abs(scale.y),
+		std::abs(scale.z)});
+	const float3 center = MultiplyComponents(sphere.pos, scale);
+
+	auto* childShape = new btSphereShape(
+		std::max(sphere.r * radiusScale, 0.001f));
+	auto* colShape = new btCompoundShape();
+	colShape->addChildShape(MakeChildTransform(center), childShape);
+	shapes.push_back(childShape);
 	shapes.push_back(colShape);
 
 	btVector3 localInertia(0, 0, 0);
@@ -102,6 +180,8 @@ btRigidBody* ModulePhysics3D::AddBody(const Sphere& sphere, ComponentRigidBody* 
 	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, component, colShape, localInertia);
 
 	btRigidBody* body = new btRigidBody(rbInfo);
+	body->setUserPointer(component);
+	body->setUserIndex(ComponentRigidBody::PhysicsUserIndex);
 	world->addRigidBody(body);
 
 	return body;
@@ -111,7 +191,27 @@ btRigidBody* ModulePhysics3D::AddBody(const Sphere& sphere, ComponentRigidBody* 
 btRigidBody * ModulePhysics3D::AddBody(const Capsule & capsule, ComponentRigidBody * component)
 {
 	float mass = (component->behaviour == ComponentRigidBody::BodyBehaviour::dynamic) ? component->mass : 0.0f;
-	btCollisionShape* colShape = new btCapsuleShape(capsule.r, capsule.LineLength());
+	const float3 scale = GetGlobalScale(*component);
+	const float3 start = MultiplyComponents(capsule.l.a, scale);
+	const float3 end = MultiplyComponents(capsule.l.b, scale);
+	const float3 center = (start + end) * 0.5f;
+	const float3 axis = end - start;
+	const float lineLength = axis.Length();
+	const float radiusScale = std::max({
+		std::abs(scale.x),
+		std::abs(scale.y),
+		std::abs(scale.z)});
+	const float radius = std::max(capsule.r * radiusScale, 0.001f);
+
+	auto* childShape = new btCapsuleShape(radius, lineLength);
+	auto* colShape = new btCompoundShape();
+	const Quat localRotation = lineLength > 0.0001f
+		? Quat::RotateFromTo(float3::unitY, axis / lineLength)
+		: Quat::identity;
+	colShape->addChildShape(
+		MakeChildTransform(center, localRotation),
+		childShape);
+	shapes.push_back(childShape);
 	shapes.push_back(colShape);
 
 	btVector3 localInertia(0, 0, 0);
@@ -121,6 +221,8 @@ btRigidBody * ModulePhysics3D::AddBody(const Capsule & capsule, ComponentRigidBo
 	btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, component, colShape, localInertia);
 
 	btRigidBody* body = new btRigidBody(rbInfo);
+	body->setUserPointer(component);
+	body->setUserIndex(ComponentRigidBody::PhysicsUserIndex);
 	world->addRigidBody(body);
 
 	return body;
@@ -328,14 +430,30 @@ void ModulePhysics3D::DeleteBody(btRigidBody * body)
 
 	btCollisionShape* shape = body->getCollisionShape();
 	delete body;
+	DeleteCollisionShape(shape);
+}
 
-	const auto found =
-		std::find(shapes.begin(), shapes.end(), shape);
-	if (found != shapes.end())
+void ModulePhysics3D::DeleteCollisionShape(btCollisionShape* shape)
+{
+	if (!shape)
+		return;
+
+	std::vector<btCollisionShape*> children;
+	if (shape->isCompound())
 	{
-		delete *found;
-		shapes.erase(found);
+		auto* compound = static_cast<btCompoundShape*>(shape);
+		children.reserve(compound->getNumChildShapes());
+		for (int index = 0; index < compound->getNumChildShapes(); ++index)
+			children.push_back(compound->getChildShape(index));
 	}
+
+	const auto found = std::find(shapes.begin(), shapes.end(), shape);
+	if (found != shapes.end())
+		shapes.erase(found);
+	delete shape;
+
+	for (btCollisionShape* child : children)
+		DeleteCollisionShape(child);
 }
 
 // ---------------------------------------------------------
@@ -353,49 +471,96 @@ void ModulePhysics3D::SetDebugMode(uint mode)
 // ---------------------------------------------------------
 update_status ModulePhysics3D::PreUpdate(float dt)
 {
-	if (paused || !world)
-		return UPDATE_CONTINUE;
+	return UPDATE_CONTINUE;
+}
 
-	const std::uint32_t stepCount =
-		App ? App->GetTime().GetFixedStepCount() : 1;
-	const float fixedDeltaTime =
-		App ? App->GetTime().GetFixedDeltaTime() : dt;
-	for (std::uint32_t step = 0; step < stepCount; ++step)
+void ModulePhysics3D::Step(float fixed_delta_time)
+{
+	if (paused || !world || fixed_delta_time <= 0.0f)
+		return;
+
+	world->stepSimulation(
+		fixed_delta_time,
+		1,
+		fixed_delta_time);
+	DispatchCollisions();
+}
+
+void ModulePhysics3D::DispatchCollisions()
+{
+	const int manifoldCount =
+		world->getDispatcher()->getNumManifolds();
+	for (int manifoldIndex = 0;
+			manifoldIndex < manifoldCount;
+			++manifoldIndex)
 	{
-		world->stepSimulation(
-			fixedDeltaTime,
-			1,
-			fixedDeltaTime);
-	}
+		btPersistentManifold* manifold =
+			world->getDispatcher()->getManifoldByIndexInternal(
+				manifoldIndex);
+		if (!manifold)
+			continue;
 
-	// Update transformations
-
-	// Detect collisions
-	int numManifolds = world->getDispatcher()->getNumManifolds();
-	for(int i = 0; i<numManifolds; i++)
-	{
-		btPersistentManifold* contactManifold = world->getDispatcher()->getManifoldByIndexInternal(i);
-		btCollisionObject* obA = (btCollisionObject*) (contactManifold->getBody0());
-		btCollisionObject* obB = (btCollisionObject*) (contactManifold->getBody1());
-
-		int numContacts = contactManifold->getNumContacts();
-		if(numContacts > 0)
+		bool touching = false;
+		for (int contactIndex = 0;
+			contactIndex < manifold->getNumContacts();
+			++contactIndex)
 		{
-			PhysBody3D* pbodyA = (PhysBody3D*)obA->getUserPointer();
-			PhysBody3D* pbodyB = (PhysBody3D*)obB->getUserPointer();
-
-			if(pbodyA && pbodyB)
+			if (manifold->getContactPoint(contactIndex).getDistance() <= 0.0f)
 			{
-				for (list<Module*>::iterator it = pbodyA->collision_listeners.begin(); it != pbodyA->collision_listeners.end(); ++it)
-					(*it)->OnCollision(pbodyA, pbodyB);
-
-				for (list<Module*>::iterator it = pbodyB->collision_listeners.begin(); it != pbodyB->collision_listeners.end(); ++it)
-					(*it)->OnCollision(pbodyB, pbodyA);
+				touching = true;
+				break;
 			}
 		}
-	}
+		if (!touching)
+			continue;
 
-	return UPDATE_CONTINUE;
+		auto* objectA = const_cast<btCollisionObject*>(
+			static_cast<const btCollisionObject*>(
+				manifold->getBody0()));
+		auto* objectB = const_cast<btCollisionObject*>(
+			static_cast<const btCollisionObject*>(
+				manifold->getBody1()));
+		if (!objectA || !objectB)
+			continue;
+
+		const bool componentBodyA =
+			objectA->getUserIndex() ==
+				ComponentRigidBody::PhysicsUserIndex;
+		const bool componentBodyB =
+			objectB->getUserIndex() ==
+				ComponentRigidBody::PhysicsUserIndex;
+		if (componentBodyA && componentBodyB)
+		{
+			auto* componentA = static_cast<ComponentRigidBody*>(
+				objectA->getUserPointer());
+			auto* componentB = static_cast<ComponentRigidBody*>(
+				objectB->getUserPointer());
+			GameObject* ownerA =
+				componentA ? componentA->GetGameObject() : nullptr;
+			GameObject* ownerB =
+				componentB ? componentB->GetGameObject() : nullptr;
+			if (ownerA && ownerB && ownerA != ownerB)
+			{
+				ownerA->OnCollision(ownerB);
+				ownerB->OnCollision(ownerA);
+			}
+			continue;
+		}
+		if (componentBodyA || componentBodyB)
+			continue;
+
+		auto* bodyA = static_cast<PhysBody3D*>(
+			objectA->getUserPointer());
+		auto* bodyB = static_cast<PhysBody3D*>(
+			objectB->getUserPointer());
+		if (!bodyA || !bodyB)
+			continue;
+
+		for (Module* listener : bodyA->collision_listeners)
+			listener->OnCollision(bodyA, bodyB);
+		for (Module* listener : bodyB->collision_listeners)
+			listener->OnCollision(bodyB, bodyA);
+	}
 }
 
 // ---------------------------------------------------------

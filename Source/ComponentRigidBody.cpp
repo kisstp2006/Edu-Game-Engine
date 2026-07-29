@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 
 using namespace std;
 
@@ -68,6 +69,7 @@ void ComponentRigidBody::OnSave(Config& config) const
 	config.AddFloat("Rolling Friction", rolling_friction);
 	config.AddFloat("Linear Damping", linear_damping);
 	config.AddFloat("Angular Damping", angular_damping);
+	config.AddBool("Use World Gravity", use_world_gravity);
 	config.AddFloat3("Gravity", gravity);
 }
 
@@ -108,6 +110,13 @@ void ComponentRigidBody::OnLoad(Config * config)
 		config->GetFloat("Angular Damping", 0.0f);
 	gravity = config->GetFloat3(
 		"Gravity", float3(0.0f, -10.0f, 0.0f));
+	const bool hasLegacyCustomGravity =
+		!gravity.Equals(
+			float3(0.0f, -10.0f, 0.0f),
+			0.0001f);
+	use_world_gravity = config->GetBool(
+		"Use World Gravity",
+		!hasLegacyCustomGravity);
 
 	linear_factor.x = config->GetFloat("Linear Factor", 1.f, 0);
 	linear_factor.y = config->GetFloat("Linear Factor", 1.f, 1);
@@ -142,6 +151,16 @@ void ComponentRigidBody::OnPlay()
 		CreateBody();
 }
 
+void ComponentRigidBody::OnFixedUpdate(float deltaTime)
+{
+	if (!body)
+		return;
+
+	const float3 currentScale = GetAbsoluteGlobalScale();
+	if (!currentScale.Equals(collision_scale, 0.0001f))
+		RebuildBody();
+}
+
 // ---------------------------------------------------------
 void ComponentRigidBody::OnStop()
 {
@@ -158,22 +177,62 @@ void ComponentRigidBody::OnDebugDraw(bool selected) const
 	if (selected == false)
 		return;
 
+	const float4x4& globalTransform =
+		game_object->GetGlobalTransformation();
+	const float3 globalScale = GetAbsoluteGlobalScale();
+	const float radiusScale = std::max({
+		globalScale.x,
+		globalScale.y,
+		globalScale.z});
+	const Quat globalRotation =
+		globalTransform.RotatePart().ToQuat().Normalized();
 	switch (body_type)
 	{
 		case body_sphere:
-			dd::sphere(game_object->GetGlobalTransformation().TransformPos(sphere.pos), dd::colors::Green, sphere.r);
+		{
+			dd::sphere(
+				globalTransform.TransformPos(sphere.pos),
+				dd::colors::Green,
+				sphere.r * radiusScale);
+		}
 		break;
 		case body_box:
-			dd::box(box.CenterPoint(), dd::colors::Green, box.Size().x, box.Size().y, box.Size().z);
+		{
+			OBB worldBox;
+			worldBox.pos = globalTransform.TransformPos(box.pos);
+			worldBox.r = float3(
+				box.r.x * globalScale.x,
+				box.r.y * globalScale.y,
+				box.r.z * globalScale.z);
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				worldBox.axis[axis] =
+					globalRotation.Transform(box.axis[axis]).Normalized();
+			}
+			float3 corners[8];
+			worldBox.GetCornerPoints(corners);
+			dd::box(corners, dd::colors::Green);
+		}
 		break;
 		case body_capsule:
         {
-            float3 pos = (capsule.l.a+capsule.l.b)*0.5f;
-            float3 dir = (capsule.l.b-capsule.l.a);
+			const float3 worldStart =
+				globalTransform.TransformPos(capsule.l.a);
+			const float3 worldEnd =
+				globalTransform.TransformPos(capsule.l.b);
+            float3 pos = (worldStart + worldEnd) * 0.5f;
+            float3 dir = worldEnd - worldStart;
             float len = dir.Length();
 
-            dd::capsule(game_object->GetGlobalTransformation().TransformPos(pos), dd::colors::Green, capsule.r, 
-                        game_object->GetGlobalTransformation().TransformDir(dir/len), len);
+			if (len > 0.0001f)
+			{
+				dd::capsule(
+					pos,
+					dd::colors::Green,
+					capsule.r * radiusScale,
+					dir / len,
+					len);
+			}
         }
 		break;
 	}
@@ -189,20 +248,32 @@ void ComponentRigidBody::getWorldTransform(btTransform & worldTrans) const
 // ---------------------------------------------------------
 void ComponentRigidBody::setWorldTransform(const btTransform & worldTrans)
 {
-	btQuaternion rot = worldTrans.getRotation();
-    btVector3 pos = worldTrans.getOrigin();
+	const Quat globalRotation(worldTrans.getRotation());
+	const float3 globalPosition(worldTrans.getOrigin());
 
-	float4x4 new_global(rot, pos);
+	GameObject* parent = game_object->GetParent();
+	float3 localPosition = globalPosition;
+	Quat localRotation = globalRotation;
+	if (parent)
+	{
+		const float4x4& parentTransform =
+			parent->GetGlobalTransformation();
+		localPosition =
+			parentTransform.Inverted().TransformPos(globalPosition);
 
-	// now find out our new local transformation in order to meet the global one from physics
-	float4x4 new_local = new_global * game_object->GetParent()->GetLocalTransform().Inverted();
-	float3 translation, scale;
-	Quat rotation;
+		float3 parentPosition;
+		float3 parentScale;
+		Quat parentRotation;
+		parentTransform.Decompose(
+			parentPosition,
+			parentRotation,
+			parentScale);
+		localRotation =
+			(parentRotation.Inverted() * globalRotation).Normalized();
+	}
 
-	new_local.Decompose(translation, rotation, scale);
-	game_object->SetLocalPosition(translation);
-	game_object->SetLocalRotation(rotation);
-	game_object->SetLocalScale(scale);
+	game_object->SetLocalPosition(localPosition);
+	game_object->SetLocalRotation(localRotation);
 }
 
 // ---------------------------------------------------------
@@ -229,6 +300,7 @@ void ComponentRigidBody::CreateBody()
 
 	if (body != nullptr)
 	{
+		collision_scale = GetAbsoluteGlobalScale();
 		ApplyBodyConfiguration();
 	}
 }
@@ -504,16 +576,37 @@ float3 ComponentRigidBody::GetTotalTorque() const
 	return body ? float3(body->getTotalTorque()) : float3::zero;
 }
 
+bool ComponentRigidBody::GetUseWorldGravity() const
+{
+	return use_world_gravity;
+}
+
+void ComponentRigidBody::SetUseWorldGravity(bool value)
+{
+	use_world_gravity = value;
+	if (body)
+		ApplyBodyConfiguration();
+}
+
 float3 ComponentRigidBody::GetGravity() const
 {
-	return body ? float3(body->getGravity()) : gravity;
+	if (body)
+		return float3(body->getGravity());
+	if (use_world_gravity &&
+		App &&
+		App->physics3D)
+	{
+		return App->physics3D->GetGravity();
+	}
+	return gravity;
 }
 
 void ComponentRigidBody::SetGravity(const float3& value)
 {
 	gravity = value;
+	use_world_gravity = false;
 	if (body)
-		body->setGravity(value);
+		ApplyBodyConfiguration();
 }
 
 bool ComponentRigidBody::IsAwake() const
@@ -611,6 +704,24 @@ void ComponentRigidBody::RebuildBody()
 	SetAngularVelocity(angularVelocity);
 }
 
+float3 ComponentRigidBody::GetAbsoluteGlobalScale() const
+{
+	if (!game_object)
+		return float3::one;
+
+	float3 position;
+	float3 scale;
+	Quat rotation;
+	game_object->GetGlobalTransformation().Decompose(
+		position,
+		rotation,
+		scale);
+	return {
+		std::max(std::abs(scale.x), 0.0001f),
+		std::max(std::abs(scale.y), 0.0001f),
+		std::max(std::abs(scale.z), 0.0001f)};
+}
+
 void ComponentRigidBody::ApplyBodyConfiguration()
 {
 	if (!body)
@@ -644,7 +755,21 @@ void ComponentRigidBody::ApplyBodyConfiguration()
 	body->setFriction(friction);
 	body->setRollingFriction(rolling_friction);
 	body->setDamping(linear_damping, angular_damping);
-	body->setGravity(gravity);
+	int rigidBodyFlags = body->getFlags();
+	if (use_world_gravity)
+	{
+		rigidBodyFlags &= ~BT_DISABLE_WORLD_GRAVITY;
+		body->setGravity(
+			App && App->physics3D
+				? App->physics3D->GetGravity()
+				: float3(0.0f, -10.0f, 0.0f));
+	}
+	else
+	{
+		rigidBodyFlags |= BT_DISABLE_WORLD_GRAVITY;
+		body->setGravity(gravity);
+	}
+	body->setFlags(rigidBodyFlags);
 	if (behaviour == BodyBehaviour::kinematic)
 		body->setActivationState(DISABLE_DEACTIVATION);
 	else
@@ -727,9 +852,16 @@ void ComponentRigidBody::DrawEditor()
 		SetAngularFactor(vector);
 	}
 
-	vector = GetGravity();
-	if (ImGui::DragFloat3("Gravity", &vector.x, 0.05f))
-		SetGravity(vector);
+	bool useWorldGravity = GetUseWorldGravity();
+	if (ImGui::Checkbox("Use World Gravity", &useWorldGravity))
+		SetUseWorldGravity(useWorldGravity);
+
+	if (!useWorldGravity)
+	{
+		vector = GetGravity();
+		if (ImGui::DragFloat3("Gravity", &vector.x, 0.05f))
+			SetGravity(vector);
+	}
 
 	if (body != nullptr)
 	{

@@ -62,6 +62,7 @@ public:
 	virtual void OnFixedUpdate(float dt) {};
 	virtual void OnUpdate(float dt) {};
 	virtual void OnLateUpdate(float dt) {};
+	virtual void OnCollision(GameObject* other) {};
 	virtual void OnFinish() {};
 
 	virtual void OnPlay() {};

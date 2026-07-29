@@ -14,6 +14,8 @@ class ComponentRigidBody : public Component, public btMotionState
 {
 	friend class ModulePhysics3D;
 public:
+	static constexpr int PhysicsUserIndex = 0x45474552;
+
 	enum BodyType
 	{
 		body_sphere,
@@ -41,6 +43,7 @@ public:
 	void OnActivate() override;
 	void OnDeActivate() override;
 	void OnPlay() override;
+	void OnFixedUpdate(float deltaTime) override;
 	void OnStop() override;
 	void OnDebugDraw(bool selected) const override;
 
@@ -95,6 +98,8 @@ public:
 	float3 GetCenterOfMass() const;
 	float3 GetTotalForce() const;
 	float3 GetTotalTorque() const;
+	bool GetUseWorldGravity() const;
+	void SetUseWorldGravity(bool value);
 	float3 GetGravity() const;
 	void SetGravity(const float3& value);
 	bool IsAwake() const;
@@ -119,6 +124,7 @@ private:
 	void ResetShapes();
 	void CreateBody();
 	void ApplyBodyConfiguration();
+	[[nodiscard]] float3 GetAbsoluteGlobalScale() const;
 
 private:
 
@@ -137,8 +143,10 @@ private:
 	float linear_damping = 0.0f;
 	float angular_damping = 0.0f;
 	float3 gravity = float3(0.0f, -10.0f, 0.0f);
+	bool use_world_gravity = true;
 	float3 linear_factor = float3::one;
 	float3 angular_factor = float3::one;
+	float3 collision_scale = float3::one;
 };
 
 #endif // __COMPONENT_RIGID_BODY_H__

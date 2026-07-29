@@ -64,6 +64,7 @@ public:
 
 	void DeleteBody(PhysBody3D* body);
 	void DeleteBody(btRigidBody* body);
+	void Step(float fixed_delta_time);
 
 	uint GetDebugMode() const;
 	void SetDebugMode(uint mode);
@@ -73,6 +74,8 @@ public:
 	bool paused = true;
 
 private:
+	void DeleteCollisionShape(btCollisionShape* shape);
+	void DispatchCollisions();
 
 	btDefaultCollisionConfiguration*	collision_conf = nullptr;
 	btCollisionDispatcher*				dispatcher = nullptr;

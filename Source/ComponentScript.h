@@ -24,6 +24,7 @@ public:
 	void OnFixedUpdate(float deltaTime) override;
 	void OnUpdate(float deltaTime) override;
 	void OnLateUpdate(float deltaTime) override;
+	void OnCollision(GameObject* other) override;
 	void OnStop() override;
 	void RemapSerializedReferences(
 		const std::map<uint, uint>& gameObjectIds,

@@ -251,6 +251,22 @@ void GameObject::OnLateUpdate(float dt)
 		(*it)->OnLateUpdate(dt);
 }
 
+void GameObject::OnCollision(GameObject* other)
+{
+	if (!other || pending_destroy)
+		return;
+
+	for (Component* component : components)
+	{
+		if (component &&
+			component->IsActive() &&
+			!component->flag_for_removal)
+		{
+			component->OnCollision(other);
+		}
+	}
+}
+
 // ---------------------------------------------------------
 void GameObject::OnStop()
 {

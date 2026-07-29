@@ -518,6 +518,21 @@ namespace EGE
 			return body && body->IsAwake();
 		}
 
+		bool GetUseWorldGravity(
+			const ScriptComponentReference* reference)
+		{
+			ComponentRigidBody* body = ResolveRigidBody(reference);
+			return body && body->GetUseWorldGravity();
+		}
+
+		void SetUseWorldGravity(
+			bool value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentRigidBody* body = ResolveRigidBody(reference))
+				body->SetUseWorldGravity(value);
+		}
+
 		void WakeUp(ScriptComponentReference* reference)
 		{
 			if (ComponentRigidBody* body = ResolveRigidBody(reference))
@@ -800,6 +815,16 @@ namespace EGE
 					"RigidBody",
 					"bool get_isAwake() const property",
 					asFUNCTION(GetIsAwake),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"RigidBody",
+					"bool get_useWorldGravity() const property",
+					asFUNCTION(GetUseWorldGravity),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"RigidBody",
+					"void set_useWorldGravity(bool) property",
+					asFUNCTION(SetUseWorldGravity),
 					asCALL_CDECL_OBJLAST) >= 0;
 
 #undef EGE_REGISTER_RIGID_FLOAT
@@ -919,6 +944,7 @@ void ValidateTypedComponentApi(GameObject@ object)
         Vector3 torque = first.totalTorque;
         bool hasRuntimeBody = first.hasRuntimeBody;
         bool awake = first.isAwake;
+        first.useWorldGravity = first.useWorldGravity;
 
         first.WakeUp();
         first.Sleep();

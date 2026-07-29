@@ -55,6 +55,7 @@ shared class EGEBehaviour
     void OnFixedUpdate(float deltaTime) {}
     void OnUpdate(float deltaTime) {}
     void OnLateUpdate(float deltaTime) {}
+    void OnCollision(GameObject@ other) {}
     void OnDisable() {}
     void OnStop() {}
     void OnDestroy() {}
@@ -632,6 +633,7 @@ shared class EGEBehaviour
 			asIScriptFunction* fixedUpdate = nullptr;
 			asIScriptFunction* update = nullptr;
 			asIScriptFunction* lateUpdate = nullptr;
+			asIScriptFunction* collision = nullptr;
 			asIScriptFunction* stop = nullptr;
 			asIScriptFunction* destroy = nullptr;
 			asIScriptFunction* enable = nullptr;
@@ -990,6 +992,36 @@ shared class EGEBehaviour
 				instance.context.get());
 		}
 
+		bool InvokeInstanceWithObject(
+			ScriptInstance& instance,
+			asIScriptFunction* function,
+			void* argument)
+		{
+			if (!function)
+				return true;
+
+			std::lock_guard lock(executionMutex);
+			ScriptExecutionError error;
+			if (instance.context->ExecuteWithObject(
+					*function,
+					instance.object,
+					argument,
+					error))
+			{
+				return true;
+			}
+
+			RecordExecutionError(error);
+			LOG(
+				"[AngelScript] Execution of %s failed at %s(%d, %d): %s",
+				function->GetDeclaration(),
+				error.file.string().c_str(),
+				error.line,
+				error.column,
+				error.message.c_str());
+			return false;
+		}
+
 		bool IsScriptEnabled(const ScriptInstance& instance) const
 		{
 			if (!instance.object)
@@ -1306,6 +1338,9 @@ shared class EGEBehaviour
 					type->GetMethodByDecl("void OnUpdate(float)");
 				binding.lateUpdate =
 					type->GetMethodByDecl("void OnLateUpdate(float)");
+				binding.collision =
+					type->GetMethodByDecl(
+						"void OnCollision(GameObject@)");
 				binding.stop =
 					type->GetMethodByDecl("void OnStop()");
 				binding.destroy =
@@ -1323,7 +1358,8 @@ shared class EGEBehaviour
 					builder.GetMetadataForType(type->GetTypeId());
 				const bool hasLifecycle =
 					binding.awake || binding.start || binding.fixedUpdate ||
-					binding.update || binding.lateUpdate || binding.stop ||
+					binding.update || binding.lateUpdate ||
+					binding.collision || binding.stop ||
 					binding.destroy ||
 					binding.enable || binding.disable ||
 					binding.beforeReload || binding.afterReload;
@@ -1686,6 +1722,7 @@ shared class EGEBehaviour
 				<< "    void OnFixedUpdate(float deltaTime);\n"
 				<< "    void OnUpdate(float deltaTime);\n"
 				<< "    void OnLateUpdate(float deltaTime);\n"
+				<< "    void OnCollision(GameObject@ other);\n"
 				<< "    void OnDisable();\n"
 				<< "    void OnStop();\n"
 				<< "    void OnDestroy();\n"
@@ -2399,6 +2436,37 @@ shared class EGEBehaviour
 		{
 			instance.executionFaulted = true;
 		}
+	}
+
+	void ScriptRuntime::CollisionInstance(
+		ScriptInstanceHandle handle,
+		std::uint32_t otherObjectId)
+	{
+		const auto iterator = impl_->instances.find(handle);
+		if (iterator == impl_->instances.end() || otherObjectId == 0)
+			return;
+
+		Impl::ScriptInstance& instance = iterator->second;
+		if (!instance.object || !instance.running || !instance.enabled ||
+			!impl_->IsScriptEnabled(instance) || instance.executionFaulted)
+		{
+			return;
+		}
+
+		const auto binding = impl_->classes.find(instance.className);
+		if (binding == impl_->classes.end() || !binding->second.collision)
+			return;
+
+		ScriptGameObjectReference* other =
+			MakeGameObjectReference(otherObjectId);
+		const bool succeeded = impl_->InvokeInstanceWithObject(
+			instance,
+			binding->second.collision,
+			other);
+		if (other)
+			other->Release();
+		if (!succeeded)
+			instance.executionFaulted = true;
 	}
 
 	void ScriptRuntime::StopInstance(ScriptInstanceHandle handle)

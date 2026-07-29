@@ -87,6 +87,14 @@ void ComponentScript::OnLateUpdate(float deltaTime)
 		runtime->LateUpdateInstance(instanceHandle_, deltaTime);
 }
 
+void ComponentScript::OnCollision(GameObject* other)
+{
+	if (!other)
+		return;
+	if (EGE::ScriptRuntime* runtime = GetRuntime(); runtime && instanceHandle_)
+		runtime->CollisionInstance(instanceHandle_, other->GetUID());
+}
+
 void ComponentScript::OnStop()
 {
 	if (EGE::ScriptRuntime* runtime = GetRuntime(); runtime && instanceHandle_)

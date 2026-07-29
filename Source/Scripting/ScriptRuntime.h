@@ -100,6 +100,9 @@ namespace EGE
 		void FixedUpdateInstance(ScriptInstanceHandle handle, float deltaTime);
 		void UpdateInstance(ScriptInstanceHandle handle, float deltaTime);
 		void LateUpdateInstance(ScriptInstanceHandle handle, float deltaTime);
+		void CollisionInstance(
+			ScriptInstanceHandle handle,
+			std::uint32_t otherObjectId);
 		void StopInstance(ScriptInstanceHandle handle);
 		void EnableInstance(ScriptInstanceHandle handle);
 		void DisableInstance(ScriptInstanceHandle handle);

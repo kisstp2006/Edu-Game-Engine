@@ -1,6 +1,7 @@
 #include "Globals.h"
 #include "Application.h"
 #include "ModuleLevelManager.h"
+#include "ModulePhysics3D.h"
 #include "ModuleFileSystem.h"
 #include "GameObject.h"
 #include "Project/Project.h"
@@ -257,6 +258,8 @@ update_status ModuleLevelManager::PreUpdate(float dt)
 			++step)
 		{
 			RecursiveFixedUpdate(root, time.GetFixedDeltaTime());
+			if (App->physics3D)
+				App->physics3D->Step(time.GetFixedDeltaTime());
 		}
 	}
 	return UPDATE_CONTINUE;

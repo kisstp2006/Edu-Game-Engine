@@ -35,6 +35,7 @@ public:
 	void OnFixedUpdate(float dt);
 	void OnUpdate(float dt);
 	void OnLateUpdate(float dt);
+	void OnCollision(GameObject* other);
 	void OnStop();
 	void OnPause();
 	void OnUnPause();

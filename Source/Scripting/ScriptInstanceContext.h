@@ -37,6 +37,11 @@ namespace EGE
 			void* object,
 			std::optional<float> deltaTime,
 			ScriptExecutionError& error);
+		[[nodiscard]] bool ExecuteWithObject(
+			asIScriptFunction& function,
+			void* object,
+			void* argument,
+			ScriptExecutionError& error);
 		[[nodiscard]] bool ExecuteWithObjects(
 			asIScriptFunction& function,
 			void* object,
