@@ -8,6 +8,8 @@
 #include "Component.h"
 #include "ComponentAudioSource.h"
 #include "ComponentAudioListener.h"
+#include "ComponentReziAudioEmitter.h"
+#include "ComponentReziAudioListener.h"
 #include "ComponentCamera.h"
 #include "ComponentPath.h"
 #include "ComponentRigidBody.h"
@@ -1131,13 +1133,22 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
             go->SetLocalRotation(Quat::identity);
         }
 
-        static_assert(Component::Types::Unknown == 18, "code needs update");
+        static_assert(Component::Types::Unknown == 20, "code needs update");
         if (ImGui::BeginMenu("New Component", (go != nullptr)))
         {
             if (ImGui::MenuItem("Audio Listener"))
                 addComponent(Component::Types::AudioListener);
             if (ImGui::MenuItem("Audio Source"))
                 addComponent(Component::Types::AudioSource);
+			if (ImGui::MenuItem("ReziAudio Emitter"))
+				addComponent(Component::Types::ReziAudioEmitter);
+			if (ImGui::MenuItem(
+					"ReziAudio Listener",
+					nullptr,
+					nullptr,
+					!go->HasComponent(
+						Component::Types::ReziAudioListener)))
+				addComponent(Component::Types::ReziAudioListener);
 			if (ImGui::MenuItem("MeshRenderer"))
 				addComponent(Component::Types::MeshRenderer);
             if (ImGui::MenuItem("Camera"))
@@ -1240,7 +1251,7 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
         }
 
         // Iterate all components and draw
-        static_assert(Component::Types::Unknown == 18, "code needs update");
+        static_assert(Component::Types::Unknown == 20, "code needs update");
         for (list<Component*>::iterator it = go->components.begin(); it != go->components.end(); ++it)
         {
             ImGui::PushID(*it);
@@ -1257,6 +1268,14 @@ void PanelProperties::DrawGameObject(GameObject* go, Component* component)
                     case Component::Types::AudioListener:
                         DrawAudioListenerComponent((ComponentAudioListener*)(*it));
                         break;
+					case Component::Types::ReziAudioEmitter:
+						DrawReziAudioEmitterComponent(
+							static_cast<ComponentReziAudioEmitter*>(*it));
+						break;
+					case Component::Types::ReziAudioListener:
+						DrawReziAudioListenerComponent(
+							static_cast<ComponentReziAudioListener*>(*it));
+						break;
                     case Component::Types::Camera:
                         DrawCameraComponent((ComponentCamera*)(*it));
                         break;
@@ -1923,6 +1942,115 @@ void PanelProperties::DrawAudioListenerComponent(ComponentAudioListener * compon
 	ImGui::DragFloat("Distance", (float*)&component->distance, 0.1f, 0.1f, 10000.0f);
 	ImGui::SliderFloat("Roll Off", (float*)&component->roll_off, 0.0f, 10.0f);
 	ImGui::SliderFloat("Doppler", (float*)&component->doppler, 0.0f, 10.0f);
+}
+
+void PanelProperties::DrawReziAudioEmitterComponent(
+	ComponentReziAudioEmitter* component)
+{
+	UID selected = PickResource(component->GetClip(), Resource::audio);
+	if (selected != 0 && selected != component->GetClip())
+		component->SetClip(selected);
+	ImGui::SameLine();
+	if (ImGui::Button("Clear Clip"))
+		component->SetClip(0);
+
+	const ResourceAudio* clip = component->GetClipResource();
+	ImGui::TextDisabled(
+		"%s",
+		clip && clip->GetFile() ? clip->GetFile() : "No audio clip");
+
+	ImGui::Checkbox("Play On Start", &component->playOnStart);
+	ImGui::Checkbox("Looping", &component->settings.looping);
+	ImGui::Checkbox("Streaming", &component->settings.streaming);
+	ImGui::SliderFloat(
+		"Volume", &component->settings.volume, 0.0f, 2.0f);
+	ImGui::SliderFloat(
+		"Pitch", &component->settings.pitch, 0.1f, 4.0f);
+	ImGui::SliderFloat(
+		"Pan", &component->settings.pan, -1.0f, 1.0f);
+
+	static const char* buses[] = {
+		"Master", "Music", "Sound Effects", "Ambience", "UI"};
+	int bus = static_cast<int>(component->settings.bus);
+	if (ImGui::Combo("Bus", &bus, buses, IM_ARRAYSIZE(buses)))
+	{
+		component->settings.bus =
+			static_cast<EGE::ReziAudio::Bus>(bus);
+	}
+
+	auto& spatial = component->settings.spatial;
+	ImGui::Separator();
+	ImGui::TextDisabled("SPATIALIZATION");
+	ImGui::Checkbox("3D Spatialization", &spatial.enabled);
+	if (spatial.enabled)
+	{
+		static const char* attenuationModels[] = {
+			"None", "Inverse", "Linear", "Exponential"};
+		int attenuation = static_cast<int>(spatial.attenuation);
+		if (ImGui::Combo(
+				"Attenuation",
+				&attenuation,
+				attenuationModels,
+				IM_ARRAYSIZE(attenuationModels)))
+		{
+			spatial.attenuation =
+				static_cast<EGE::ReziAudio::AttenuationModel>(
+					attenuation);
+		}
+		ImGui::DragFloat(
+			"Min Distance", &spatial.minDistance, 0.1f, 0.0f, 10000.0f);
+		ImGui::DragFloat(
+			"Max Distance", &spatial.maxDistance, 0.1f, 0.0f, 10000.0f);
+		spatial.maxDistance =
+			std::max(spatial.maxDistance, spatial.minDistance);
+		ImGui::SliderFloat("Rolloff", &spatial.rolloff, 0.0f, 10.0f);
+		ImGui::SliderFloat(
+			"Doppler", &spatial.dopplerFactor, 0.0f, 10.0f);
+		ImGui::SliderFloat(
+			"Cone Inner",
+			&spatial.cone.innerAngleDegrees,
+			0.0f,
+			360.0f);
+		ImGui::SliderFloat(
+			"Cone Outer",
+			&spatial.cone.outerAngleDegrees,
+			0.0f,
+			360.0f);
+		ImGui::SliderFloat(
+			"Cone Outer Gain",
+			&spatial.cone.outerGain,
+			0.0f,
+			1.0f);
+	}
+
+	if (ImGui::Button("Play"))
+		component->Play();
+	ImGui::SameLine();
+	if (ImGui::Button("Pause"))
+		component->Pause();
+	ImGui::SameLine();
+	if (ImGui::Button("Resume"))
+		component->Resume();
+	ImGui::SameLine();
+	if (ImGui::Button("Stop"))
+		component->Stop();
+
+	static const char* states[] = {
+		"Invalid", "Stopped", "Playing", "Paused", "Finished"};
+	const int state = static_cast<int>(component->GetPlaybackState());
+	ImGui::TextDisabled(
+		"Voice: %s",
+		state >= 0 && state < IM_ARRAYSIZE(states)
+			? states[state]
+			: "Unknown");
+}
+
+void PanelProperties::DrawReziAudioListenerComponent(
+	ComponentReziAudioListener* component)
+{
+	ImGui::SliderFloat("Gain", &component->gain, 0.0f, 2.0f);
+	ImGui::TextDisabled(
+		"The first active ReziAudio Listener drives the audio scene.");
 }
 
 void PanelProperties::DrawCameraComponent(ComponentCamera * component)

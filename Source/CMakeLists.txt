@@ -118,6 +118,8 @@ endif()
 
 set_target_properties(Engine Editor Runtime PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+set_target_properties(Engine PROPERTIES FOLDER "Engine")
+set_target_properties(Editor Runtime PROPERTIES FOLDER "Applications")
 set_target_properties(Engine PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib"
     LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib"
@@ -131,6 +133,137 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
 source_group("Entry points" FILES "${EGE_EDITOR_ENTRY}" "${EGE_RUNTIME_ENTRY}")
 
 if(EGE_BUILD_TESTS)
+	add_executable(ReziAudioFoundationTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioTypes.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/miniaudio_impl.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ReziAudioFoundationTests.cpp")
+	target_compile_features(ReziAudioFoundationTests PRIVATE cxx_std_20)
+	target_compile_definitions(ReziAudioFoundationTests PRIVATE NOMINMAX)
+	target_link_libraries(
+		ReziAudioFoundationTests
+		PRIVATE
+			EGE::miniaudio
+			EGE::MathGeoLib)
+	set_target_properties(ReziAudioFoundationTests PROPERTIES
+		FOLDER "Tests/Audio"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ReziAudioFoundation
+		COMMAND ReziAudioFoundationTests)
+
+	add_executable(ReziAudioGraphTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioGraph.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioGraph.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioTypes.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ReziAudioGraphTests.cpp")
+	target_compile_features(ReziAudioGraphTests PRIVATE cxx_std_20)
+	target_compile_definitions(ReziAudioGraphTests PRIVATE NOMINMAX)
+	target_link_libraries(
+		ReziAudioGraphTests
+		PRIVATE
+			EGE::MathGeoLib)
+	set_target_properties(ReziAudioGraphTests PROPERTIES
+		FOLDER "Tests/Audio"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ReziAudioGraph
+		COMMAND ReziAudioGraphTests)
+
+	add_executable(ReziAudioDspGraphTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioDspGraph.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioDspGraph.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioTypes.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/miniaudio_impl.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ReziAudioDspGraphTests.cpp")
+	target_compile_features(ReziAudioDspGraphTests PRIVATE cxx_std_20)
+	target_compile_definitions(ReziAudioDspGraphTests PRIVATE NOMINMAX)
+	target_link_libraries(
+		ReziAudioDspGraphTests
+		PRIVATE
+			EGE::miniaudio
+			EGE::MathGeoLib)
+	set_target_properties(ReziAudioDspGraphTests PROPERTIES
+		FOLDER "Tests/Audio"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ReziAudioDspGraph
+		COMMAND ReziAudioDspGraphTests)
+
+	add_executable(ReziAudioLab
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioTypes.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/miniaudio_impl.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ReziAudioLab.cpp")
+	target_compile_features(ReziAudioLab PRIVATE cxx_std_20)
+	target_compile_definitions(
+		ReziAudioLab
+		PRIVATE
+			NOMINMAX
+			EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+	target_link_libraries(
+		ReziAudioLab
+		PRIVATE
+			SDL2-static
+			EGE::GLEW
+			EGE::ImGui
+			EGE::miniaudio
+			EGE::MathGeoLib
+			opengl32)
+	set_target_properties(ReziAudioLab PROPERTIES
+		FOLDER "Tests/Interactive"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ReziAudioLabSmoke
+		COMMAND ReziAudioLab --smoke)
+
+	add_executable(ReziAudioGraphLab
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioGraph.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioGraph.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioTypes.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/miniaudio_impl.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ReziAudioGraphLab.cpp")
+	target_compile_features(ReziAudioGraphLab PRIVATE cxx_std_20)
+	target_compile_definitions(
+		ReziAudioGraphLab
+		PRIVATE
+			NOMINMAX
+			EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+	target_link_libraries(
+		ReziAudioGraphLab
+		PRIVATE
+			SDL2-static
+			EGE::GLEW
+			EGE::ImGui
+			EGE::NodeEditor
+			EGE::miniaudio
+			EGE::MathGeoLib
+			opengl32)
+	set_target_properties(ReziAudioGraphLab PROPERTIES
+		FOLDER "Tests/Interactive"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ReziAudioGraphLabSmoke
+		COMMAND ReziAudioGraphLab --smoke)
+
     add_executable(ScriptingBackendTests
         "${CMAKE_CURRENT_SOURCE_DIR}/Config.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Config.h"
@@ -174,7 +307,7 @@ if(EGE_BUILD_TESTS)
             EGE::MathGeoLib
             shell32)
     set_target_properties(ScriptingBackendTests PROPERTIES
-        FOLDER "Tests"
+        FOLDER "Tests/Scripting"
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 
     add_test(
@@ -192,7 +325,7 @@ if(EGE_BUILD_TESTS)
 			EGE::MathGeoLib
 			opengl32)
 	set_target_properties(ImportSettingsTests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Assets"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME ImportSettings
@@ -204,7 +337,7 @@ if(EGE_BUILD_TESTS)
 		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/EditorHistoryTests.cpp")
 	target_compile_features(EditorHistoryTests PRIVATE cxx_std_20)
 	set_target_properties(EditorHistoryTests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Editor"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME EditorHistory
@@ -220,7 +353,7 @@ if(EGE_BUILD_TESTS)
 	target_link_libraries(
 		ModelImportCoordinatesTests PRIVATE EGE::MathGeoLib)
 	set_target_properties(ModelImportCoordinatesTests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Assets"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME ModelImportCoordinates
@@ -246,7 +379,7 @@ if(EGE_BUILD_TESTS)
 			LinearMath
 			EGE::MathGeoLib)
 	set_target_properties(PhysicsCollisionShapeTests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Physics"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME PhysicsCollisionShape
@@ -286,7 +419,7 @@ if(EGE_BUILD_TESTS)
 			LinearMath
 			EGE::MathGeoLib)
 	set_target_properties(PhysicsInteractionTests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Physics"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME PhysicsInteraction
@@ -303,7 +436,7 @@ if(EGE_BUILD_TESTS)
 		PRIVATE
 			Engine)
 	set_target_properties(EngineAngelScriptApiTests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Scripting"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME EngineAngelScriptApi
@@ -320,7 +453,7 @@ if(EGE_BUILD_TESTS)
 		PRIVATE
 			Engine)
 	set_target_properties(PhysicsSceneScriptingE2ETests PROPERTIES
-		FOLDER "Tests"
+		FOLDER "Tests/Physics"
 		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
 	add_test(
 		NAME PhysicsSceneScriptingE2E

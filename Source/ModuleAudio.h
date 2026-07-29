@@ -3,6 +3,7 @@
 
 #include <vector>
 #include "Module.h"
+#include "ReziAudioSystem.h"
 #include <miniaudio.h>
 
 // miniaudio pulls in <windows.h> on Windows, which #defines CreateDirectory to
@@ -14,6 +15,8 @@
 class GameObject;
 class ComponentAudioListener;
 class ComponentAudioSource;
+class ComponentReziAudioEmitter;
+class ComponentReziAudioListener;
 class ResourceAudio;
 
 class ModuleAudio : public Module
@@ -45,12 +48,24 @@ public:
 	void SetMusicVolume(float new_music_volume);
 	void SetFXVolume(float new_fx_volume);
 
+	EGE::ReziAudio::System& GetReziAudio() { return rezi_audio; }
+	const EGE::ReziAudio::System& GetReziAudio() const
+	{
+		return rezi_audio;
+	}
+
+	void Register(ComponentReziAudioEmitter* emitter);
+	void Unregister(ComponentReziAudioEmitter* emitter);
+	void Register(ComponentReziAudioListener* listener);
+	void Unregister(ComponentReziAudioListener* listener);
+
 private:
 
 	void UpdateAudio();
 
 	void UpdateListener(ComponentAudioListener* listener);
 	void UpdateSource(ComponentAudioSource* source);
+	void UpdateReziAudio();
 
 private:
 	friend class ComponentAudioSource;
@@ -61,6 +76,9 @@ private:
 	float fx_volume = 1.0f;
 	std::vector<ComponentAudioSource*> sources;
 	std::vector<ComponentAudioListener*> listeners;
+	std::vector<ComponentReziAudioEmitter*> rezi_emitters;
+	std::vector<ComponentReziAudioListener*> rezi_listeners;
+	EGE::ReziAudio::System rezi_audio;
 
 	ma_engine engine;
 	ma_sound_group music_group; // streams (music)

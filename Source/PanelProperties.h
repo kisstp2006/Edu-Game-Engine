@@ -15,6 +15,8 @@ class GameObject;
 class Component;
 class ComponentAudioSource;
 class ComponentAudioListener;
+class ComponentReziAudioEmitter;
+class ComponentReziAudioListener;
 class ComponentCamera;
 class ComponentRigidBody;
 class ComponentAnimation;
@@ -94,6 +96,10 @@ private:
 	void DrawScriptComponent(ComponentScript* component);
 	void DrawAudioSourceComponent(ComponentAudioSource * component);
 	void DrawAudioListenerComponent(ComponentAudioListener * component);
+	void DrawReziAudioEmitterComponent(
+		ComponentReziAudioEmitter* component);
+	void DrawReziAudioListenerComponent(
+		ComponentReziAudioListener* component);
     bool TextureButton(UID& uid, ResourceMesh* mesh, const char* name);
     UID TextureButton(ResourceTexture* texture, ResourceMesh* mesh, const char* name, int uniqueId, bool& modified);
 	void DrawAnimationComponent(ComponentAnimation * component);

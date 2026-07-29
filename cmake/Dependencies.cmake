@@ -172,10 +172,6 @@ target_include_directories(ege_angelscript_addons
         "${angelscript_SOURCE_DIR}/sdk/angelscript/include")
 target_link_libraries(ege_angelscript_addons
     PUBLIC EGE::AngelScript)
-set_target_properties(
-    "${EGE_ANGELSCRIPT_UPSTREAM_TARGET}"
-    ege_angelscript_addons
-    PROPERTIES FOLDER "Third-party dependencies")
 
 # This project uses a customized Dear ImGui 1.80 WIP docking snapshot. The
 # stable v1.80 tag does not contain the required docking/viewport API, so this
@@ -202,7 +198,6 @@ target_include_directories(ege_imgui
 )
 target_compile_definitions(ege_imgui PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLEW)
 target_link_libraries(ege_imgui PUBLIC SDL2-static EGE::GLEW)
-set_target_properties(ege_imgui PROPERTIES FOLDER "Legacy dependencies")
 
 add_library(ege_tinygltf INTERFACE)
 add_library(EGE::TinyGLTF ALIAS ege_tinygltf)

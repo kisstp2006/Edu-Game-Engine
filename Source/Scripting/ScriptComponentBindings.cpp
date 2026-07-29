@@ -8,6 +8,8 @@
 #include "../Component.h"
 #include "../ComponentAnimation.h"
 #include "../ComponentAudioSource.h"
+#include "../ComponentReziAudioEmitter.h"
+#include "../ComponentReziAudioListener.h"
 #include "../ComponentCamera.h"
 #include "../ComponentCollider.h"
 #include "../ComponentMeshRenderer.h"
@@ -47,14 +49,16 @@ namespace EGE
 			bool allowMultiple = false;
 		};
 
-		constexpr std::array<ComponentBinding, 7> ComponentBindings{{
+		constexpr std::array<ComponentBinding, 9> ComponentBindings{{
 			{"MeshRenderer", Component::MeshRenderer, true, true, true},
 			{"Camera", Component::Camera, true, true, false},
 			{"Animation", Component::Animation, true, true, false},
 			{"AudioSource", Component::AudioSource, true, true, true},
 			{"AudioListener", Component::AudioListener, true, true, false},
 			{"RigidBody", Component::RigidBody, true, true, false},
-			{"Collider", Component::Collider, true, true, true}
+			{"Collider", Component::Collider, true, true, true},
+			{"ReziAudioEmitter", Component::ReziAudioEmitter, true, true, true},
+			{"ReziAudioListener", Component::ReziAudioListener, true, true, false}
 		}};
 
 		void SetScriptException(const char* message)
@@ -665,6 +669,50 @@ namespace EGE
 			return reference;
 		}
 
+		ScriptComponentReference* CastReziAudioEmitterToComponent(
+			ScriptComponentReference* reference)
+		{
+			if (reference)
+				reference->AddRef();
+			return reference;
+		}
+
+		ScriptComponentReference* CastComponentToReziAudioEmitter(
+			ScriptComponentReference* reference)
+		{
+			Component* component =
+				reference ? reference->Resolve() : nullptr;
+			if (!component ||
+				component->GetType() != Component::ReziAudioEmitter)
+			{
+				return nullptr;
+			}
+			reference->AddRef();
+			return reference;
+		}
+
+		ScriptComponentReference* CastReziAudioListenerToComponent(
+			ScriptComponentReference* reference)
+		{
+			if (reference)
+				reference->AddRef();
+			return reference;
+		}
+
+		ScriptComponentReference* CastComponentToReziAudioListener(
+			ScriptComponentReference* reference)
+		{
+			Component* component =
+				reference ? reference->Resolve() : nullptr;
+			if (!component ||
+				component->GetType() != Component::ReziAudioListener)
+			{
+				return nullptr;
+			}
+			reference->AddRef();
+			return reference;
+		}
+
 		ComponentRigidBody* ResolveRigidBody(
 			const ScriptComponentReference* reference)
 		{
@@ -737,6 +785,21 @@ namespace EGE
 				return nullptr;
 			}
 			return static_cast<ComponentAudioSource*>(component);
+		}
+
+		ComponentReziAudioEmitter* ResolveReziAudioEmitter(
+			const ScriptComponentReference* reference)
+		{
+			Component* component =
+				reference ? reference->Resolve() : nullptr;
+			if (!component ||
+				component->GetType() != Component::ReziAudioEmitter)
+			{
+				SetScriptException(
+					"The ReziAudioEmitter reference is no longer valid.");
+				return nullptr;
+			}
+			return static_cast<ComponentReziAudioEmitter*>(component);
 		}
 
 		ComponentAnimation* ResolveAnimation(
@@ -995,6 +1058,256 @@ namespace EGE
 			{
 				source->Stop();
 			}
+		}
+
+		ScriptResourceReference* GetReziAudioEmitterClip(
+			const ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter
+				? GetScriptResourceReference(
+					emitter->GetClip(), Resource::audio)
+				: nullptr;
+		}
+
+		void SetReziAudioEmitterClip(
+			ScriptResourceReference* clip,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			if (!emitter)
+				return;
+			const UID id = clip
+				? ResolveScriptResourceId(clip, Resource::audio)
+				: 0;
+			if (!clip || id != 0)
+				emitter->SetClip(id);
+		}
+
+		float GetReziAudioEmitterVolume(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter ? emitter->settings.volume : 0.0f;
+		}
+
+		void SetReziAudioEmitterVolume(
+			float value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->settings.volume = std::max(value, 0.0f);
+			}
+		}
+
+		float GetReziAudioEmitterPitch(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter ? emitter->settings.pitch : 0.0f;
+		}
+
+		void SetReziAudioEmitterPitch(
+			float value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->settings.pitch = std::max(value, 0.01f);
+			}
+		}
+
+		bool GetReziAudioEmitterSpatial(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->settings.spatial.enabled;
+		}
+
+		void SetReziAudioEmitterSpatial(
+			bool value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->settings.spatial.enabled = value;
+			}
+		}
+
+		void SetReziAudioFloatParameter(
+			const std::string& name,
+			float value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->SetRuntimeParameter(name, value);
+			}
+		}
+
+		float GetReziAudioFloatParameter(
+			const std::string& name,
+			float fallback,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const float* result = value
+				? std::get_if<float>(value)
+				: nullptr;
+			return result ? *result : fallback;
+		}
+
+		void SetReziAudioIntParameter(
+			const std::string& name,
+			int value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->SetRuntimeParameter(name, value);
+			}
+		}
+
+		int GetReziAudioIntParameter(
+			const std::string& name,
+			int fallback,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const int* result = value
+				? std::get_if<int>(value)
+				: nullptr;
+			return result ? *result : fallback;
+		}
+
+		void SetReziAudioBoolParameter(
+			const std::string& name,
+			bool value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->SetRuntimeParameter(name, value);
+			}
+		}
+
+		bool GetReziAudioBoolParameter(
+			const std::string& name,
+			bool fallback,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const bool* result = value
+				? std::get_if<bool>(value)
+				: nullptr;
+			return result ? *result : fallback;
+		}
+
+		void SetReziAudioVectorParameter(
+			const std::string& name,
+			const ScriptVector3& value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->SetRuntimeParameter(
+					name, float3(value.x, value.y, value.z));
+			}
+		}
+
+		ScriptVector3 GetReziAudioVectorParameter(
+			const std::string& name,
+			const ScriptVector3& fallback,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const float3* result = value
+				? std::get_if<float3>(value)
+				: nullptr;
+			return result
+				? ScriptVector3{result->x, result->y, result->z}
+				: fallback;
+		}
+
+		void ClearReziAudioParameters(
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->ClearRuntimeParameters();
+			}
+		}
+
+		bool PlayReziAudioEmitter(
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->Play();
+		}
+
+		bool PauseReziAudioEmitter(
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->Pause();
+		}
+
+		bool ResumeReziAudioEmitter(
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->Resume();
+		}
+
+		void StopReziAudioEmitter(
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->Stop();
+			}
+		}
+
+		bool IsReziAudioEmitterPlaying(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->IsPlaying();
 		}
 
 		float GetCameraFieldOfView(
@@ -2183,6 +2496,156 @@ namespace EGE
 			return false;
 		}
 
+		bool RegisterReziAudioApi(
+			asIScriptEngine& engine,
+			std::string& error)
+		{
+			if (!RegisterComponentHandle(
+					engine, "ReziAudioEmitter", error) ||
+				!RegisterComponentHandle(
+					engine, "ReziAudioListener", error))
+			{
+				return false;
+			}
+
+			const bool registered =
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"Component@+ opImplCast()",
+					asFUNCTION(CastReziAudioEmitterToComponent),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"Component",
+					"ReziAudioEmitter@+ opCast()",
+					asFUNCTION(CastComponentToReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioListener",
+					"Component@+ opImplCast()",
+					asFUNCTION(CastReziAudioListenerToComponent),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"Component",
+					"ReziAudioListener@+ opCast()",
+					asFUNCTION(CastComponentToReziAudioListener),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"AudioClip@ get_clip() const property",
+					asFUNCTION(GetReziAudioEmitterClip),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void set_clip(AudioClip@+) property",
+					asFUNCTION(SetReziAudioEmitterClip),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"float get_volume() const property",
+					asFUNCTION(GetReziAudioEmitterVolume),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void set_volume(float) property",
+					asFUNCTION(SetReziAudioEmitterVolume),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"float get_pitch() const property",
+					asFUNCTION(GetReziAudioEmitterPitch),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void set_pitch(float) property",
+					asFUNCTION(SetReziAudioEmitterPitch),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool get_spatial() const property",
+					asFUNCTION(GetReziAudioEmitterSpatial),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void set_spatial(bool) property",
+					asFUNCTION(SetReziAudioEmitterSpatial),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetFloatParameter(const string &in, float)",
+					asFUNCTION(SetReziAudioFloatParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"float GetFloatParameter(const string &in, "
+					"float fallback = 0.0f) const",
+					asFUNCTION(GetReziAudioFloatParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetIntParameter(const string &in, int)",
+					asFUNCTION(SetReziAudioIntParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"int GetIntParameter(const string &in, "
+					"int fallback = 0) const",
+					asFUNCTION(GetReziAudioIntParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetBoolParameter(const string &in, bool)",
+					asFUNCTION(SetReziAudioBoolParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool GetBoolParameter(const string &in, "
+					"bool fallback = false) const",
+					asFUNCTION(GetReziAudioBoolParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetVector3Parameter(const string &in, "
+					"const Vector3 &in)",
+					asFUNCTION(SetReziAudioVectorParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"Vector3 GetVector3Parameter(const string &in, "
+					"const Vector3 &in fallback) const",
+					asFUNCTION(GetReziAudioVectorParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void ClearParameters()",
+					asFUNCTION(ClearReziAudioParameters),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool get_isPlaying() const property",
+					asFUNCTION(IsReziAudioEmitterPlaying),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter", "bool Play()",
+					asFUNCTION(PlayReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter", "bool Pause()",
+					asFUNCTION(PauseReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter", "bool Resume()",
+					asFUNCTION(ResumeReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter", "void Stop()",
+					asFUNCTION(StopReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0;
+			if (registered)
+				return true;
+			error = "Could not register the ReziAudio component API.";
+			return false;
+		}
+
 		bool RegisterAnimationApi(
 			asIScriptEngine& engine,
 			std::string& error)
@@ -2705,12 +3168,40 @@ void ValidateTypedComponentApi(GameObject@ object)
         object.GetComponent<AudioListener>();
     AudioListener@ addedAudioListener =
         object.AddComponent<AudioListener>();
+    ReziAudioEmitter@ reziEmitter =
+        object.GetComponent<ReziAudioEmitter>();
+    ReziAudioEmitter@ addedReziEmitter =
+        object.AddComponent<ReziAudioEmitter>();
+    array<ReziAudioEmitter@>@ reziEmitters =
+        object.GetComponents<ReziAudioEmitter@>();
+    reziEmitter.SetFloatParameter("Volume", 0.5f);
+    float graphVolume =
+        reziEmitter.GetFloatParameter("Volume", 1.0f);
+    reziEmitter.SetIntParameter("Variation", 2);
+    int graphVariation =
+        reziEmitter.GetIntParameter("Variation", 0);
+    reziEmitter.SetBoolParameter("Loop", true);
+    bool graphLoop =
+        reziEmitter.GetBoolParameter("Loop", false);
+    reziEmitter.SetVector3Parameter(
+        "Position", Vector3(1.0f, 2.0f, 3.0f));
+    Vector3 fallbackPosition = Vector3(0.0f, 0.0f, 0.0f);
+    Vector3 graphPosition =
+        reziEmitter.GetVector3Parameter(
+            "Position", fallbackPosition);
+    reziEmitter.ClearParameters();
+    ReziAudioListener@ reziListener =
+        object.GetComponent<ReziAudioListener>();
+    ReziAudioListener@ addedReziListener =
+        object.AddComponent<ReziAudioListener>();
     Component@ component = added;
     Component@ colliderComponent = addedCollider;
     Component@ meshRendererComponent = addedMeshRenderer;
     Component@ animationComponent = addedAnimator;
     Component@ audioSourceComponent = addedAudioSource;
     Component@ audioListenerComponent = addedAudioListener;
+    Component@ reziEmitterComponent = addedReziEmitter;
+    Component@ reziListenerComponent = addedReziListener;
     RigidBody@ casted = cast<RigidBody>(component);
     Collider@ castedCollider = cast<Collider>(colliderComponent);
     MeshRenderer@ castedMeshRenderer =
@@ -2721,6 +3212,10 @@ void ValidateTypedComponentApi(GameObject@ object)
         cast<AudioSource>(audioSourceComponent);
     AudioListener@ castedAudioListener =
         cast<AudioListener>(audioListenerComponent);
+    ReziAudioEmitter@ castedReziEmitter =
+        cast<ReziAudioEmitter>(reziEmitterComponent);
+    ReziAudioListener@ castedReziListener =
+        cast<ReziAudioListener>(reziListenerComponent);
     if (first !is null)
     {
         uint componentId = first.id;
@@ -2968,12 +3463,33 @@ void ValidateTypedComponentApi(GameObject@ object)
         addedAudioListener.enabled = addedAudioListener.enabled;
         GameObject@ listenerOwner = addedAudioListener.gameObject;
     }
+    if (addedReziEmitter !is null)
+    {
+        AudioClip@ clip = addedReziEmitter.clip;
+        @addedReziEmitter.clip = clip;
+        addedReziEmitter.volume = addedReziEmitter.volume;
+        addedReziEmitter.pitch = addedReziEmitter.pitch;
+        addedReziEmitter.spatial = addedReziEmitter.spatial;
+        bool playing = addedReziEmitter.isPlaying;
+        bool playAccepted = addedReziEmitter.Play();
+        bool pauseAccepted = addedReziEmitter.Pause();
+        bool resumeAccepted = addedReziEmitter.Resume();
+        addedReziEmitter.Stop();
+    }
+    if (addedReziListener !is null)
+    {
+        bool listenerValid = addedReziListener.valid;
+        addedReziListener.enabled = addedReziListener.enabled;
+        GameObject@ listenerOwner = addedReziListener.gameObject;
+    }
     object.RemoveComponent(component);
     object.RemoveComponent(colliderComponent);
     object.RemoveComponent(meshRendererComponent);
     object.RemoveComponent(animationComponent);
     object.RemoveComponent(audioSourceComponent);
     object.RemoveComponent(audioListenerComponent);
+    object.RemoveComponent(reziEmitterComponent);
+    object.RemoveComponent(reziListenerComponent);
 }
 )";
 
@@ -3031,6 +3547,8 @@ void ValidateTypedComponentApi(GameObject@ object)
 		if (!RegisterAudioSourceApi(engine, error))
 			return false;
 		if (!RegisterAudioListenerApi(engine, error))
+			return false;
+		if (!RegisterReziAudioApi(engine, error))
 			return false;
 
 		const bool registered =

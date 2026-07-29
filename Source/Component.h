@@ -35,6 +35,8 @@ public:
 		SpotCone,
 		Script,
 		Collider,
+		ReziAudioEmitter,
+		ReziAudioListener,
 		Unknown
 	};
 

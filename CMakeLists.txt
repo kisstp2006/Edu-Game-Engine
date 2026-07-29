@@ -8,6 +8,9 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
 
 project(EduGameEngine VERSION 0.1.0 LANGUAGES C CXX)
 
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")
+
 if(NOT WIN32)
     message(FATAL_ERROR "Edu Game Engine currently supports Windows only.")
 endif()
@@ -40,3 +43,6 @@ include(LegacyThirdParty)
 if(EGE_BUILD_ENGINE)
     add_subdirectory(Source)
 endif()
+
+include(SolutionFolders)
+ege_configure_solution_folders()

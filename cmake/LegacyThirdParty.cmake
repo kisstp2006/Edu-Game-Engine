@@ -10,7 +10,6 @@ add_library(ege_mathgeolib STATIC ${EGE_MATHGEOLIB_SOURCES})
 add_library(EGE::MathGeoLib ALIAS ege_mathgeolib)
 target_include_directories(ege_mathgeolib
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source/MathGeoLib/include")
-set_target_properties(ege_mathgeolib PROPERTIES FOLDER "Legacy dependencies")
 
 file(GLOB_RECURSE EGE_THEKLA_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/thekla_atlas/src/nvcore/*.cpp"
@@ -31,7 +30,6 @@ if(MSVC)
     target_compile_definitions(ege_thekla_atlas PRIVATE
         _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
-set_target_properties(ege_thekla_atlas PROPERTIES FOLDER "Legacy dependencies")
 
 add_library(ege_tinyspline STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/tinyspline/include/tinyspline.c"
@@ -39,7 +37,6 @@ add_library(ege_tinyspline STATIC
 add_library(EGE::TinySpline ALIAS ege_tinyspline)
 target_include_directories(ege_tinyspline
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source/tinyspline/include")
-set_target_properties(ege_tinyspline PROPERTIES FOLDER "Legacy dependencies")
 
 add_library(ege_node_editor STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/NodeEditor/Source/crude_json.cpp"
@@ -52,5 +49,3 @@ target_include_directories(ege_node_editor
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/NodeEditor/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/Source/NodeEditor/Source")
 target_link_libraries(ege_node_editor PUBLIC EGE::ImGui)
-set_target_properties(ege_node_editor PROPERTIES FOLDER "Legacy dependencies")
-

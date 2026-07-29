@@ -8,9 +8,13 @@
 #include "GameObject.h"
 #include "ComponentAudioListener.h"
 #include "ComponentAudioSource.h"
+#include "ComponentReziAudioEmitter.h"
+#include "ComponentReziAudioListener.h"
 #include "Config.h"
 
 #include "Leaks.h"
+
+#include <algorithm>
 
 using namespace std;
 
@@ -52,6 +56,9 @@ bool ModuleAudio::Init(Config* config)
 
 		if (ma_sound_group_init(&engine, 0, nullptr, &fx_group) != MA_SUCCESS)
 			LOG("Could not create the fx sound group");
+
+		if (!rezi_audio.Initialize(engine))
+			LOG("Could not initialize the ReziAudio backend");
 	}
 
 	// Settings
@@ -84,6 +91,7 @@ bool ModuleAudio::CleanUp()
 
 	if (engine_initialized == true)
 	{
+		rezi_audio.Shutdown();
 		ma_sound_group_uninit(&fx_group);
 		ma_sound_group_uninit(&music_group);
 		ma_engine_uninit(&engine);
@@ -273,6 +281,71 @@ void ModuleAudio::UpdateAudio()
 		if (source->IsActive())
 			UpdateSource(source);
 	}
+
+	UpdateReziAudio();
+}
+
+void ModuleAudio::UpdateReziAudio()
+{
+	bool listenerUpdated = false;
+	for (ComponentReziAudioListener* listener : rezi_listeners)
+	{
+		if (!listener || !listener->IsActive())
+			continue;
+		listener->UpdateListener();
+		listenerUpdated = true;
+		break;
+	}
+
+	if (!listenerUpdated && rezi_audio.IsReady())
+	{
+		EGE::ReziAudio::AudioTransform listener;
+		rezi_audio.SetListener(listener, false);
+	}
+
+	for (ComponentReziAudioEmitter* emitter : rezi_emitters)
+	{
+		if (emitter && emitter->IsActive())
+			emitter->UpdateVoice();
+	}
+}
+
+void ModuleAudio::Register(ComponentReziAudioEmitter* emitter)
+{
+	if (emitter &&
+		std::find(
+			rezi_emitters.begin(), rezi_emitters.end(), emitter) ==
+			rezi_emitters.end())
+	{
+		rezi_emitters.push_back(emitter);
+	}
+}
+
+void ModuleAudio::Unregister(ComponentReziAudioEmitter* emitter)
+{
+	rezi_emitters.erase(
+		std::remove(
+			rezi_emitters.begin(), rezi_emitters.end(), emitter),
+		rezi_emitters.end());
+}
+
+void ModuleAudio::Register(ComponentReziAudioListener* listener)
+{
+	if (listener &&
+		std::find(
+			rezi_listeners.begin(), rezi_listeners.end(), listener) ==
+			rezi_listeners.end())
+	{
+		rezi_listeners.push_back(listener);
+	}
+}
+
+void ModuleAudio::Unregister(ComponentReziAudioListener* listener)
+{
+	rezi_listeners.erase(
+		std::remove(
+			rezi_listeners.begin(), rezi_listeners.end(), listener),
+		rezi_listeners.end());
 }
 
 void ModuleAudio::UpdateListener(ComponentAudioListener * listener)

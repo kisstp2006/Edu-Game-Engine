@@ -381,6 +381,8 @@ shared class EGEBehaviour
 					typeName == "Animation" ||
 					typeName == "AudioSource" ||
 					typeName == "AudioListener" ||
+					typeName == "ReziAudioEmitter" ||
+					typeName == "ReziAudioListener" ||
 					typeName == "RigidBody" ||
 					typeName == "Collider")
 					return PropertyKind::ComponentReference;

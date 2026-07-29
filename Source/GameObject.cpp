@@ -5,6 +5,8 @@
 #include "Component.h"
 #include "ComponentAudioListener.h"
 #include "ComponentAudioSource.h"
+#include "ComponentReziAudioEmitter.h"
+#include "ComponentReziAudioListener.h"
 #include "ComponentMeshRenderer.h"
 #include "ComponentCamera.h"
 #include "ComponentRigidBody.h"
@@ -354,7 +356,7 @@ void GameObject::InvalidateBoundingBox()
 // ---------------------------------------------------------
 Component* GameObject::CreateComponent(Component::Types type)
 {
-	static_assert(Component::Types::Unknown == 18, "code needs update");
+	static_assert(Component::Types::Unknown == 20, "code needs update");
 
 	Component* ret = nullptr;
 
@@ -413,6 +415,12 @@ Component* GameObject::CreateComponent(Component::Types type)
 			break;
 		case Component::Types::Collider:
 			ret = new ComponentCollider(this);
+			break;
+		case Component::Types::ReziAudioEmitter:
+			ret = new ComponentReziAudioEmitter(this);
+			break;
+		case Component::Types::ReziAudioListener:
+			ret = new ComponentReziAudioListener(this);
 			break;
 	}
 
