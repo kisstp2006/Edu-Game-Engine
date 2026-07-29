@@ -104,7 +104,10 @@ private:
 		std::multimap<uint, MeshRenderer>& meshes,
 		const EGE::ModelImportOptions& options);
     void        GenerateMaterials   (const tinygltf::Model& model, const char* file, std::vector<UID>& materials);
-    void        GenerateSkins       (const tinygltf::Model& model, const std::vector<int>& nodeMapping);
+    void        GenerateSkins(
+		const tinygltf::Model& model,
+		const std::vector<int>& nodeMapping,
+		const EGE::ModelImportOptions& options);
 
 
     void        GenerateNodes(

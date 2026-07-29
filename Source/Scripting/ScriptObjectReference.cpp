@@ -30,7 +30,9 @@ namespace EGE
 
 		for (Component* component : owner->components)
 		{
-			if (component && component->GetUID() == componentId_)
+			if (component &&
+				!component->flag_for_removal &&
+				component->GetUID() == componentId_)
 				return component;
 		}
 		return nullptr;

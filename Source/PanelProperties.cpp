@@ -182,6 +182,9 @@ PanelProperties::~PanelProperties()
 
 void PanelProperties::ResetProjectState()
 {
+	if (historyInteractionActive && App && App->editor)
+		App->editor->CancelSceneTransaction();
+	historyInteractionActive = false;
 	ReleaseInspectedAssetResource();
 	selectGameObjectAfterDraw = nullptr;
 	show_texture.Clear();
@@ -196,6 +199,17 @@ void PanelProperties::OnEditorSelectionChanged()
 // ---------------------------------------------------------
 void PanelProperties::Draw()
 {
+	if (!historyInteractionActive &&
+		App->IsStop() &&
+		ImGui::IsWindowHovered(
+			ImGuiHoveredFlags_RootAndChildWindows) &&
+		ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+	{
+		historyInteractionActive =
+			App->editor->BeginSceneTransaction(
+				"Edit Inspector Properties");
+	}
+
 	const ModuleEditor::SelectionVariant& selection =
 		App->editor->GetSelection();
 	if (!std::holds_alternative<EGE::EditorAssetSelection>(selection))
@@ -226,6 +240,14 @@ void PanelProperties::Draw()
 
     show_texture.Display();
     selectTexture.Display();
+
+	if (historyInteractionActive &&
+		!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+		!ImGui::IsAnyItemActive())
+	{
+		App->editor->EndSceneTransaction();
+		historyInteractionActive = false;
+	}
 }
 
 void PanelProperties::DrawAssetSelection(
@@ -1837,14 +1859,14 @@ void PanelProperties::DrawCameraComponent(ComponentCamera * component)
 	if (ImGui::DragFloat("Aspect Ratio", &aspect_ratio, 0.1f, 0.1f, 10000.0f))
 		component->SetAspectRatio(aspect_ratio);
 
-	bool is_active = App->renderer3D->active_camera == component;
-	if (ImGui::Checkbox("Is Active Camera", &is_active))
-	{
-		if(is_active == true)
-			App->renderer3D->active_camera = component;
-		else
-			App->renderer3D->active_camera = App->camera->GetDummy();
-	}
+	const bool isMainCamera =
+		!App->IsStop() &&
+		App->renderer3D->active_camera == component;
+	ImGui::Text(
+		"Runtime Main Camera: %s",
+		isMainCamera ? "Yes" : "No");
+	ImGui::TextDisabled(
+		"The first active scene camera is selected in Play mode.");
 
     bool is_culling = App->renderer3D->culling_camera == component;
     if (ImGui::Checkbox("Is Culling Camera", &is_culling))

@@ -10,6 +10,7 @@
 #include "ModuleHints.h"
 #include "OpenGL.h"
 #include "Primitive.h"
+#include "GameObject.h"
 #include "ComponentCamera.h"
 #include "Event.h"
 #include "Config.h"
@@ -17,6 +18,43 @@
 #include "Viewport.h"
 
 #include "Leaks.h"
+
+namespace
+{
+	ComponentCamera* FindFirstActiveCamera(
+		GameObject* gameObject,
+		bool parentActive = true)
+	{
+		if (!gameObject || gameObject->IsPendingDestroy())
+			return nullptr;
+
+		const bool branchActive =
+			parentActive && gameObject->IsActive();
+		if (branchActive)
+		{
+			for (Component* component : gameObject->components)
+			{
+				if (component &&
+					!component->flag_for_removal &&
+					component->IsActive() &&
+					component->GetType() == Component::Camera)
+				{
+					return static_cast<ComponentCamera*>(component);
+				}
+			}
+		}
+
+		for (GameObject* child : gameObject->childs)
+		{
+			if (ComponentCamera* camera =
+					FindFirstActiveCamera(child, branchActive))
+			{
+				return camera;
+			}
+		}
+		return nullptr;
+	}
+}
 
 void __stdcall DebugMessageGL(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam)
 {
@@ -185,7 +223,7 @@ bool ModuleRenderer3D::Start(Config * config)
 // PreUpdate: clear buffer
 update_status ModuleRenderer3D::PreUpdate(float dt)
 {
-	ComponentCamera* cam = (App->IsPlay()) ? active_camera : App->camera->GetDummy();
+	RefreshActiveCamera();
 
 	glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
@@ -202,6 +240,8 @@ update_status ModuleRenderer3D::Update(float dt)
 // PostUpdate present buffer to screen
 update_status ModuleRenderer3D::PostUpdate(float dt)
 {
+	RefreshActiveCamera();
+
 	if (viewport && App->editor)
 	{
 		if (App->GetActiveProject())
@@ -228,6 +268,10 @@ void ModuleRenderer3D::ReceiveEvent(const Event& event)
 {
 	switch (event.type)
 	{
+		case Event::play:
+		case Event::stop:
+			RefreshActiveCamera();
+		break;
 		case Event::window_resize:
 			OnResize(event.point2d.x, event.point2d.y);
 		break;
@@ -250,9 +294,32 @@ void ModuleRenderer3D::Load(Config * config)
 
 void ModuleRenderer3D::OnResize(int width, int height)
 {
-	ComponentCamera* cam = (App->IsPlay()) ? active_camera : App->camera->GetDummy();
+	RefreshActiveCamera();
+	ComponentCamera* cam = active_camera;
 
-	cam->SetAspectRatio((float)width / (float)height);
+	if (cam && height > 0)
+		cam->SetAspectRatio((float)width / (float)height);
+}
+
+void ModuleRenderer3D::RefreshActiveCamera()
+{
+	if (!App || !App->camera)
+		return;
+
+	ComponentCamera* previous = active_camera;
+	ComponentCamera* selected = App->camera->GetDummy();
+	if (!App->IsStop() && App->level)
+	{
+		if (ComponentCamera* sceneCamera =
+				FindFirstActiveCamera(App->level->GetRoot()))
+		{
+			selected = sceneCamera;
+		}
+	}
+
+	active_camera = selected;
+	if (!culling_camera || culling_camera == previous)
+		culling_camera = selected;
 }
 
 bool ModuleRenderer3D::GetVSync() const

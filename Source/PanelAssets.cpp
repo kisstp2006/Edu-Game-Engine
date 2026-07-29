@@ -2523,7 +2523,9 @@ void PanelAssets::OpenImportDialog(Resource::Type type)
 	switch (type)
 	{
 	case Resource::model:
-		filters = {".fbx", ".dae", ".gltf", ".glb"};
+		filters = {
+			".fbx", ".dae", ".gltf", ".glb", ".obj",
+			".3ds", ".ply", ".stl", ".blend"};
 		break;
 	case Resource::texture:
 		filters = {

@@ -24,6 +24,7 @@ namespace EGE
 		bool weldVertices = true;
 		bool optimizeMeshes = true;
 		bool flipUVs = false;
+		bool convertGlTfCoordinates = true;
 	};
 
 	struct TextureImportOptions
@@ -66,6 +67,7 @@ namespace EGE
 	{
 		float3 scale = float3::one;
 		bool importMorphTargets = true;
+		bool convertGlTfCoordinates = true;
 		std::vector<AnimationClipImportRange> clips;
 	};
 }

@@ -9,9 +9,11 @@
 #include "../Globals.h"
 #include "ScriptMath.h"
 #include "ScriptCoreHelpers.h"
+#include "ScriptComponentBindings.h"
 #include "ScriptObjectReference.h"
 
 #include <angelscript.h>
+#include <SDL_mouse.h>
 #include <SDL_scancode.h>
 
 #include <charconv>
@@ -479,25 +481,6 @@ ScriptGameObjectReference* FindChild(
 		: nullptr;
 }
 
-ScriptComponentReference* GetComponent(
-	const std::string& typeName,
-	const ScriptGameObjectReference* reference)
-{
-	const GameObject* gameObject = ResolveGameObject(reference);
-	if (!gameObject)
-		return nullptr;
-
-	for (Component* component : gameObject->components)
-	{
-		if (component && typeName == component->GetTypeStr())
-		{
-			return MakeComponentReference(
-				gameObject->GetUID(), component->GetUID());
-		}
-	}
-	return nullptr;
-}
-
 ScriptVector3 GetLocalPosition(
 	const ScriptGameObjectReference* reference)
 {
@@ -564,6 +547,39 @@ void Translate(
 {
 	if (GameObject* gameObject = ResolveGameObject(reference))
 		gameObject->Move(ToEngineVector3(translation));
+}
+
+ScriptVector3 GetForward(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetLocalRotationQ().Transform(
+				-float3::unitZ).Normalized())
+		: ScriptVector3{0.0f, 0.0f, -1.0f};
+}
+
+ScriptVector3 GetRight(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetLocalRotationQ().Transform(
+				float3::unitX).Normalized())
+		: ScriptVector3{1.0f, 0.0f, 0.0f};
+}
+
+ScriptVector3 GetUp(
+	const ScriptGameObjectReference* reference)
+{
+	const GameObject* gameObject = ResolveGameObject(reference);
+	return gameObject
+		? ToScriptVector3(
+			gameObject->GetLocalRotationQ().Transform(
+				float3::unitY).Normalized())
+		: ScriptVector3{0.0f, 1.0f, 0.0f};
 }
 
 ScriptGameObjectReference* FindGameObject(
@@ -640,29 +656,30 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 {
 	const bool registered =
 		engine.RegisterObjectMethod(
-			"GameObject", "uint get_id() const",
+			"GameObject", "uint get_id() const property",
 			asMETHOD(ScriptGameObjectReference, GetObjectId),
 			asCALL_THISCALL) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "bool get_valid() const",
+			"GameObject", "bool get_valid() const property",
 			asMETHOD(ScriptGameObjectReference, IsValid),
 			asCALL_THISCALL) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "string get_name() const",
+			"GameObject", "string get_name() const property",
 			asFUNCTION(GetGameObjectName), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "void set_name(const string &in)",
+			"GameObject",
+			"void set_name(const string &in) property",
 			asFUNCTION(SetGameObjectName), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "bool get_active() const",
+			"GameObject", "bool get_active() const property",
 			asFUNCTION(GetGameObjectActive),
 			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "void set_active(bool)",
+			"GameObject", "void set_active(bool) property",
 			asFUNCTION(SetGameObjectActive),
 			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "Transform@ get_transform() const",
+			"GameObject", "Transform@ get_transform() const property",
 			asFUNCTION(GetGameObjectTransform), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"GameObject",
@@ -670,7 +687,7 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			asFUNCTION(GameObjectsEqual),
 			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject", "GameObject@ get_parent() const",
+			"GameObject", "GameObject@ get_parent() const property",
 			asFUNCTION(GetParent), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"GameObject",
@@ -678,51 +695,64 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 				"bool recursive = true) const",
 			asFUNCTION(FindChild), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"GameObject",
-			"Component@ GetComponent(const string &in typeName) const",
-			asFUNCTION(GetComponent), asCALL_CDECL_OBJLAST) >= 0 &&
-		engine.RegisterObjectMethod(
-			"Transform", "Vector3 get_localPosition() const",
+			"Transform",
+			"Vector3 get_localPosition() const property",
 			asFUNCTION(GetLocalPosition), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "void set_localPosition(const Vector3 &in)",
+			"Transform",
+			"void set_localPosition(const Vector3 &in) property",
 			asFUNCTION(SetLocalPosition), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "Vector3 get_localEulerAngles() const",
+			"Transform",
+			"Vector3 get_localEulerAngles() const property",
 			asFUNCTION(GetLocalEulerAngles), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "void set_localEulerAngles(const Vector3 &in)",
+			"Transform",
+			"void set_localEulerAngles("
+				"const Vector3 &in) property",
 			asFUNCTION(SetLocalEulerAngles), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "Vector3 get_localScale() const",
+			"Transform",
+			"Vector3 get_localScale() const property",
 			asFUNCTION(GetLocalScale), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "void set_localScale(const Vector3 &in)",
+			"Transform",
+			"void set_localScale(const Vector3 &in) property",
 			asFUNCTION(SetLocalScale), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "Vector3 get_position() const",
+			"Transform", "Vector3 get_position() const property",
 			asFUNCTION(GetPosition), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
 			"Transform", "void Translate(const Vector3 &in)",
 			asFUNCTION(Translate), asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Transform", "bool get_valid() const",
+			"Transform", "Vector3 get_forward() const property",
+			asFUNCTION(GetForward), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Vector3 get_right() const property",
+			asFUNCTION(GetRight), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "Vector3 get_up() const property",
+			asFUNCTION(GetUp), asCALL_CDECL_OBJLAST) >= 0 &&
+		engine.RegisterObjectMethod(
+			"Transform", "bool get_valid() const property",
 			asMETHOD(ScriptGameObjectReference, IsValid),
 			asCALL_THISCALL) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Component", "uint get_id() const",
+			"Component", "uint get_id() const property",
 			asMETHOD(ScriptComponentReference, GetComponentId),
 			asCALL_THISCALL) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Component", "bool get_valid() const",
+			"Component", "bool get_valid() const property",
 			asMETHOD(ScriptComponentReference, IsValid),
 			asCALL_THISCALL) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Component", "string get_typeName() const",
+			"Component", "string get_typeName() const property",
 			asFUNCTION(GetComponentTypeName),
 			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
-			"Component", "GameObject@ get_gameObject() const",
+			"Component",
+			"GameObject@ get_gameObject() const property",
 			asFUNCTION(GetComponentGameObject),
 			asCALL_CDECL_OBJLAST) >= 0 &&
 		engine.RegisterObjectMethod(
@@ -736,6 +766,8 @@ bool RegisterGameObjectApi(asIScriptEngine& engine, std::string& error)
 			"Could not register the GameObject, Transform or Component API.";
 		return false;
 	}
+	if (!RegisterTypedComponentApi(engine, error))
+		return false;
 
 	engine.SetDefaultNamespace("GameObject");
 	const bool sceneApiRegistered =
@@ -781,18 +813,35 @@ bool ScriptGetKeyUp(int key)
 
 bool ScriptGetMouseButton(int button)
 {
+    if (button < 1 || button > NUM_MOUSE_BUTTONS)
+        return false;
     KeyState s = App->input->GetMouseButton(button);
     return s == KEY_DOWN || s == KEY_REPEAT;
 }
 
 bool ScriptGetMouseButtonDown(int button)
 {
+    if (button < 1 || button > NUM_MOUSE_BUTTONS)
+        return false;
     return App->input->GetMouseButton(button) == KEY_DOWN;
 }
 
 bool ScriptGetMouseButtonUp(int button)
 {
+    if (button < 1 || button > NUM_MOUSE_BUTTONS)
+        return false;
     return App->input->GetMouseButton(button) == KEY_UP;
+}
+
+bool ScriptGetCursorLocked()
+{
+    return SDL_GetRelativeMouseMode() == SDL_TRUE;
+}
+
+void ScriptSetCursorLocked(bool locked)
+{
+    if (SDL_SetRelativeMouseMode(locked ? SDL_TRUE : SDL_FALSE) < 0)
+        LOG("Could not change cursor lock: %s", SDL_GetError());
 }
 
 int ScriptGetMouseX()
@@ -848,6 +897,64 @@ float ScriptGetAxis(const std::string& axis)
 // =============================================================================
 // KeyCode enum regisztrálása
 // =============================================================================
+static bool ValidateFlyCameraApi(
+	asIScriptEngine& engine,
+	std::string& error)
+{
+	constexpr const char* ModuleName =
+		"__EGE_FlyCameraApiValidation";
+	constexpr const char* Source = R"(
+void ValidateFlyCameraApi(Transform@ transform, float deltaTime)
+{
+    float lookSensitivity = 0.003f;
+    Vector3 rotation = transform.localEulerAngles;
+    rotation.y -= Input::GetAxis("Mouse X") * lookSensitivity;
+    rotation.x = Math::Clamp(
+        rotation.x - Input::GetAxis("Mouse Y") * lookSensitivity,
+        -89.0f * Math::Deg2Rad,
+        89.0f * Math::Deg2Rad);
+    transform.localEulerAngles = rotation;
+
+    Vector3 movement =
+        transform.right * Input::GetAxis("Horizontal") +
+        transform.forward * Input::GetAxis("Vertical");
+    if (Input::GetKey(KeyCode::E))
+        movement += transform.up;
+    if (Input::GetKey(KeyCode::Q))
+        movement -= transform.up;
+    if (movement.lengthSquared > Math::Epsilon)
+    {
+        movement.Normalize();
+        float speed = Input::GetKey(KeyCode::LeftShift)
+            ? 18.0f
+            : 6.0f;
+        transform.Translate(movement * speed * deltaTime);
+    }
+
+    if (Input::GetKeyDown(KeyCode::Tab))
+        Input::cursorLocked = !Input::cursorLocked;
+    Input::SetCursorLocked(Input::cursorLocked);
+}
+)";
+
+	asIScriptModule* module =
+		engine.GetModule(ModuleName, asGM_ALWAYS_CREATE);
+	if (!module ||
+		module->AddScriptSection(
+			"FlyCameraApiValidation", Source) < 0 ||
+		module->Build() < 0)
+	{
+		engine.DiscardModule(ModuleName);
+		error =
+			"The Input and Transform fly-camera API did not "
+			"pass AngelScript compile validation.";
+		return false;
+	}
+
+	engine.DiscardModule(ModuleName);
+	return true;
+}
+
 static bool RegisterKeyCodeEnum(
     asIScriptEngine* engine,
     std::string& error)
@@ -992,13 +1099,17 @@ bool RegisterEngineBindings(
         engine.RegisterGlobalFunction("int GetMouseX()", asFUNCTION(ScriptGetMouseX), asCALL_CDECL) >= 0 &&
         engine.RegisterGlobalFunction("int GetMouseY()", asFUNCTION(ScriptGetMouseY), asCALL_CDECL) >= 0 &&
         engine.RegisterGlobalFunction("int GetMouseWheel()", asFUNCTION(ScriptGetMouseWheel), asCALL_CDECL) >= 0 &&
-        engine.RegisterGlobalFunction("float GetAxis(const string &in axis)", asFUNCTION(ScriptGetAxis), asCALL_CDECL) >= 0;
+        engine.RegisterGlobalFunction("float GetAxis(const string &in axis)", asFUNCTION(ScriptGetAxis), asCALL_CDECL) >= 0 &&
+        engine.RegisterGlobalFunction("bool get_cursorLocked() property", asFUNCTION(ScriptGetCursorLocked), asCALL_CDECL) >= 0 &&
+        engine.RegisterGlobalFunction("void set_cursorLocked(bool) property", asFUNCTION(ScriptSetCursorLocked), asCALL_CDECL) >= 0 &&
+        engine.RegisterGlobalFunction("void SetCursorLocked(bool locked)", asFUNCTION(ScriptSetCursorLocked), asCALL_CDECL) >= 0;
     engine.SetDefaultNamespace("");
-    if (registered)
-        return true;
-
-    error = "Could not register the Input API.";
-    return false;
+    if (!registered)
+    {
+        error = "Could not register the Input API.";
+        return false;
+    }
+    return ValidateFlyCameraApi(engine, error);
 }
 
 }

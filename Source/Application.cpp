@@ -412,6 +412,8 @@ update_status Application::Update()
 void Application::FinishUpdate()
 {
 	level->FlushPendingDestructions();
+	if (editor)
+		editor->SynchronizeSceneHistory();
 
 	// Recap on framecount and fps
 	++frames;

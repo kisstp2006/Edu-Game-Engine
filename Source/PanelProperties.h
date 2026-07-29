@@ -127,6 +127,7 @@ private:
 	UID                  inspectedAssetUid = 0;
 	bool                 ownsInspectedAssetReference = false;
 	GameObject*          selectGameObjectAfterDraw = nullptr;
+	bool                 historyInteractionActive = false;
 
 };
 

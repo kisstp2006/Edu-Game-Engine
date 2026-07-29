@@ -163,6 +163,7 @@ bool ModuleEditor::Start(Config * config)
     //props->active = config->GetBool("PropsActive", true);
 
 	OnResize(App->window->GetWidth(), App->window->GetHeight());
+	ResetSceneHistory();
 
 	return true;
 }
@@ -284,6 +285,7 @@ update_status ModuleEditor::Update(float dt)
 				{
 					App->level->CreateNewEmpty("Untitled");
 					ClearSelected();
+					ResetSceneHistory();
 				}
 				if (ImGui::MenuItem(
 						"Open Scene...", "Ctrl+O", false,
@@ -312,6 +314,28 @@ update_status ModuleEditor::Update(float dt)
 
 			if (ImGui::BeginMenu("Edit"))
 			{
+				const char* undoLabel = GetUndoLabel();
+				const std::string undoText = undoLabel
+					? "Undo " + std::string(undoLabel)
+					: "Undo";
+				if (ImGui::MenuItem(
+						undoText.c_str(), "Ctrl+Z", false, CanUndo()))
+				{
+					Undo();
+				}
+				const char* redoLabel = GetRedoLabel();
+				const std::string redoText = redoLabel
+					? "Redo " + std::string(redoLabel)
+					: "Redo";
+				if (ImGui::MenuItem(
+						redoText.c_str(),
+						"Ctrl+Y / Ctrl+Shift+Z",
+						false,
+						CanRedo()))
+				{
+					Redo();
+				}
+				ImGui::Separator();
 				if (ImGui::MenuItem(
 						"Project Settings...", nullptr, false,
 						App->GetActiveProject() != nullptr))
@@ -411,6 +435,21 @@ void ModuleEditor::HandleEditorShortcuts()
 	const bool canEditScene =
 		App->GetActiveProject() != nullptr && App->IsStop();
 	if (canEditScene &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_Z, false))
+	{
+		if (io.KeyShift)
+			Redo();
+		else
+			Undo();
+		return;
+	}
+	if (canEditScene && !io.KeyShift &&
+		ImGui::IsKeyPressed(SDL_SCANCODE_Y, false))
+	{
+		Redo();
+		return;
+	}
+	if (canEditScene &&
 		ImGui::IsKeyPressed(SDL_SCANCODE_S, false))
 	{
 		RequestSaveScene(io.KeyShift);
@@ -427,6 +466,7 @@ void ModuleEditor::HandleEditorShortcuts()
 	{
 		App->level->CreateNewEmpty("Untitled");
 		ClearSelected();
+		ResetSceneHistory();
 		return;
 	}
 	if (App->GetActiveProject() &&
@@ -1223,6 +1263,11 @@ bool ModuleEditor::CleanUp()
 
 void ModuleEditor::PrepareForProjectChange()
 {
+	sceneHistory.Clear();
+	historyBaseline = {};
+	historyBaselineValid = false;
+	historyTransactionEndRequested = false;
+	historySuspended = false;
 	if (assetEditorManager)
 		assetEditorManager->CloseAll();
 	ClearSelected();
@@ -1324,6 +1369,7 @@ bool ModuleEditor::OpenSceneAsset(
 	}
 
 	ClearSelected();
+	ResetSceneHistory();
 	return true;
 }
 
@@ -1362,6 +1408,7 @@ void ModuleEditor::RequestSaveScene(bool saveAs)
 		App->resources->SaveResources();
 		if (assets)
 			assets->RefreshProjectAssets();
+		AcceptCurrentSceneHistoryState();
 		return;
 	}
 
@@ -1446,6 +1493,7 @@ bool ModuleEditor::SaveSceneTo(
 	App->resources->SaveResources();
 	if (assets)
 		assets->RefreshProjectAssets();
+	AcceptCurrentSceneHistoryState();
 	return true;
 }
 
@@ -1482,6 +1530,252 @@ void ModuleEditor::OpenActiveProjectInVsCode()
 	std::string error;
 	if (!EGE::OpenVsCode(project->GetProjectDirectory(), error))
 		SetProjectStatus(false, error);
+}
+
+bool ModuleEditor::BeginSceneTransaction(
+	const std::string& label)
+{
+	if (!App->GetActiveProject() ||
+		!App->IsStop() ||
+		sceneHistory.HasOpenTransaction())
+	{
+		return false;
+	}
+
+	EGE::EditorDocumentState current;
+	if (!CaptureEditorDocumentState(current))
+		return false;
+
+	if (historyBaselineValid &&
+		!historyBaseline.HasSameDocumentData(current))
+	{
+		sceneHistory.Push(
+			"Edit Scene",
+			historyBaseline,
+			current);
+	}
+	historyBaseline = current;
+	historyBaselineValid = true;
+	sceneHistory.Begin(label, std::move(current));
+	historyTransactionEndRequested = false;
+	return true;
+}
+
+void ModuleEditor::EndSceneTransaction()
+{
+	if (sceneHistory.HasOpenTransaction())
+		historyTransactionEndRequested = true;
+}
+
+void ModuleEditor::CancelSceneTransaction()
+{
+	sceneHistory.Cancel();
+	historyTransactionEndRequested = false;
+}
+
+void ModuleEditor::SynchronizeSceneHistory()
+{
+	if (!App->GetActiveProject() || !App->IsStop())
+	{
+		if (sceneHistory.HasOpenTransaction())
+			CancelSceneTransaction();
+		historySuspended = true;
+		return;
+	}
+
+	EGE::EditorDocumentState current;
+	if (!CaptureEditorDocumentState(current))
+		return;
+
+	if (historySuspended || !historyBaselineValid)
+	{
+		historySuspended = false;
+		historyBaseline = std::move(current);
+		historyBaselineValid = true;
+		return;
+	}
+
+	if (!sceneHistory.HasOpenTransaction() &&
+		historyBaseline.documentType == current.documentType &&
+		historyBaseline.payload == current.payload &&
+		historyBaseline.documentId != current.documentId)
+	{
+		sceneHistory.RebaseDocument(
+			current.documentType,
+			current.documentId);
+		historyBaseline = std::move(current);
+		return;
+	}
+
+	if (sceneHistory.HasOpenTransaction())
+	{
+		if (!historyTransactionEndRequested)
+			return;
+		sceneHistory.Commit(current);
+		historyTransactionEndRequested = false;
+		historyBaseline = std::move(current);
+		return;
+	}
+
+	if (!historyBaseline.HasSameDocumentData(current))
+	{
+		sceneHistory.Push(
+			"Edit Scene",
+			historyBaseline,
+			current);
+	}
+	historyBaseline = std::move(current);
+}
+
+void ModuleEditor::ResetSceneHistory()
+{
+	sceneHistory.Clear();
+	historyTransactionEndRequested = false;
+	historySuspended = false;
+	historyBaseline = {};
+	historyBaselineValid =
+		CaptureEditorDocumentState(historyBaseline);
+}
+
+bool ModuleEditor::Undo()
+{
+	const EGE::EditorDocumentState* state = sceneHistory.Undo();
+	if (!state)
+		return false;
+
+	const EGE::EditorDocumentState restored = *state;
+	if (!ApplyEditorDocumentState(restored))
+	{
+		sceneHistory.Redo();
+		return false;
+	}
+	historyBaseline = restored;
+	historyBaselineValid = true;
+	return true;
+}
+
+bool ModuleEditor::Redo()
+{
+	const EGE::EditorDocumentState* state = sceneHistory.Redo();
+	if (!state)
+		return false;
+
+	const EGE::EditorDocumentState restored = *state;
+	if (!ApplyEditorDocumentState(restored))
+	{
+		sceneHistory.Undo();
+		return false;
+	}
+	historyBaseline = restored;
+	historyBaselineValid = true;
+	return true;
+}
+
+bool ModuleEditor::CanUndo() const
+{
+	return App->GetActiveProject() &&
+		App->IsStop() &&
+		sceneHistory.CanUndo();
+}
+
+bool ModuleEditor::CanRedo() const
+{
+	return App->GetActiveProject() &&
+		App->IsStop() &&
+		sceneHistory.CanRedo();
+}
+
+const char* ModuleEditor::GetUndoLabel() const
+{
+	return CanUndo() ? sceneHistory.GetUndoLabel() : nullptr;
+}
+
+const char* ModuleEditor::GetRedoLabel() const
+{
+	return CanRedo() ? sceneHistory.GetRedoLabel() : nullptr;
+}
+
+bool ModuleEditor::CaptureEditorDocumentState(
+	EGE::EditorDocumentState& state) const
+{
+	if (!App || !App->level || !App->GetActiveProject())
+		return false;
+
+	state = {};
+	state.documentType = "Scene";
+	state.documentId =
+		App->level->GetScenePath().generic_string();
+	if (!App->level->CaptureSceneSnapshot(state.payload))
+		return false;
+
+	if (const EGE::GameObjectSelection* selection =
+			GetGameObjectSelection())
+	{
+		state.selectedObjects.reserve(selection->objects.size());
+		for (GameObject* gameObject : selection->objects)
+		{
+			if (GameObject* valid =
+					App->level->Validate(gameObject))
+			{
+				state.selectedObjects.push_back(valid->GetUID());
+			}
+		}
+		if (GameObject* primary =
+				App->level->Validate(selection->primary))
+		{
+			state.primaryObject = primary->GetUID();
+		}
+	}
+	return true;
+}
+
+bool ModuleEditor::ApplyEditorDocumentState(
+	const EGE::EditorDocumentState& state)
+{
+	if (state.documentType != "Scene" ||
+		!App->IsStop())
+	{
+		return false;
+	}
+
+	ClearSelected();
+	if (tree)
+	{
+		tree->drag = nullptr;
+		tree->drag_candidate = nullptr;
+	}
+	if (!App->level->RestoreSceneSnapshot(
+			state.payload,
+			std::filesystem::path(state.documentId)))
+	{
+		return false;
+	}
+
+	std::vector<GameObject*> selection;
+	selection.reserve(state.selectedObjects.size());
+	for (uint uid : state.selectedObjects)
+	{
+		if (GameObject* gameObject = App->level->Find(uid))
+			selection.push_back(gameObject);
+	}
+	GameObject* primary = state.primaryObject != 0
+		? App->level->Find(state.primaryObject)
+		: nullptr;
+	SetGameObjectSelection(std::move(selection), primary);
+	return true;
+}
+
+void ModuleEditor::AcceptCurrentSceneHistoryState()
+{
+	EGE::EditorDocumentState current;
+	if (!CaptureEditorDocumentState(current))
+		return;
+
+	sceneHistory.RebaseDocument(
+		current.documentType,
+		current.documentId);
+	historyBaseline = std::move(current);
+	historyBaselineValid = true;
 }
 
 void ModuleEditor::NotifySelectionChanged()

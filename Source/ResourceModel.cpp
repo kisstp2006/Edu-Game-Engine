@@ -16,6 +16,7 @@
 
 #include "ResourceMaterial.h"
 #include "ResourceMesh.h"
+#include "ModelImportCoordinates.h"
 
 #include "utils/SimpleBinStream.h"
 #include "HashString.h"
@@ -42,6 +43,9 @@ void ResourceModel::Save(Config& config) const
 	import.AddBool("Weld Vertices", importOptions.weldVertices);
 	import.AddBool("Optimize Meshes", importOptions.optimizeMeshes);
 	import.AddBool("Flip UVs", importOptions.flipUVs);
+	import.AddBool(
+		"Convert glTF Coordinates",
+		importOptions.convertGlTfCoordinates);
 }
 
 void ResourceModel::Load(const Config& config) 
@@ -63,6 +67,8 @@ void ResourceModel::Load(const Config& config)
 	importOptions.optimizeMeshes =
 		import.GetBool("Optimize Meshes", true);
 	importOptions.flipUVs = import.GetBool("Flip UVs", false);
+	importOptions.convertGlTfCoordinates =
+		import.GetBool("Convert glTF Coordinates", true);
 }
 
 bool ResourceModel::LoadInMemory()
@@ -301,7 +307,8 @@ void ResourceModel::GenerateMeshes(
 					weightCount,
 					full_path,
 					options.scale,
-					options.flipUVs),
+					options.flipUVs,
+					options.convertGlTfCoordinates),
 				material};
 			meshes.insert({uint(i), renderer});
         }
@@ -318,7 +325,10 @@ void ResourceModel::GenerateMaterials(const tinygltf::Model& model, const char* 
     }
 }
 
-void ResourceModel::GenerateSkins(const tinygltf::Model& model, const std::vector<int>& nodeMapping)
+void ResourceModel::GenerateSkins(
+	const tinygltf::Model& model,
+	const std::vector<int>& nodeMapping,
+	const EGE::ModelImportOptions& options)
 {    
     skins.resize(model.skins.size());
 
@@ -344,6 +354,11 @@ void ResourceModel::GenerateSkins(const tinygltf::Model& model, const std::vecto
             {
                 skin.bones[i].bind = *reinterpret_cast<const float4x4*>(bindPtr);
                 skin.bones[i].bind.Transpose();
+				skin.bones[i].bind =
+					EGE::ModelImportCoordinates::Transform(
+						skin.bones[i].bind,
+						float3::one,
+						options.convertGlTfCoordinates);
 
                 bindPtr += bindStride;
             }
@@ -377,11 +392,10 @@ void ResourceModel::GenerateNodes(
         for(uint i=0; i< 16; ++i) ptr[i] = float(node.matrix[i]);
 
         local.Transpose();
-		const float3 translation = local.TranslatePart();
-		local.SetTranslatePart(float3(
-			translation.x * options.scale.x,
-			translation.y * options.scale.y,
-			translation.z * options.scale.z));
+		local = EGE::ModelImportCoordinates::Transform(
+			local,
+			options.scale,
+			options.convertGlTfCoordinates);
     }
     else
     {
@@ -391,12 +405,24 @@ void ResourceModel::GenerateNodes(
 
         if (node.translation.size() == 3)
 		{
-			translation = float3(
-				float(node.translation[0]) * options.scale.x,
-				float(node.translation[1]) * options.scale.y,
-				float(node.translation[2]) * options.scale.z);
+			translation = EGE::ModelImportCoordinates::Position(
+				float3(
+					float(node.translation[0]),
+					float(node.translation[1]),
+					float(node.translation[2])),
+				options.scale,
+				options.convertGlTfCoordinates);
 		}
-        if (node.rotation.size() == 4) rotation = Quat(float(node.rotation[0]), float(node.rotation[1]), float(node.rotation[2]), float(node.rotation[3]));
+        if (node.rotation.size() == 4)
+		{
+			rotation = EGE::ModelImportCoordinates::Rotation(
+				Quat(
+					float(node.rotation[0]),
+					float(node.rotation[1]),
+					float(node.rotation[2]),
+					float(node.rotation[3])),
+				options.convertGlTfCoordinates);
+		}
         if (node.scale.size() == 3) scale = float3(float(node.scale[0]), float(node.scale[1]), float(node.scale[2])) ;
 
         local = float4x4::FromTRS(translation, rotation, scale);
@@ -477,7 +503,7 @@ bool ResourceModel::ImportGLTF(
             }
         }
 
-        m.GenerateSkins(model, nodeMapping);
+        m.GenerateSkins(model, nodeMapping, options);
 
         return m.Save(output);
 
@@ -553,8 +579,9 @@ bool ResourceModel::Import(
 	const EGE::ModelImportOptions& options,
 	std::string& output)
 {
-    return ImportGLTF(fullPath, options, output) ||
-		ImportAssimp(fullPath, options, output);
+	if (EGE::ModelImportCoordinates::IsGlTf(fullPath))
+		return ImportGLTF(fullPath, options, output);
+	return ImportAssimp(fullPath, options, output);
 }
 
 void ResourceModel::GenerateMaterials(const aiScene* scene, const char* file, std::vector<UID>& materials)
@@ -583,7 +610,7 @@ void ResourceModel::GenerateMeshes(
 			scene->mMeshes[i],
 			file,
 			options.scale,
-			false));
+			options.flipUVs));
 
 		assert(meshes.back() != 0);
 	}

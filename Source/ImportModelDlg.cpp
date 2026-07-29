@@ -59,6 +59,13 @@ void ImportModelDlg::Open(const std::string& file)
 	settings_.AddBoolean(
 		"flipUVs", "Flip UV vertically", false).tooltip =
 		"Flips the V texture coordinate during import.";
+	EGE::ImportSetting& coordinates = settings_.AddBoolean(
+		"convertGlTfCoordinates",
+		"Convert glTF coordinates",
+		true);
+	coordinates.group = "TRANSFORM";
+	coordinates.tooltip =
+		"Converts GLTF and GLB assets to the engine coordinate system.";
 }
 
 void ImportModelDlg::Display()
@@ -147,5 +154,7 @@ EGE::ModelImportOptions ImportModelDlg::GetOptions() const
 	options.optimizeMeshes =
 		settings_.GetBoolean("optimizeMeshes", true);
 	options.flipUVs = settings_.GetBoolean("flipUVs", false);
+	options.convertGlTfCoordinates =
+		settings_.GetBoolean("convertGlTfCoordinates", true);
 	return options;
 }

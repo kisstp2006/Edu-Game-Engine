@@ -65,7 +65,8 @@ public:
 		const float3& scale,
 		bool flipUVs);
     static UID            Import              (const tinygltf::Model& model, const tinygltf::Mesh& mesh, const tinygltf::Primitive& primitive, 
-                                               uint32_t& weightsCount, const char* sourceFile, const float3& scale, bool flipUVs);
+                                               uint32_t& weightsCount, const char* sourceFile, const float3& scale, bool flipUVs,
+											   bool convertGlTfCoordinates);
 
     static UID            LoadSphere          (const char* sphere_name, float size, unsigned slices, unsigned stacks, UID uid = 0);
     static UID            LoadTorus           (const char* torus_name, float inner_r, float outer_r, unsigned slices, unsigned stacks, UID uid = 0);
@@ -129,7 +130,8 @@ private:
 		const tinygltf::Primitive& primitive,
 		uint32_t& weightsCount,
 		const float3& scale,
-		bool flipUVs);
+		bool flipUVs,
+		bool convertGlTfCoordinates);
 	void                GenerateCPUBuffers  (par_shapes_mesh_s* shape);
     void                GenerateVBO         ();
     void                GenerateBoneData    (const aiMesh* mesh, float scale);

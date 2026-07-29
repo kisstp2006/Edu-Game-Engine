@@ -192,4 +192,32 @@ if(EGE_BUILD_TESTS)
 	add_test(
 		NAME ImportSettings
 		COMMAND ImportSettingsTests)
+
+	add_executable(EditorHistoryTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/EditorHistory.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/EditorHistory.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/EditorHistoryTests.cpp")
+	target_compile_features(EditorHistoryTests PRIVATE cxx_std_20)
+	set_target_properties(EditorHistoryTests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME EditorHistory
+		COMMAND EditorHistoryTests)
+
+	add_executable(ModelImportCoordinatesTests
+		"${CMAKE_CURRENT_SOURCE_DIR}/ModelImportCoordinates.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ModelImportCoordinatesTests.cpp")
+	target_compile_features(
+		ModelImportCoordinatesTests PRIVATE cxx_std_20)
+	target_compile_definitions(
+		ModelImportCoordinatesTests PRIVATE NOMINMAX)
+	target_link_libraries(
+		ModelImportCoordinatesTests PRIVATE EGE::MathGeoLib)
+	set_target_properties(ModelImportCoordinatesTests PROPERTIES
+		FOLDER "Tests"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ModelImportCoordinates
+		COMMAND ModelImportCoordinatesTests)
 endif()

@@ -100,10 +100,16 @@ void ModuleEditorCamera::DrawDebug()
 // -----------------------------------------------------------------
 update_status ModuleEditorCamera::Update(float dt)
 {
+	if (!App->IsStop())
+	{
+		SetFlyMode(false);
+		return UPDATE_CONTINUE;
+	}
+
 	if (!App->renderer3D->viewport)
 	{
 		SetFlyMode(false);
-		App->renderer3D->active_camera->OnUpdateFrustum();
+		dummy->OnUpdateFrustum();
 		return UPDATE_CONTINUE;
 	}
 
@@ -158,7 +164,7 @@ update_status ModuleEditorCamera::Update(float dt)
 			Zoom(float(wheel) * zoom_speed *
 				App->hints->GetFloatValue(ModuleHints::METRIC_PROPORTION));
 
-		App->renderer3D->active_camera->OnUpdateFrustum();
+		dummy->OnUpdateFrustum();
 	}
 	else
 	{
@@ -171,14 +177,14 @@ update_status ModuleEditorCamera::Update(float dt)
 // -----------------------------------------------------------------
 void ModuleEditorCamera::Look(const float3& position)
 {
-	App->renderer3D->active_camera->Look(position);
+	dummy->Look(position);
 }
 
 // -----------------------------------------------------------------
 void ModuleEditorCamera::CenterOn(const float3& position, float distance)
 {
-	float3 v = App->renderer3D->active_camera->frustum.front.Neg();
-	App->renderer3D->active_camera->frustum.pos = position + (v * distance);
+	float3 v = dummy->frustum.front.Neg();
+	dummy->frustum.pos = position + (v * distance);
 	looking_at = position;
 	looking = true;
 }
@@ -192,7 +198,7 @@ ComponentCamera * ModuleEditorCamera::GetDummy() const
 // -----------------------------------------------------------------
 void ModuleEditorCamera::Move(float dt)
 {
-	Frustum* frustum = &App->renderer3D->active_camera->frustum;
+	Frustum* frustum = &dummy->frustum;
 
 	float adjusted_speed = mov_speed;
 
@@ -230,32 +236,34 @@ void ModuleEditorCamera::Orbit(float dx, float dy)
 	// fake point should be a ray colliding with something
 	if (looking == false)
 	{
-		LineSegment picking = App->renderer3D->active_camera->frustum.UnProjectLineSegment(0.f, 0.f);
+		LineSegment picking =
+			dummy->frustum.UnProjectLineSegment(0.f, 0.f);
 		float distance;
 		GameObject* hit = App->level->CastRay(picking, distance);
 
 		if (hit != nullptr)
 			point = picking.GetPoint(distance);
 		else
-			point = App->renderer3D->active_camera->frustum.pos + App->renderer3D->active_camera->frustum.front * 50.0f;
+			point = dummy->frustum.pos +
+				dummy->frustum.front * 50.0f;
 
 		looking = true;
 		looking_at = point;
 	}
 
-	float3 focus = App->renderer3D->active_camera->frustum.pos - point;
+	float3 focus = dummy->frustum.pos - point;
 
 	Quat qy = Quat::RotateY(dx);
-	Quat qx(App->renderer3D->active_camera->frustum.WorldRight(), dy);
+	Quat qx(dummy->frustum.WorldRight(), dy);
 
 	const float3 pitchedFocus = qx.Transform(focus);
 	const float3 pitchedUp = qx.Transform(
-		App->renderer3D->active_camera->frustum.up).Normalized();
+		dummy->frustum.up).Normalized();
 	if (pitchedUp.y > 0.0f)
 		focus = pitchedFocus;
 	focus = qy.Transform(focus);
 
-	App->renderer3D->active_camera->frustum.pos = focus + point;
+	dummy->frustum.pos = focus + point;
 
 	Look(point);
 }
@@ -269,22 +277,27 @@ void ModuleEditorCamera::LookAt(float dx, float dy)
 	if (dx != 0.f)
 	{
 		Quat q = Quat::RotateY(dx);
-		App->renderer3D->active_camera->frustum.front = q.Mul(App->renderer3D->active_camera->frustum.front).Normalized();
+		dummy->frustum.front =
+			q.Mul(dummy->frustum.front).Normalized();
 		// would not need this is we were rotating in the local Y, but that is too disorienting
-		App->renderer3D->active_camera->frustum.up = q.Mul(App->renderer3D->active_camera->frustum.up).Normalized();
+		dummy->frustum.up =
+			q.Mul(dummy->frustum.up).Normalized();
 	}
 
 	// y motion makes the camera rotate in X local axis, with tops
 	if(dy != 0.f)
 	{
-		Quat q = Quat::RotateAxisAngle(App->renderer3D->active_camera->frustum.WorldRight(), dy);
+		Quat q = Quat::RotateAxisAngle(
+			dummy->frustum.WorldRight(), dy);
 
-		float3 new_up = q.Mul(App->renderer3D->active_camera->frustum.up).Normalized();
+		float3 new_up =
+			q.Mul(dummy->frustum.up).Normalized();
 
 		if (new_up.y > 0.0f)
 		{
-			App->renderer3D->active_camera->frustum.up = new_up;
-			App->renderer3D->active_camera->frustum.front = q.Mul(App->renderer3D->active_camera->frustum.front).Normalized();
+			dummy->frustum.up = new_up;
+			dummy->frustum.front =
+				q.Mul(dummy->frustum.front).Normalized();
 		}
 	}
 }
@@ -294,7 +307,7 @@ void ModuleEditorCamera::Zoom(float zoom)
 {
 	if (looking == true)
 	{
-		float dist = looking_at.Distance(App->renderer3D->active_camera->frustum.pos);
+		float dist = looking_at.Distance(dummy->frustum.pos);
 
 		// Slower on closer distances
 		if (dist < 15.0f)
@@ -309,14 +322,14 @@ void ModuleEditorCamera::Zoom(float zoom)
 		IsHeld(App->input->GetKey(SDL_SCANCODE_RSHIFT)))
 		zoom *= 5.0f;
 
-	float3 p = App->renderer3D->active_camera->frustum.front * zoom;
-	App->renderer3D->active_camera->frustum.pos += p;
+	float3 p = dummy->frustum.front * zoom;
+	dummy->frustum.pos += p;
 }
 
 // -----------------------------------------------------------------
 void ModuleEditorCamera::Pan(float motion_x, float motion_y)
 {
-	Frustum& frustum = App->renderer3D->active_camera->frustum;
+	Frustum& frustum = dummy->frustum;
 	float distance = looking
 		? looking_at.Distance(frustum.pos)
 		: 10.0f;

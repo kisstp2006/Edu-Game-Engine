@@ -111,6 +111,14 @@ void ImportAnimationDlg::Open(
 	scale.maximum = 10000.0;
 	scale.step = 0.01;
 
+	EGE::ImportSetting& coordinates = settings_.AddBoolean(
+		"convertGlTfCoordinates",
+		"Convert glTF coordinates",
+		true);
+	coordinates.group = "TRANSFORM";
+	coordinates.tooltip =
+		"Uses the same GLTF and GLB coordinate conversion as model import.";
+
 	EGE::ImportSetting& morphTargets = settings_.AddBoolean(
 		"importMorphTargets", "Import morph targets", true);
 	morphTargets.group = "CONTENT";
@@ -213,6 +221,8 @@ EGE::AnimationImportOptions ImportAnimationDlg::GetOptions() const
 	options.scale = settings_.GetVector3("scale", float3::one);
 	options.importMorphTargets =
 		settings_.GetBoolean("importMorphTargets", true);
+	options.convertGlTfCoordinates =
+		settings_.GetBoolean("convertGlTfCoordinates", true);
 	if (const auto* clips =
 			settings_.GetCustom<
 				std::vector<EGE::AnimationClipImportRange>>(

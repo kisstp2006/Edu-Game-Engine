@@ -2,6 +2,7 @@
 #define __MODULEEDITOR_H__
 
 #include "EditorAssetSelection.h"
+#include "EditorHistory.h"
 #include "Module.h"
 #include <imgui.h>
 #include "imgui-filebrowser/imfilebrowser.h"
@@ -114,6 +115,17 @@ public:
 	bool OpenSceneAsset(const std::filesystem::path& scenePath);
 	void RequestOpenScene();
 	void RequestSaveScene(bool saveAs = false);
+	bool BeginSceneTransaction(const std::string& label);
+	void EndSceneTransaction();
+	void CancelSceneTransaction();
+	void SynchronizeSceneHistory();
+	void ResetSceneHistory();
+	bool Undo();
+	bool Redo();
+	[[nodiscard]] bool CanUndo() const;
+	[[nodiscard]] bool CanRedo() const;
+	[[nodiscard]] const char* GetUndoLabel() const;
+	[[nodiscard]] const char* GetRedoLabel() const;
 
     int GetWidth(TabPanelEnum panel) const { return tab_panels[panel].width; }
     int GetHeight(TabPanelEnum panel) const { return tab_panels[panel].height; }
@@ -163,6 +175,11 @@ private:
 	void DrawSceneDialogs();
 	bool SaveSceneTo(const std::filesystem::path& selectedPath);
 	std::filesystem::path GetSceneDialogDirectory() const;
+	bool CaptureEditorDocumentState(
+		EGE::EditorDocumentState& state) const;
+	bool ApplyEditorDocumentState(
+		const EGE::EditorDocumentState& state);
+	void AcceptCurrentSceneHistoryState();
 
 private:
 
@@ -217,6 +234,11 @@ private:
     SelectionVariant selected;
 	std::unique_ptr<EGE::AssetEditorManager> assetEditorManager;
 	std::unique_ptr<EGE::RecentProjects> recentProjects;
+	EGE::EditorHistory sceneHistory;
+	EGE::EditorDocumentState historyBaseline;
+	bool historyBaselineValid = false;
+	bool historyTransactionEndRequested = false;
+	bool historySuspended = false;
 
 };
 

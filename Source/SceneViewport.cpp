@@ -80,6 +80,16 @@ void SceneViewport::Draw(ComponentCamera* camera, ComponentCamera* culling)
     if(ImGui::BeginChild("SceneCanvas", ImVec2(0, 0), true, ImGuiWindowFlags_NoMove))
     {
 		focused = ImGui::IsWindowFocused();
+		if (!historyInteractionActive &&
+			App->IsStop() &&
+			ImGui::IsWindowHovered(
+				ImGuiHoveredFlags_RootAndChildWindows) &&
+			ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+		{
+			historyInteractionActive =
+				App->editor->BeginSceneTransaction(
+					"Transform Selection");
+		}
 
         DrawQuickBar(camera);
 
@@ -152,6 +162,13 @@ void SceneViewport::Draw(ComponentCamera* camera, ComponentCamera* culling)
 
         ShowTexture();
         DrawGuizmo(camera);
+		if (historyInteractionActive &&
+			!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+			!ImGuizmo::IsUsing())
+		{
+			App->editor->EndSceneTransaction();
+			historyInteractionActive = false;
+		}
     }
     ImGui::EndChild();
 }

@@ -162,6 +162,7 @@ target_link_libraries(ege_angelscript
     INTERFACE "${EGE_ANGELSCRIPT_UPSTREAM_TARGET}")
 
 add_library(ege_angelscript_addons STATIC
+    "${angelscript_SOURCE_DIR}/sdk/add_on/scriptarray/scriptarray.cpp"
     "${angelscript_SOURCE_DIR}/sdk/add_on/scriptbuilder/scriptbuilder.cpp"
     "${angelscript_SOURCE_DIR}/sdk/add_on/scriptstdstring/scriptstdstring.cpp")
 add_library(EGE::AngelScriptAddons ALIAS ege_angelscript_addons)

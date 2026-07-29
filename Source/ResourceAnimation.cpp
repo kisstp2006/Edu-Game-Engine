@@ -9,6 +9,7 @@
 #include <assimp/postprocess.h>
 
 #include "gltf.h"
+#include "ModelImportCoordinates.h"
 
 #include "utils/SimpleBinStream.h"
 
@@ -112,6 +113,9 @@ void ResourceAnimation::Save(Config& config) const
 	import.AddFloat3("Scale", importOptions.scale);
 	import.AddBool(
 		"Import Morph Targets", importOptions.importMorphTargets);
+	import.AddBool(
+		"Convert glTF Coordinates",
+		importOptions.convertGlTfCoordinates);
 	import.AddUInt("First Frame", firstFrame);
 	import.AddUInt("Last Frame", lastFrame);
 }
@@ -124,6 +128,8 @@ void ResourceAnimation::Load(const Config& config)
 		import.GetFloat3("Scale", float3::one);
 	importOptions.importMorphTargets =
 		import.GetBool("Import Morph Targets", true);
+	importOptions.convertGlTfCoordinates =
+		import.GetBool("Convert glTF Coordinates", true);
 	firstFrame = import.GetUInt("First Frame", 0);
 	lastFrame = import.GetUInt(
 		"Last Frame",
@@ -317,7 +323,10 @@ bool ResourceAnimation::ImportGLTF(
     const std::string rotation("rotation");
     const std::string weights("weights");
 
-    if (gltfContext.LoadASCIIFromFile(&model, &error, &warning, full_path))
+    if (gltfContext.LoadASCIIFromFile(
+			&model, &error, &warning, full_path) ||
+		gltfContext.LoadBinaryFromFile(
+			&model, &error, &warning, full_path))
     {
         output.reserve(model.animations.size());
 
@@ -348,10 +357,11 @@ bool ResourceAnimation::ImportGLTF(
 						{
 							float3& position =
 								resChannel.positions[i];
-							position = float3(
-								position.x * options.scale.x,
-								position.y * options.scale.y,
-								position.z * options.scale.z);
+							position =
+								EGE::ModelImportCoordinates::Position(
+									position,
+									options.scale,
+									options.convertGlTfCoordinates);
 						}
 						CropKeyframes(
 							resChannel.posTime,
@@ -375,6 +385,15 @@ bool ResourceAnimation::ImportGLTF(
                         loadAccessor(resChannel.rotTime, numTime, model, sampler.input);
                         loadAccessor(resChannel.rotations, resChannel.num_rotations, model, sampler.output);
                         SDL_assert(numTime == resChannel.num_rotations);
+						for (uint i = 0;
+							i < resChannel.num_rotations;
+							++i)
+						{
+							resChannel.rotations[i] =
+								EGE::ModelImportCoordinates::Rotation(
+									resChannel.rotations[i],
+									options.convertGlTfCoordinates);
+						}
 						CropKeyframes(
 							resChannel.rotTime,
 							resChannel.rotations,

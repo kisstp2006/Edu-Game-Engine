@@ -57,6 +57,10 @@ public:
 		std::string* error = nullptr);
 	bool HasScenePath() const;
 	const std::filesystem::path& GetScenePath() const;
+	bool CaptureSceneSnapshot(std::string& snapshot) const;
+	bool RestoreSceneSnapshot(
+		const std::string& snapshot,
+		const std::filesystem::path& scenePath);
 	void OnAssetRenamed(
 		const std::filesystem::path& oldPath,
 		const std::filesystem::path& newPath);
@@ -93,6 +97,12 @@ private:
 	void RecursiveUpdate(GameObject* go, float dt) const;
 	void RecursiveLateUpdate(GameObject* go, float dt) const;
 	void RecursiveFlushPendingComponentRemovals(GameObject* go) const;
+	void BuildSceneConfig(
+		Config& config,
+		const char* sceneName) const;
+	bool RestoreSceneConfig(
+		const Config& config,
+		const std::filesystem::path& scenePath);
 	GameObject* RecursiveFind(
 		uint uid, GameObject* go, bool includePending) const;
 	GameObject* RecursiveFind(const char* name, GameObject* go) const;

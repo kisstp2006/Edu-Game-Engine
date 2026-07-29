@@ -554,21 +554,7 @@ bool ModuleLevelManager::Load(const char * file)
 			Config config(buffer);
 
 			if (config.IsValid())
-			{
-				UnloadCurrent();
-
-				// Load level description
-				Config desc(config.GetSection("Description"));
-				name = desc.GetString("Name", "Unnamed level");
-				//App->hints->Init(&desc);
-				//App->camera->Load(&desc);
-
-				lightManager->LoadLights(config.GetSection("Lights"));
-				LoadGameObjects(config);
-				skybox->Load(config.GetSection("Skybox"));
-				scene_path = resolvedPath;
-				ret = true;
-			}
+				ret = RestoreSceneConfig(config, resolvedPath);
         }
 
 		RELEASE_ARRAY(buffer); 
@@ -600,24 +586,7 @@ bool ModuleLevelManager::Save(const char * file)
 	const std::string savedName = resolvedPath.stem().string();
 
 	Config save;
-
-	// Add header info
-	Config desc(save.AddSection("Description"));
-	desc.AddString("Name", savedName.c_str());
-    //App->hints->Save(&desc);
-    //App->camera->Save(&desc);
-
-    Config lightsCfg = save.AddSection("Lights");
-    lightManager->SaveLights(lightsCfg);
-
-	// Serialize GameObjects recursively
-	save.AddArray("Game Objects");
-
-	for (list<GameObject*>::const_iterator it = root->childs.begin(); it != root->childs.end(); ++it)
-		(*it)->Save(save);
-
-    Config skyCfg = save.AddSection("Skybox");
-	skybox->Save(skyCfg);
+	BuildSceneConfig(save, savedName.c_str());
 
 	if (!WriteSceneConfig(save, resolvedPath, nullptr))
 		return false;
@@ -793,6 +762,86 @@ bool ModuleLevelManager::HasScenePath() const
 const std::filesystem::path& ModuleLevelManager::GetScenePath() const
 {
 	return scene_path;
+}
+
+bool ModuleLevelManager::CaptureSceneSnapshot(
+	std::string& snapshot) const
+{
+	Config config;
+	BuildSceneConfig(
+		config,
+		name.empty() ? "Untitled" : name.c_str());
+
+	char* buffer = nullptr;
+	const std::size_t size =
+		config.Save(&buffer, "Editor history scene snapshot");
+	if (!buffer || size == 0)
+	{
+		RELEASE_ARRAY(buffer);
+		snapshot.clear();
+		return false;
+	}
+
+	snapshot.assign(buffer);
+	RELEASE_ARRAY(buffer);
+	return !snapshot.empty();
+}
+
+bool ModuleLevelManager::RestoreSceneSnapshot(
+	const std::string& snapshot,
+	const std::filesystem::path& scenePath)
+{
+	if (snapshot.empty())
+		return false;
+
+	Config config(snapshot.c_str());
+	return config.IsValid() &&
+		RestoreSceneConfig(config, scenePath);
+}
+
+void ModuleLevelManager::BuildSceneConfig(
+	Config& config,
+	const char* sceneName) const
+{
+	Config description = config.AddSection("Description");
+	description.AddString(
+		"Name",
+		sceneName && sceneName[0] != '\0'
+			? sceneName
+			: "Untitled");
+
+	Config lights = config.AddSection("Lights");
+	lightManager->SaveLights(lights);
+
+	config.AddArray("Game Objects");
+	for (GameObject* gameObject : root->childs)
+	{
+		if (!gameObject->IsPendingDestroy())
+			gameObject->Save(config);
+	}
+
+	Config skyboxConfig = config.AddSection("Skybox");
+	skybox->Save(skyboxConfig);
+}
+
+bool ModuleLevelManager::RestoreSceneConfig(
+	const Config& config,
+	const std::filesystem::path& scenePath)
+{
+	if (!config.IsValid())
+		return false;
+
+	UnloadCurrent();
+	Config description = config.GetSection("Description");
+	name = description.GetString("Name", "Untitled");
+	lightManager->LoadLights(config.GetSection("Lights"));
+	LoadGameObjects(config);
+	skybox->Load(config.GetSection("Skybox"));
+	scene_path = scenePath.lexically_normal();
+	root->RecursiveCalcGlobalTransform(
+		root->GetLocalTransform(), true);
+	root->RecursiveCalcBoundingBoxes();
+	return true;
 }
 
 void ModuleLevelManager::OnAssetRenamed(

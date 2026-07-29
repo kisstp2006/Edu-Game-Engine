@@ -320,8 +320,22 @@ void ModulePhysics3D::DeleteBody(PhysBody3D* pbody)
 // ---------------------------------------------------------
 void ModulePhysics3D::DeleteBody(btRigidBody * body)
 {
-	if (body != nullptr)
-		world->removeCollisionObject(body);
+	if (!body)
+		return;
+
+	if (world)
+		world->removeRigidBody(body);
+
+	btCollisionShape* shape = body->getCollisionShape();
+	delete body;
+
+	const auto found =
+		std::find(shapes.begin(), shapes.end(), shape);
+	if (found != shapes.end())
+	{
+		delete *found;
+		shapes.erase(found);
+	}
 }
 
 // ---------------------------------------------------------
@@ -339,11 +353,20 @@ void ModulePhysics3D::SetDebugMode(uint mode)
 // ---------------------------------------------------------
 update_status ModulePhysics3D::PreUpdate(float dt)
 {
-	if (paused == true)
+	if (paused || !world)
 		return UPDATE_CONTINUE;
 
-	// Step the physics world
-	//world->stepSimulation(dt, 15);
+	const std::uint32_t stepCount =
+		App ? App->GetTime().GetFixedStepCount() : 1;
+	const float fixedDeltaTime =
+		App ? App->GetTime().GetFixedDeltaTime() : dt;
+	for (std::uint32_t step = 0; step < stepCount; ++step)
+	{
+		world->stepSimulation(
+			fixedDeltaTime,
+			1,
+			fixedDeltaTime);
+	}
 
 	// Update transformations
 

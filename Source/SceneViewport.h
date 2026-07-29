@@ -118,6 +118,7 @@ private:
 	bool        draw_plane  = true;
 	bool        draw_axis   = true;
 	bool        debug_draw  = true;
+	bool        historyInteractionActive = false;
 
     ImGuizmo::OPERATION          guizmo_op      = ImGuizmo::TRANSLATE;
     ImGuizmo::MODE               guizmo_mode    = ImGuizmo::LOCAL;

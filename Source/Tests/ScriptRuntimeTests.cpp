@@ -134,6 +134,7 @@ int main()
 		"    string pathName;\n"
 		"    string normalizedText;\n"
 		"    bool stringChecks = false;\n"
+		"    bool arraysValid = false;\n"
 		"\n"
 		"    void OnUpdate(float deltaTime)\n"
 		"    {\n"
@@ -180,6 +181,11 @@ int main()
 		"            normalizedText.Contains(\"LO WO\") &&\n"
 		"            normalizedText.Length == 11 &&\n"
 		"            String::IsNullOrWhiteSpace(\"  \\t\");\n"
+		"\n"
+		"        array<int> values = { 1, 2, 3 };\n"
+		"        values.insertLast(4);\n"
+		"        arraysValid = values.length() == 4 &&\n"
+		"            values[0] == 1 && values[3] == 4;\n"
 		"    }\n"
 		"}\n");
 
@@ -260,6 +266,7 @@ int main()
 	const std::string pathName = ReadText("pathName");
 	const std::string normalizedText = ReadText("normalizedText");
 	const bool stringChecks = ReadBool("stringChecks");
+	const bool arraysValid = ReadBool("arraysValid");
 	const bool helpersValid =
 		reflectedHelpers &&
 		deterministicRandom &&
@@ -270,7 +277,8 @@ int main()
 		guidRoundTrip &&
 		pathName == "Player" &&
 		normalizedText == "HELLO WORLD" &&
-		stringChecks;
+		stringChecks &&
+		arraysValid;
 	if (!helpersValid)
 	{
 		std::cerr
@@ -282,7 +290,8 @@ int main()
 			<< " guid=" << guidRoundTrip
 			<< " path=[" << pathName << ']'
 			<< " text=[" << normalizedText << ']'
-			<< " string=" << stringChecks << '\n';
+			<< " string=" << stringChecks
+			<< " arrays=" << arraysValid << '\n';
 		for (const EGE::ScriptDiagnostic& diagnostic :
 			helpersRuntime.GetDiagnostics())
 		{
@@ -315,6 +324,8 @@ int main()
 			helpersLanguageServerApi.find("class Stopwatch") !=
 				std::string::npos &&
 			helpersLanguageServerApi.find("class Guid") !=
+				std::string::npos &&
+			helpersLanguageServerApi.find("class array<class T>") ==
 				std::string::npos &&
 			helpersLanguageServerApi.find(
 				"namespace Stopwatch {\n"

@@ -122,12 +122,17 @@ void PanelGOTree::Draw()
 		const bool hasSelection = primary != nullptr;
 		if (ImGui::MenuItem("New Game Object", "Ctrl+Shift+N"))
 		{
+			const bool history =
+				App->editor->BeginSceneTransaction(
+					"Create Game Object");
 			if (GameObject* gameObject =
 					App->level->CreateGameObject())
 			{
 				App->editor->SetSelected(gameObject);
 				selectionAnchor_ = gameObject;
 			}
+			if (history)
+				App->editor->EndSceneTransaction();
 		}
 		if (ImGui::MenuItem(
 				"Select All", "Ctrl+A", false,
@@ -424,12 +429,17 @@ void PanelGOTree::HandleShortcuts()
 		input.KeyShift &&
 		ImGui::IsKeyPressed(SDL_SCANCODE_N, false))
 	{
+		const bool history =
+			App->editor->BeginSceneTransaction(
+				"Create Game Object");
 		if (GameObject* gameObject =
 				App->level->CreateGameObject())
 		{
 			App->editor->SetSelected(gameObject);
 			selectionAnchor_ = gameObject;
 		}
+		if (history)
+			App->editor->EndSceneTransaction();
 		return;
 	}
 	if (input.KeyCtrl &&
@@ -535,7 +545,12 @@ void PanelGOTree::DrawActionDialogs()
 			if (GameObject* gameObject =
 					App->level->Find(pendingRenameId_))
 			{
+				const bool history =
+					App->editor->BeginSceneTransaction(
+					"Rename Game Object");
 				gameObject->name = renameBuffer_;
+				if (history)
+					App->editor->EndSceneTransaction();
 			}
 			pendingRenameId_ = 0;
 			ImGui::CloseCurrentPopup();
@@ -549,6 +564,9 @@ void PanelGOTree::DuplicateSelection(GameObject* context)
 	if (!context)
 		context = App->editor->GetPrimaryGameObject();
 
+	const bool history =
+		App->editor->BeginSceneTransaction(
+			"Duplicate Game Objects");
 	std::vector<GameObject*> duplicates;
 	for (GameObject* gameObject : GetSelectionRoots(context))
 	{
@@ -564,6 +582,8 @@ void PanelGOTree::DuplicateSelection(GameObject* context)
 			duplicates, duplicates.back());
 		selectionAnchor_ = duplicates.back();
 	}
+	if (history)
+		App->editor->EndSceneTransaction();
 }
 
 void PanelGOTree::RequestDeleteSelection(GameObject* context)
@@ -582,6 +602,9 @@ void PanelGOTree::RequestDeleteSelection(GameObject* context)
 
 void PanelGOTree::DeletePendingSelection()
 {
+	const bool history =
+		App->editor->BeginSceneTransaction(
+			"Delete Game Objects");
 	for (uint uid : pendingDeleteIds_)
 	{
 		if (GameObject* gameObject = App->level->Find(uid))
@@ -592,6 +615,8 @@ void PanelGOTree::DeletePendingSelection()
 	selectionAnchor_ = nullptr;
 	drag = nullptr;
 	drag_candidate = nullptr;
+	if (history)
+		App->editor->EndSceneTransaction();
 }
 
 void PanelGOTree::RequestRenameSelection(GameObject* context)
@@ -870,10 +895,15 @@ bool PanelGOTree::RecursiveDraw(GameObject* go)
             {
 				if (ImGui::MenuItem("Create Child"))
 				{
+					const bool history =
+						App->editor->BeginSceneTransaction(
+							"Create Game Object");
 					GameObject* child =
 						App->level->CreateGameObject(go);
 					if (child)
 						App->editor->SetSelected(child);
+					if (history)
+						App->editor->EndSceneTransaction();
 				}
 				if (ImGui::MenuItem("Duplicate"))
 					DuplicateSelection(go);
@@ -946,9 +976,14 @@ void PanelGOTree::CheckHover(GameObject* go)
 			drag != go &&
 			!go->IsUnder(drag))
 		{
+			const bool history =
+				App->editor->BeginSceneTransaction(
+					"Reparent Game Object");
 			drag->SetNewParent(go, true);
 			drag = nullptr;
 			drag_candidate = nullptr;
+			if (history)
+				App->editor->EndSceneTransaction();
 		}
 	}
 }

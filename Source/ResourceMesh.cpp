@@ -3,6 +3,7 @@
 #include "gltf.h"
 
 #include "ResourceMesh.h"
+#include "ModelImportCoordinates.h"
 #include "Application.h"
 
 #include "ModuleFileSystem.h"
@@ -453,13 +454,20 @@ UID ResourceMesh::Import(
 	uint32_t& weightCount,
 	const char* source_file,
 	const float3& scale,
-	bool flipUVs)
+	bool flipUVs,
+	bool convertGlTfCoordinates)
 {    
     ResourceMesh* m = static_cast<ResourceMesh*>(App->resources->CreateNewResource(Resource::mesh));
 
     m->name = mesh.name;
-    m->GenerateCPUBuffers(
-		model, mesh, primitive, weightCount, scale, flipUVs);
+	m->GenerateCPUBuffers(
+		model,
+		mesh,
+		primitive,
+		weightCount,
+		scale,
+		flipUVs,
+		convertGlTfCoordinates);
     
     // TODO: Bones
     m->GenerateAttribInfo();
@@ -615,8 +623,12 @@ void ResourceMesh::GenerateCPUBuffers(
 	const tinygltf::Primitive& primitive,
 	uint32_t& weightCount,
 	const float3& scale,
-	bool flipUVs)
+	bool flipUVs,
+	bool convertGlTfCoordinates)
 {
+	const bool isTriangleList =
+		primitive.mode == -1 ||
+		primitive.mode == TINYGLTF_MODE_TRIANGLES;
     const auto& itPos = primitive.attributes.find("POSITION");
 
     if (primitive.indices >= 0 && itPos != primitive.attributes.end())
@@ -626,10 +638,8 @@ void ResourceMesh::GenerateCPUBuffers(
         for (uint i = 0; i < num_vertices; ++i)
         {
 			float3& vertex = src_vertices[i];
-			vertex = float3(
-				vertex.x * scale.x,
-				vertex.y * scale.y,
-				vertex.z * scale.z);
+			vertex = EGE::ModelImportCoordinates::Position(
+				vertex, scale, convertGlTfCoordinates);
         }
 
         uint numTexCoord = 0;
@@ -648,16 +658,27 @@ void ResourceMesh::GenerateCPUBuffers(
 		{
 			for (uint i = 0; i < numNormals; ++i)
 			{
-				src_normals[i] = float3(
-					src_normals[i].x / scale.x,
-					src_normals[i].y / scale.y,
-					src_normals[i].z / scale.z).Normalized();
+				src_normals[i] =
+					EGE::ModelImportCoordinates::Normal(
+						src_normals[i],
+						scale,
+						convertGlTfCoordinates);
 			}
 		}
 
         uint numTangents = 0;
         loadAccessor(src_tangents, numTangents, model, primitive.attributes, "TANGENT");
         SDL_assert(numTangents == 0 || numTangents == num_vertices);
+		if (src_tangents)
+		{
+			for (uint i = 0; i < numTangents; ++i)
+			{
+				src_tangents[i] =
+					EGE::ModelImportCoordinates::Tangent(
+						src_tangents[i],
+						convertGlTfCoordinates);
+			}
+		}
 
         uint numJoints;
         loadAccessor(src_bone_indices, numJoints, model, primitive.attributes, "JOINTS_0");
@@ -671,6 +692,10 @@ void ResourceMesh::GenerateCPUBuffers(
         bbox.Enclose(src_vertices.get(), num_vertices);
 
         loadAccessor(src_indices, num_indices, model, primitive.indices);
+		EGE::ModelImportCoordinates::ReverseTriangleWinding(
+			src_indices.get(),
+			num_indices,
+			convertGlTfCoordinates && isTriangleList);
     }
 
     num_morph_targets = 0;
@@ -689,23 +714,46 @@ void ResourceMesh::GenerateCPUBuffers(
             SDL_assert(numMorphVert == num_vertices);
 			for (uint i = 0; i < numMorphVert; ++i)
 			{
-				data.src_vertices[i] = float3(
-					data.src_vertices[i].x * scale.x,
-					data.src_vertices[i].y * scale.y,
-					data.src_vertices[i].z * scale.z);
+				data.src_vertices[i] =
+					EGE::ModelImportCoordinates::Position(
+						data.src_vertices[i],
+						scale,
+						convertGlTfCoordinates);
 			}
 
             uint numNormals = 0;
             loadAccessor(data.src_normals, numNormals, model, target, "NORMAL");
             SDL_assert(numNormals == num_vertices);
+			if (data.src_normals)
+			{
+				for (uint i = 0; i < numNormals; ++i)
+				{
+					data.src_normals[i] =
+						EGE::ModelImportCoordinates::MorphDirection(
+							data.src_normals[i],
+							scale,
+							convertGlTfCoordinates);
+				}
+			}
 
             uint numTangents = 0;
             loadAccessor(data.src_tangents, numTangents, model, target, "TANGENT");
             SDL_assert(numTangents == 0 || numTangents == num_vertices);
+			if (data.src_tangents &&
+				convertGlTfCoordinates)
+			{
+				for (uint i = 0; i < numTangents; ++i)
+					data.src_tangents[i].x =
+						-data.src_tangents[i].x;
+			}
 
             uint numIndices = 0;
             loadAccessor(data.src_indices, numIndices, model, primitive.indices);
             SDL_assert(num_indices == numIndices);
+			EGE::ModelImportCoordinates::ReverseTriangleWinding(
+				data.src_indices.get(),
+				numIndices,
+				convertGlTfCoordinates && isTriangleList);
 
             data.initWeight = float(mesh.weights[weightCount]);
             data.offset = weightCount;

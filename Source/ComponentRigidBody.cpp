@@ -8,6 +8,8 @@
 #include <btBulletDynamicsCommon.h>
 #include <imgui.h>
 
+#include <algorithm>
+
 using namespace std;
 
 // ---------------------------------------------------------
@@ -62,6 +64,11 @@ void ComponentRigidBody::OnSave(Config& config) const
 	config.AddArrayFloat("Linear Factor", &linear_factor.x, 3);
 	config.AddArrayFloat("Angular Factor", &angular_factor.x, 3);
 	config.AddFloat("Restitution", restitution);
+	config.AddFloat("Friction", friction);
+	config.AddFloat("Rolling Friction", rolling_friction);
+	config.AddFloat("Linear Damping", linear_damping);
+	config.AddFloat("Angular Damping", angular_damping);
+	config.AddFloat3("Gravity", gravity);
 }
 
 // ---------------------------------------------------------
@@ -92,6 +99,15 @@ void ComponentRigidBody::OnLoad(Config * config)
 	box.r.z = config->GetFloat("Box", 1.f, 5);
 
 	restitution = config->GetFloat("Restitution", 1.0f);
+	friction = config->GetFloat("Friction", 0.5f);
+	rolling_friction =
+		config->GetFloat("Rolling Friction", 0.0f);
+	linear_damping =
+		config->GetFloat("Linear Damping", 0.0f);
+	angular_damping =
+		config->GetFloat("Angular Damping", 0.0f);
+	gravity = config->GetFloat3(
+		"Gravity", float3(0.0f, -10.0f, 0.0f));
 
 	linear_factor.x = config->GetFloat("Linear Factor", 1.f, 0);
 	linear_factor.y = config->GetFloat("Linear Factor", 1.f, 1);
@@ -103,16 +119,37 @@ void ComponentRigidBody::OnLoad(Config * config)
 }
 
 // ---------------------------------------------------------
+void ComponentRigidBody::OnActivate()
+{
+	if (App && App->IsPlay() && !body)
+		CreateBody();
+}
+
+// ---------------------------------------------------------
+void ComponentRigidBody::OnDeActivate()
+{
+	if (body && App && App->physics3D)
+	{
+		App->physics3D->DeleteBody(body);
+		body = nullptr;
+	}
+}
+
+// ---------------------------------------------------------
 void ComponentRigidBody::OnPlay()
 {
-	CreateBody();
+	if (IsActive())
+		CreateBody();
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::OnStop()
 {
 	if (body != nullptr)
+	{
 		App->physics3D->DeleteBody(body);
+		body = nullptr;
+	}
 }
 
 // ---------------------------------------------------------
@@ -171,6 +208,9 @@ void ComponentRigidBody::setWorldTransform(const btTransform & worldTrans)
 // ---------------------------------------------------------
 void ComponentRigidBody::CreateBody()
 {
+	if (!App || !App->physics3D)
+		return;
+
 	if (body != nullptr)
 		App->physics3D->DeleteBody(body);
 
@@ -189,18 +229,20 @@ void ComponentRigidBody::CreateBody()
 
 	if (body != nullptr)
 	{
-		body->setLinearFactor(linear_factor);
-		body->setAngularFactor(angular_factor);
-		body->setRestitution(restitution);
+		ApplyBodyConfiguration();
 	}
 }
 
 // ---------------------------------------------------------
 void ComponentRigidBody::SetBodyType(BodyType new_type)
 {
-	if (new_type != body_unknown && new_type != body_type)
+	if (new_type >= body_sphere &&
+		new_type <= body_capsule &&
+		new_type != body_type)
 	{
 		body_type = new_type;
+		if (body)
+			RebuildBody();
 	}
 }
 
@@ -213,9 +255,13 @@ ComponentRigidBody::BodyType ComponentRigidBody::GetBodyType() const
 // ---------------------------------------------------------
 void ComponentRigidBody::SetBehaviour(BodyBehaviour new_behaviour)
 {
-	if (new_behaviour != behaviour)
+	if (new_behaviour >= fixed &&
+		new_behaviour <= kinematic &&
+		new_behaviour != behaviour)
 	{
 		behaviour = new_behaviour;
+		if (body)
+			ApplyBodyConfiguration();
 	}
 }
 
@@ -225,28 +271,413 @@ ComponentRigidBody::BodyBehaviour ComponentRigidBody::GetBehaviour() const
 	return behaviour;
 }
 
+float ComponentRigidBody::GetMass() const
+{
+	return mass;
+}
+
+void ComponentRigidBody::SetMass(float value)
+{
+	mass = std::max(value, 0.0001f);
+	if (body)
+		ApplyBodyConfiguration();
+}
+
+float ComponentRigidBody::GetRestitution() const
+{
+	return restitution;
+}
+
+void ComponentRigidBody::SetRestitution(float value)
+{
+	restitution = std::clamp(value, 0.0f, 1.0f);
+	if (body)
+		body->setRestitution(restitution);
+}
+
+float ComponentRigidBody::GetFriction() const
+{
+	return friction;
+}
+
+void ComponentRigidBody::SetFriction(float value)
+{
+	friction = std::max(value, 0.0f);
+	if (body)
+		body->setFriction(friction);
+}
+
+float ComponentRigidBody::GetRollingFriction() const
+{
+	return rolling_friction;
+}
+
+void ComponentRigidBody::SetRollingFriction(float value)
+{
+	rolling_friction = std::max(value, 0.0f);
+	if (body)
+		body->setRollingFriction(rolling_friction);
+}
+
+float ComponentRigidBody::GetLinearDamping() const
+{
+	return linear_damping;
+}
+
+void ComponentRigidBody::SetLinearDamping(float value)
+{
+	linear_damping = std::clamp(value, 0.0f, 1.0f);
+	if (body)
+		body->setDamping(linear_damping, angular_damping);
+}
+
+float ComponentRigidBody::GetAngularDamping() const
+{
+	return angular_damping;
+}
+
+void ComponentRigidBody::SetAngularDamping(float value)
+{
+	angular_damping = std::clamp(value, 0.0f, 1.0f);
+	if (body)
+		body->setDamping(linear_damping, angular_damping);
+}
+
+const float3& ComponentRigidBody::GetLinearFactor() const
+{
+	return linear_factor;
+}
+
+void ComponentRigidBody::SetLinearFactor(const float3& value)
+{
+	linear_factor = value;
+	if (body)
+		body->setLinearFactor(linear_factor);
+}
+
+const float3& ComponentRigidBody::GetAngularFactor() const
+{
+	return angular_factor;
+}
+
+void ComponentRigidBody::SetAngularFactor(const float3& value)
+{
+	angular_factor = value;
+	if (body)
+		body->setAngularFactor(angular_factor);
+}
+
+const float3& ComponentRigidBody::GetSphereCenter() const
+{
+	return sphere.pos;
+}
+
+void ComponentRigidBody::SetSphereCenter(const float3& value)
+{
+	sphere.pos = value;
+	if (body)
+		RebuildBody();
+}
+
+float ComponentRigidBody::GetSphereRadius() const
+{
+	return sphere.r;
+}
+
+void ComponentRigidBody::SetSphereRadius(float value)
+{
+	sphere.r = std::max(value, 0.001f);
+	if (body)
+		RebuildBody();
+}
+
+const float3& ComponentRigidBody::GetBoxCenter() const
+{
+	return box.pos;
+}
+
+void ComponentRigidBody::SetBoxCenter(const float3& value)
+{
+	box.pos = value;
+	if (body)
+		RebuildBody();
+}
+
+const float3& ComponentRigidBody::GetBoxHalfExtents() const
+{
+	return box.r;
+}
+
+void ComponentRigidBody::SetBoxHalfExtents(const float3& value)
+{
+	box.r = float3(
+		std::max(value.x, 0.001f),
+		std::max(value.y, 0.001f),
+		std::max(value.z, 0.001f));
+	if (body)
+		RebuildBody();
+}
+
+const float3& ComponentRigidBody::GetCapsuleStart() const
+{
+	return capsule.l.a;
+}
+
+void ComponentRigidBody::SetCapsuleStart(const float3& value)
+{
+	capsule.l.a = value;
+	if (body)
+		RebuildBody();
+}
+
+const float3& ComponentRigidBody::GetCapsuleEnd() const
+{
+	return capsule.l.b;
+}
+
+void ComponentRigidBody::SetCapsuleEnd(const float3& value)
+{
+	capsule.l.b = value;
+	if (body)
+		RebuildBody();
+}
+
+float ComponentRigidBody::GetCapsuleRadius() const
+{
+	return capsule.r;
+}
+
+void ComponentRigidBody::SetCapsuleRadius(float value)
+{
+	capsule.r = std::max(value, 0.001f);
+	if (body)
+		RebuildBody();
+}
+
+bool ComponentRigidBody::HasRuntimeBody() const
+{
+	return body != nullptr;
+}
+
+float3 ComponentRigidBody::GetLinearVelocity() const
+{
+	return body ? float3(body->getLinearVelocity()) : float3::zero;
+}
+
+void ComponentRigidBody::SetLinearVelocity(const float3& value)
+{
+	if (body)
+	{
+		body->setLinearVelocity(value);
+		body->activate(true);
+	}
+}
+
+float3 ComponentRigidBody::GetAngularVelocity() const
+{
+	return body ? float3(body->getAngularVelocity()) : float3::zero;
+}
+
+void ComponentRigidBody::SetAngularVelocity(const float3& value)
+{
+	if (body)
+	{
+		body->setAngularVelocity(value);
+		body->activate(true);
+	}
+}
+
+float3 ComponentRigidBody::GetCenterOfMass() const
+{
+	return body
+		? float3(body->getCenterOfMassPosition())
+		: game_object->GetGlobalPosition();
+}
+
+float3 ComponentRigidBody::GetTotalForce() const
+{
+	return body ? float3(body->getTotalForce()) : float3::zero;
+}
+
+float3 ComponentRigidBody::GetTotalTorque() const
+{
+	return body ? float3(body->getTotalTorque()) : float3::zero;
+}
+
+float3 ComponentRigidBody::GetGravity() const
+{
+	return body ? float3(body->getGravity()) : gravity;
+}
+
+void ComponentRigidBody::SetGravity(const float3& value)
+{
+	gravity = value;
+	if (body)
+		body->setGravity(value);
+}
+
+bool ComponentRigidBody::IsAwake() const
+{
+	return body && body->isActive();
+}
+
+void ComponentRigidBody::WakeUp()
+{
+	if (body)
+		body->activate(true);
+}
+
+void ComponentRigidBody::Sleep()
+{
+	if (body)
+		body->forceActivationState(ISLAND_SLEEPING);
+}
+
+void ComponentRigidBody::ClearForces()
+{
+	if (body)
+		body->clearForces();
+}
+
+void ComponentRigidBody::ApplyCentralForce(const float3& force)
+{
+	if (body)
+	{
+		body->applyCentralForce(force);
+		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::ApplyForce(
+	const float3& force,
+	const float3& relativePosition)
+{
+	if (body)
+	{
+		body->applyForce(force, relativePosition);
+		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::ApplyCentralImpulse(
+	const float3& impulse)
+{
+	if (body)
+	{
+		body->applyCentralImpulse(impulse);
+		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::ApplyImpulse(
+	const float3& impulse,
+	const float3& relativePosition)
+{
+	if (body)
+	{
+		body->applyImpulse(impulse, relativePosition);
+		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::ApplyTorque(const float3& torque)
+{
+	if (body)
+	{
+		body->applyTorque(torque);
+		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::ApplyTorqueImpulse(
+	const float3& torque)
+{
+	if (body)
+	{
+		body->applyTorqueImpulse(torque);
+		body->activate(true);
+	}
+}
+
+void ComponentRigidBody::RebuildBody()
+{
+	if (!body)
+		return;
+
+	const float3 linearVelocity(body->getLinearVelocity());
+	const float3 angularVelocity(body->getAngularVelocity());
+	CreateBody();
+	SetLinearVelocity(linearVelocity);
+	SetAngularVelocity(angularVelocity);
+}
+
+void ComponentRigidBody::ApplyBodyConfiguration()
+{
+	if (!body)
+		return;
+
+	int flags = body->getCollisionFlags();
+	flags &= ~(
+		btCollisionObject::CF_STATIC_OBJECT |
+		btCollisionObject::CF_KINEMATIC_OBJECT);
+
+	float runtimeMass = 0.0f;
+	if (behaviour == BodyBehaviour::dynamic)
+		runtimeMass = mass;
+	else if (behaviour == BodyBehaviour::fixed)
+		flags |= btCollisionObject::CF_STATIC_OBJECT;
+	else
+		flags |= btCollisionObject::CF_KINEMATIC_OBJECT;
+
+	btVector3 inertia(0.0f, 0.0f, 0.0f);
+	if (runtimeMass > 0.0f && body->getCollisionShape())
+	{
+		body->getCollisionShape()->calculateLocalInertia(
+			runtimeMass, inertia);
+	}
+	body->setCollisionFlags(flags);
+	body->setMassProps(runtimeMass, inertia);
+	body->updateInertiaTensor();
+	body->setLinearFactor(linear_factor);
+	body->setAngularFactor(angular_factor);
+	body->setRestitution(restitution);
+	body->setFriction(friction);
+	body->setRollingFriction(rolling_friction);
+	body->setDamping(linear_damping, angular_damping);
+	body->setGravity(gravity);
+	if (behaviour == BodyBehaviour::kinematic)
+		body->setActivationState(DISABLE_DEACTIVATION);
+	else
+		body->activate(true);
+}
+
 // ---------------------------------------------------------
 void ComponentRigidBody::DrawEditor()
 {
 	static const char* behaviours[] = { "Fixed", "Dynamic", "Kinematic" };
 
-	int behaviour_type = behaviour;
+	int behaviour_type = static_cast<int>(behaviour);
 	if (ImGui::Combo("Behaviour", &behaviour_type, behaviours, 3))
-		SetBehaviour((BodyBehaviour) behaviour_type);
+		SetBehaviour(static_cast<BodyBehaviour>(behaviour_type));
 
 	static const char* types[] = { "Sphere", "Box", "Capsule" };
 
-	int type = body_type;
+	int type = static_cast<int>(body_type);
 	if (ImGui::Combo("Type", &type, types, 3))
-		SetBodyType((BodyType) type);
+		SetBodyType(static_cast<BodyType>(type));
 
 	switch (type)
 	{
 		case BodyType::body_sphere:
+			ImGui::DragFloat3(
+				"Center", &sphere.pos.x, 0.05f);
 			ImGui::DragFloat("Radius", &sphere.r, 0.1f, 0.1f);
 		break;
 		case BodyType::body_box:
-			ImGui::DragFloat3("Box", &box.r.x, 0.1f, 0.1f);
+			ImGui::DragFloat3(
+				"Center", &box.pos.x, 0.05f);
+			ImGui::DragFloat3(
+				"Half Extents", &box.r.x, 0.1f, 0.1f);
 		break;
 		case BodyType::body_capsule:
 			ImGui::DragFloat3("Top", &capsule.l.a.x, 0.1f, 0.1f);
@@ -254,19 +685,51 @@ void ComponentRigidBody::DrawEditor()
 			ImGui::DragFloat("Radius", &capsule.r, 0.1f, 0.1f);
 		break;
 	}
-	ImGui::DragFloat("Mass", &mass, 0.1f, 0.1f, 100000.f);
+
+	float value = GetMass();
+	if (ImGui::DragFloat("Mass", &value, 0.1f, 0.0001f, 100000.0f))
+		SetMass(value);
+
+	value = GetRestitution();
+	if (ImGui::DragFloat("Restitution", &value, 0.01f, 0.0f, 1.0f))
+		SetRestitution(value);
+
+	value = GetFriction();
+	if (ImGui::DragFloat("Friction", &value, 0.01f, 0.0f))
+		SetFriction(value);
+
+	value = GetRollingFriction();
+	if (ImGui::DragFloat("Rolling Friction", &value, 0.01f, 0.0f))
+		SetRollingFriction(value);
+
+	value = GetLinearDamping();
+	if (ImGui::DragFloat("Linear Damping", &value, 0.01f, 0.0f, 1.0f))
+		SetLinearDamping(value);
+
+	value = GetAngularDamping();
+	if (ImGui::DragFloat("Angular Damping", &value, 0.01f, 0.0f, 1.0f))
+		SetAngularDamping(value);
 
 	if (ImGui::Button("Commit Changes to Physics Engine"))
-		CreateBody();
+		RebuildBody();
 
-	if (ImGui::DragFloat3("Linear Factor", &linear_factor.x, 0.05f, 0.f, 1.f) && body)
-		body->setLinearFactor(linear_factor);
+	float3 vector = GetLinearFactor();
+	if (ImGui::DragFloat3(
+			"Linear Factor", &vector.x, 0.05f, 0.0f, 1.0f))
+	{
+		SetLinearFactor(vector);
+	}
 
-	if (ImGui::DragFloat3("Angular Factor", &angular_factor.x, 0.05f, 0.f, 1.f) && body)
-		body->setAngularFactor(angular_factor);
+	vector = GetAngularFactor();
+	if (ImGui::DragFloat3(
+			"Angular Factor", &vector.x, 0.05f, 0.0f, 1.0f))
+	{
+		SetAngularFactor(vector);
+	}
 
-	if(ImGui::DragFloat("Restitution", &restitution, 0.1f) && body)
-		body->setRestitution(restitution);
+	vector = GetGravity();
+	if (ImGui::DragFloat3("Gravity", &vector.x, 0.05f))
+		SetGravity(vector);
 
 	if (body != nullptr)
 	{

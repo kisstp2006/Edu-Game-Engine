@@ -10,6 +10,7 @@
 
 #include <angelscript.h>
 #include <scriptbuilder/scriptbuilder.h>
+#include <scriptarray/scriptarray.h>
 #include <scriptstdstring/scriptstdstring.h>
 
 #include <algorithm>
@@ -807,6 +808,7 @@ shared class EGEBehaviour
 		bool RegisterApi()
 		{
 			RegisterStdString(engine);
+			RegisterScriptArray(engine, true);
 			if (engine->RegisterObjectType(
 					"GameObject", 0, asOBJ_REF) < 0 ||
 				engine->RegisterObjectType(
@@ -1736,6 +1738,9 @@ shared class EGEBehaviour
 				const char* typeName = type->GetName();
 				if (!typeName || typeName[0] == '\0')
 					continue;
+				if ((flags & asOBJ_TEMPLATE) ||
+					std::string_view(typeName) == "array")
+					continue;
 
 				const char* ns = type->GetNamespace();
 				if (ns && ns[0] != '\0')
@@ -1848,6 +1853,8 @@ shared class EGEBehaviour
 					continue;
 				const char* name = type->GetName();
 				if (!name || name[0] == '\0')
+					continue;
+				if (std::string_view(name) == "less")
 					continue;
 
 				const char* ns = type->GetNamespace();
