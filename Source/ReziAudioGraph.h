@@ -123,10 +123,60 @@ namespace EGE::ReziAudio
 		CompiledSoundGraph prototype_;
 		RuntimeParameterSet parameters_;
 		std::mt19937 random_{0xE6E2026u};
+		std::unordered_map<std::uint64_t, AudioClipReference>
+			randomOneShotHistory_;
+		std::unordered_map<std::uint64_t, std::size_t>
+			randomArrayHistory_;
+		std::unordered_map<std::uint64_t, int>
+			triggerCounters_;
 	};
 
 	[[nodiscard]] AudioParameterId HashAudioParameter(std::string_view name);
 	[[nodiscard]] SoundGraphAsset CreateDefaultSoundGraph(
 		const NodeRegistry& registry,
+		const AudioClipReference& clip);
+	[[nodiscard]] SoundGraphAsset CreateDefaultSoundGraph(
+		const NodeRegistry& registry,
 		const std::string& clipPath);
+
+	struct GraphParameterNodeResult
+	{
+		std::uint64_t nodeId = 0;
+		std::uint64_t outputPinId = 0;
+		std::uint64_t linkId = 0;
+		std::string parameterName;
+	};
+
+	[[nodiscard]] bool IsGraphPinConnected(
+		const SoundGraphAsset& graph,
+		std::uint64_t pinId);
+	[[nodiscard]] std::uint64_t NextGraphNodeId(
+		const SoundGraphAsset& graph);
+	[[nodiscard]] std::uint64_t NextGraphPinId(
+		const SoundGraphAsset& graph);
+	[[nodiscard]] std::uint64_t NextGraphLinkId(
+		const SoundGraphAsset& graph);
+	std::size_t DisconnectGraphPin(
+		SoundGraphAsset& graph,
+		std::uint64_t pinId);
+	[[nodiscard]] bool CanPromoteInputToParameter(
+		const SoundGraphAsset& graph,
+		std::uint64_t inputPinId);
+	[[nodiscard]] bool CanConnectParameterToInput(
+		const SoundGraphAsset& graph,
+		std::uint64_t inputPinId,
+		std::string_view parameterName);
+	[[nodiscard]] std::optional<GraphParameterNodeResult>
+		PromoteInputToParameter(
+			SoundGraphAsset& graph,
+			const NodeRegistry& registry,
+			std::uint64_t inputPinId,
+			const float2& nodePosition);
+	[[nodiscard]] std::optional<GraphParameterNodeResult>
+		ConnectParameterToInput(
+			SoundGraphAsset& graph,
+			const NodeRegistry& registry,
+			std::uint64_t inputPinId,
+			std::string_view parameterName,
+			const float2& nodePosition);
 }

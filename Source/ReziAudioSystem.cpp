@@ -1,5 +1,7 @@
 #include "ReziAudioSystem.h"
 
+#include <algorithm>
+
 namespace EGE::ReziAudio
 {
 	bool System::Initialize(ma_engine& engine)
@@ -53,6 +55,52 @@ namespace EGE::ReziAudio
 	bool System::Stop(PlaybackHandle handle)
 	{
 		return backend_.Stop(handle);
+	}
+
+	bool System::FadeTo(
+		PlaybackHandle handle,
+		float targetVolume,
+		float durationSeconds)
+	{
+		return backend_.FadeTo(
+			handle, targetVolume, durationSeconds);
+	}
+
+	bool System::StopWithFade(
+		PlaybackHandle handle,
+		float durationSeconds)
+	{
+		return backend_.StopWithFade(handle, durationSeconds);
+	}
+
+	bool System::SeekSeconds(
+		PlaybackHandle handle,
+		float seconds)
+	{
+		return backend_.SeekSeconds(handle, seconds);
+	}
+
+	float System::GetPlaybackSeconds(
+		PlaybackHandle handle) const
+	{
+		return backend_.GetPlaybackSeconds(handle);
+	}
+
+	float System::GetPlaybackLengthSeconds(
+		PlaybackHandle handle) const
+	{
+		return backend_.GetPlaybackLengthSeconds(handle);
+	}
+
+	float System::GetPlaybackPercentage(
+		PlaybackHandle handle) const
+	{
+		const float length = GetPlaybackLengthSeconds(handle);
+		return length > 0.0f
+			? std::clamp(
+				GetPlaybackSeconds(handle) / length,
+				0.0f, 1.0f)
+			: 0.0f;
 	}
 
 	bool System::SetSettings(

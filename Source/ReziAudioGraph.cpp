@@ -86,6 +86,48 @@ namespace EGE::ReziAudio
 			return fallback;
 		}
 
+		AudioClipReference AsAudioClip(
+			const ParameterValue& value,
+			AudioClipReference fallback = {})
+		{
+			if (const AudioClipReference* result =
+					std::get_if<AudioClipReference>(&value))
+			{
+				return *result;
+			}
+			return fallback;
+		}
+
+		FloatArray AsFloatArray(
+			const ParameterValue& value,
+			FloatArray fallback = {})
+		{
+			if (const FloatArray* result =
+					std::get_if<FloatArray>(&value))
+				return *result;
+			return fallback;
+		}
+
+		IntegerArray AsIntegerArray(
+			const ParameterValue& value,
+			IntegerArray fallback = {})
+		{
+			if (const IntegerArray* result =
+					std::get_if<IntegerArray>(&value))
+				return *result;
+			return fallback;
+		}
+
+		AudioClipArray AsAudioClipArray(
+			const ParameterValue& value,
+			AudioClipArray fallback = {})
+		{
+			if (const AudioClipArray* result =
+					std::get_if<AudioClipArray>(&value))
+				return *result;
+			return fallback;
+		}
+
 		bool Compatible(GraphPinType output, GraphPinType input)
 		{
 			if (output == input)
@@ -97,10 +139,7 @@ namespace EGE::ReziAudio
 			{
 				return true;
 			}
-			return (output == GraphPinType::String &&
-					input == GraphPinType::AudioClip) ||
-				(output == GraphPinType::AudioClip &&
-				 input == GraphPinType::String);
+			return false;
 		}
 
 		const GraphPin* FindPin(
@@ -207,8 +246,10 @@ namespace EGE::ReziAudio
 				{Pin("Value", GraphPinType::Color,
 					float4(1.0f, 1.0f, 1.0f, 1.0f))}),
 			Node("Constant.Clip", "Audio Clip", "Input",
-				{Pin("Path", GraphPinType::AudioClip, std::string())},
-				{Pin("Clip", GraphPinType::AudioClip, std::string())}),
+				{Pin("Asset", GraphPinType::AudioClip,
+					AudioClipReference{})},
+				{Pin("Clip", GraphPinType::AudioClip,
+					AudioClipReference{})}),
 			Node("Parameter.Float", "Float Parameter", "Parameters",
 				{floatIn("Fallback")}, {floatOut()},
 				{{"Name", std::string("Volume")}}),
@@ -232,6 +273,61 @@ namespace EGE::ReziAudio
 				{Pin("Value", GraphPinType::Color,
 					float4(1.0f, 1.0f, 1.0f, 1.0f))},
 				{{"Name", std::string("Color")}}),
+			Node("Parameter.String", "String Parameter", "Parameters",
+				{Pin("Fallback", GraphPinType::String, std::string())},
+				{Pin("Value", GraphPinType::String, std::string())},
+				{{"Name", std::string("String")}}),
+			Node("Parameter.AudioClip", "Audio Clip Parameter", "Parameters",
+				{Pin("Fallback", GraphPinType::AudioClip,
+					AudioClipReference{})},
+				{Pin("Value", GraphPinType::AudioClip,
+					AudioClipReference{})},
+				{{"Name", std::string("Clip")}}),
+			Node("Parameter.FloatArray", "Float Array Parameter", "Parameters",
+				{Pin("Fallback", GraphPinType::FloatArray, FloatArray{})},
+				{Pin("Value", GraphPinType::FloatArray, FloatArray{})},
+				{{"Name", std::string("FloatArray")}}),
+			Node("Parameter.IntegerArray", "Integer Array Parameter", "Parameters",
+				{Pin("Fallback", GraphPinType::IntegerArray, IntegerArray{})},
+				{Pin("Value", GraphPinType::IntegerArray, IntegerArray{})},
+				{{"Name", std::string("IntArray")}}),
+			Node("Parameter.AudioClipArray", "Audio Clip Array Parameter", "Parameters",
+				{Pin("Fallback", GraphPinType::AudioClipArray,
+					AudioClipArray{})},
+				{Pin("Value", GraphPinType::AudioClipArray,
+					AudioClipArray{})},
+				{{"Name", std::string("ClipArray")}}),
+			Node("Array.GetFloat", "Get (Float)", "Array",
+				{
+					Pin("Array", GraphPinType::FloatArray, FloatArray{}),
+					Pin("Index", GraphPinType::Integer, 0)
+				},
+				{Pin("Element", GraphPinType::Float, 0.0f)}),
+			Node("Array.GetInteger", "Get (Integer)", "Array",
+				{
+					Pin("Array", GraphPinType::IntegerArray, IntegerArray{}),
+					Pin("Index", GraphPinType::Integer, 0)
+				},
+				{Pin("Element", GraphPinType::Integer, 0)}),
+			Node("Array.GetAudioClip", "Get (Audio Clip)", "Array",
+				{
+					Pin("Array", GraphPinType::AudioClipArray,
+						AudioClipArray{}),
+					Pin("Index", GraphPinType::Integer, 0)
+				},
+				{Pin("Element", GraphPinType::AudioClip,
+					AudioClipReference{})}),
+			Node("Array.RandomFloat", "Get Random (Float)", "Array",
+				{Pin("Array", GraphPinType::FloatArray, FloatArray{})},
+				{Pin("Element", GraphPinType::Float, 0.0f)}),
+			Node("Array.RandomInteger", "Get Random (Integer)", "Array",
+				{Pin("Array", GraphPinType::IntegerArray, IntegerArray{})},
+				{Pin("Element", GraphPinType::Integer, 0)}),
+			Node("Array.RandomAudioClip", "Get Random (Audio Clip)", "Array",
+				{Pin("Array", GraphPinType::AudioClipArray,
+					AudioClipArray{})},
+				{Pin("Element", GraphPinType::AudioClip,
+					AudioClipReference{})}),
 			Node("Math.Add", "Add", "Math",
 				{floatIn("A"), floatIn("B")}, {floatOut()}),
 			Node("Math.Subtract", "Subtract", "Math",
@@ -242,6 +338,15 @@ namespace EGE::ReziAudio
 			Node("Math.Divide", "Divide", "Math",
 				{floatIn("Value"), floatIn("Denominator", 1.0f)},
 				{floatOut()}),
+			Node("Math.Logarithm", "Logarithm", "Math",
+				{floatIn("Value", 1.0f), floatIn("Base", 10.0f)},
+				{floatOut()}),
+			Node("Math.Modulo", "Modulo", "Math",
+				{
+					Pin("Value", GraphPinType::Integer, 0),
+					Pin("Modulo", GraphPinType::Integer, 1)
+				},
+				{Pin("Value", GraphPinType::Integer, 0)}),
 			Node("Math.Min", "Minimum", "Math",
 				{floatIn("A"), floatIn("B")}, {floatOut()}),
 			Node("Math.Max", "Maximum", "Math",
@@ -278,6 +383,41 @@ namespace EGE::ReziAudio
 				{floatIn("Value")}, {floatOut()}),
 			Node("Math.Round", "Round", "Math",
 				{floatIn("Value")}, {floatOut()}),
+			Node("Audio.LinearToLogFrequency",
+				"Linear to Log Frequency", "Audio Utilities",
+				{
+					floatIn("Value", 0.5f),
+					floatIn("Min"),
+					floatIn("Max", 1.0f),
+					floatIn("Min Frequency", 20.0f),
+					floatIn("Max Frequency", 20000.0f)
+				},
+				{floatOut("Frequency")}),
+			Node("Audio.FrequencyToLinear",
+				"Log Frequency to Linear", "Audio Utilities",
+				{
+					floatIn("Frequency", 1000.0f),
+					floatIn("Min Frequency", 20.0f),
+					floatIn("Max Frequency", 20000.0f),
+					floatIn("Min"),
+					floatIn("Max", 1.0f)
+				},
+				{floatOut("Value")}),
+			Node("Music.BPMToSeconds", "BPM to Seconds", "Music",
+				{floatIn("BPM", 90.0f)}, {floatOut("Seconds")}),
+			Node("Music.NoteToFrequency", "Note to Frequency", "Music",
+				{floatIn("MIDI Note", 60.0f)}, {floatOut("Frequency")}),
+			Node("Music.FrequencyToNote", "Frequency to Note", "Music",
+				{floatIn("Frequency", 440.0f)}, {floatOut("MIDI Note")}),
+			Node("Trigger.Counter", "Trigger Counter", "Trigger",
+				{
+					boolIn("Trigger", true),
+					boolIn("Reset"),
+					Pin("Start", GraphPinType::Integer, 0),
+					Pin("Step", GraphPinType::Integer, 1),
+					Pin("Reset Count", GraphPinType::Integer, 0)
+				},
+				{Pin("Value", GraphPinType::Integer, 0)}),
 			Node("Logic.Greater", "Greater", "Logic",
 				{floatIn("A"), floatIn("B")}, {boolOut()}),
 			Node("Logic.Less", "Less", "Logic",
@@ -341,9 +481,19 @@ namespace EGE::ReziAudio
 				 floatIn("Max Distance", 100.0f),
 				 floatIn("Rolloff", 1.0f)},
 				{floatOut("Gain")}),
+			Node("Audio.RandomOneShot", "Random One Shot", "Audio",
+				{
+					Pin("Clip 1", GraphPinType::AudioClip,
+						AudioClipReference{}),
+					Pin("Clip 2", GraphPinType::AudioClip,
+						AudioClipReference{})
+				},
+				{Pin("Clip", GraphPinType::AudioClip,
+					AudioClipReference{})}),
 			Node("Audio.Output", "Audio Output", "Output",
 				{
-					Pin("Clip", GraphPinType::AudioClip, std::string()),
+					Pin("Clip", GraphPinType::AudioClip,
+						AudioClipReference{}),
 					floatIn("Volume", 1.0f),
 					floatIn("Pitch", 1.0f),
 					floatIn("Pan"),
@@ -623,6 +773,9 @@ namespace EGE::ReziAudio
 	{
 		prototype_ = SoundGraphCompiler::Compile(asset, registry);
 		parameters_.Reset(asset.parameters);
+		randomOneShotHistory_.clear();
+		randomArrayHistory_.clear();
+		triggerCounters_.clear();
 		return prototype_.IsValid();
 	}
 
@@ -674,8 +827,13 @@ namespace EGE::ReziAudio
 			return result;
 
 		std::unordered_map<std::uint64_t, const GraphNode*> nodes;
+		std::unordered_map<std::uint64_t, const GraphNode*> outputOwners;
 		for (const GraphNode& node : prototype_.asset.nodes)
+		{
 			nodes[node.id] = &node;
+			for (const GraphPin& pin : node.outputs)
+				outputOwners[pin.id] = &node;
+		}
 		std::unordered_map<std::uint64_t, ParameterValue> values;
 
 		const auto input = [&](
@@ -694,6 +852,28 @@ namespace EGE::ReziAudio
 		{
 			if (index < node.outputs.size())
 				values[node.outputs[index].id] = std::move(value);
+		};
+		const auto randomArrayIndex = [this](
+			std::uint64_t nodeId,
+			std::size_t count)
+		{
+			if (count <= 1)
+			{
+				randomArrayHistory_[nodeId] = 0;
+				return std::size_t(0);
+			}
+			std::uniform_int_distribution<std::size_t>
+				distribution(0, count - 2);
+			std::size_t selected = distribution(random_);
+			const auto previous = randomArrayHistory_.find(nodeId);
+			if (previous != randomArrayHistory_.end() &&
+				selected >= previous->second &&
+				previous->second < count)
+			{
+				++selected;
+			}
+			randomArrayHistory_[nodeId] = selected;
+			return selected;
 		};
 
 		for (const std::uint64_t id : prototype_.evaluationOrder)
@@ -739,6 +919,90 @@ namespace EGE::ReziAudio
 					? *value
 					: (in.empty() ? ParameterValue(0.0f) : in[0]));
 			}
+			else if (node.type == "Array.GetFloat")
+			{
+				const FloatArray array = in.empty()
+					? FloatArray{}
+					: AsFloatArray(in[0]);
+				const int index = in.size() > 1
+					? AsInteger(in[1])
+					: 0;
+				write(
+					node,
+					0,
+					index >= 0 &&
+						static_cast<std::size_t>(index) < array.size()
+						? array[static_cast<std::size_t>(index)]
+						: 0.0f);
+			}
+			else if (node.type == "Array.GetInteger")
+			{
+				const IntegerArray array = in.empty()
+					? IntegerArray{}
+					: AsIntegerArray(in[0]);
+				const int index = in.size() > 1
+					? AsInteger(in[1])
+					: 0;
+				write(
+					node,
+					0,
+					index >= 0 &&
+						static_cast<std::size_t>(index) < array.size()
+						? array[static_cast<std::size_t>(index)]
+						: 0);
+			}
+			else if (node.type == "Array.GetAudioClip")
+			{
+				const AudioClipArray array = in.empty()
+					? AudioClipArray{}
+					: AsAudioClipArray(in[0]);
+				const int index = in.size() > 1
+					? AsInteger(in[1])
+					: 0;
+				write(
+					node,
+					0,
+					index >= 0 &&
+						static_cast<std::size_t>(index) < array.size()
+						? array[static_cast<std::size_t>(index)]
+						: AudioClipReference{});
+			}
+			else if (node.type == "Array.RandomFloat")
+			{
+				const FloatArray array = in.empty()
+					? FloatArray{}
+					: AsFloatArray(in[0]);
+				write(
+					node,
+					0,
+					array.empty()
+						? 0.0f
+						: array[randomArrayIndex(node.id, array.size())]);
+			}
+			else if (node.type == "Array.RandomInteger")
+			{
+				const IntegerArray array = in.empty()
+					? IntegerArray{}
+					: AsIntegerArray(in[0]);
+				write(
+					node,
+					0,
+					array.empty()
+						? 0
+						: array[randomArrayIndex(node.id, array.size())]);
+			}
+			else if (node.type == "Array.RandomAudioClip")
+			{
+				const AudioClipArray array = in.empty()
+					? AudioClipArray{}
+					: AsAudioClipArray(in[0]);
+				write(
+					node,
+					0,
+					array.empty()
+						? AudioClipReference{}
+						: array[randomArrayIndex(node.id, array.size())]);
+			}
 			else if (node.type == "Math.Add")
 				write(node, 0, f(0) + f(1));
 			else if (node.type == "Math.Subtract")
@@ -760,6 +1024,34 @@ namespace EGE::ReziAudio
 				}
 				else
 					write(node, 0, f(0) / denominator);
+			}
+			else if (node.type == "Math.Logarithm")
+			{
+				const float value = f(0, 1.0f);
+				const float base = f(1, 10.0f);
+				if (value <= 0.0f || base <= 0.0f ||
+					std::abs(base - 1.0f) <= 0.000001f)
+				{
+					AddDiagnostic(
+						result.diagnostics,
+						GraphDiagnosticSeverity::Warning,
+						"Logarithm requires a positive value and "
+						"a positive base other than one.",
+						node.id);
+					write(node, 0, 0.0f);
+				}
+				else
+					write(node, 0, std::log(value) / std::log(base));
+			}
+			else if (node.type == "Math.Modulo")
+			{
+				const int divisor = in.size() > 1
+					? AsInteger(in[1], 1)
+					: 1;
+				write(
+					node,
+					0,
+					divisor == 0 ? 0 : AsInteger(in[0]) % divisor);
 			}
 			else if (node.type == "Math.Min")
 				write(node, 0, std::min(f(0), f(1)));
@@ -806,6 +1098,71 @@ namespace EGE::ReziAudio
 				write(node, 0, std::ceil(f(0)));
 			else if (node.type == "Math.Round")
 				write(node, 0, std::round(f(0)));
+			else if (node.type == "Audio.LinearToLogFrequency")
+			{
+				const float minimum = f(1);
+				const float maximum = f(2, 1.0f);
+				const float minimumFrequency =
+					std::max(0.001f, f(3, 20.0f));
+				const float maximumFrequency =
+					std::max(minimumFrequency, f(4, 20000.0f));
+				const float range = maximum - minimum;
+				const float alpha = std::abs(range) > 0.000001f
+					? std::clamp((f(0, 0.5f) - minimum) / range,
+						0.0f, 1.0f)
+					: 0.0f;
+				write(
+					node,
+					0,
+					minimumFrequency * std::pow(
+						maximumFrequency / minimumFrequency,
+						alpha));
+			}
+			else if (node.type == "Audio.FrequencyToLinear")
+			{
+				const float minimumFrequency =
+					std::max(0.001f, f(1, 20.0f));
+				const float maximumFrequency =
+					std::max(minimumFrequency, f(2, 20000.0f));
+				const float frequency = std::clamp(
+					f(0, 1000.0f),
+					minimumFrequency,
+					maximumFrequency);
+				const float denominator = std::log(
+					maximumFrequency / minimumFrequency);
+				const float alpha = denominator > 0.000001f
+					? std::log(frequency / minimumFrequency) /
+						denominator
+					: 0.0f;
+				write(node, 0, f(3) + (f(4, 1.0f) - f(3)) * alpha);
+			}
+			else if (node.type == "Music.BPMToSeconds")
+				write(node, 0, 60.0f / std::max(f(0, 90.0f), 0.001f));
+			else if (node.type == "Music.NoteToFrequency")
+				write(
+					node,
+					0,
+					440.0f * std::pow(
+						2.0f, (f(0, 60.0f) - 69.0f) / 12.0f));
+			else if (node.type == "Music.FrequencyToNote")
+				write(
+					node,
+					0,
+					69.0f + 12.0f * std::log2(
+						std::max(f(0, 440.0f), 0.001f) / 440.0f));
+			else if (node.type == "Trigger.Counter")
+			{
+				const int start =
+					in.size() > 2 ? AsInteger(in[2]) : 0;
+				const auto counter =
+					triggerCounters_.try_emplace(node.id, start).first;
+				int& count = counter->second;
+				if (b(1))
+					count = in.size() > 4 ? AsInteger(in[4]) : 0;
+				if (b(0, true))
+				count += in.size() > 3 ? AsInteger(in[3], 1) : 1;
+				write(node, 0, count);
+			}
 			else if (node.type == "Logic.Greater")
 				write(node, 0, f(0) > f(1));
 			else if (node.type == "Logic.Less")
@@ -868,18 +1225,93 @@ namespace EGE::ReziAudio
 					minimum / distance,
 					std::max(0.0f, f(3, 1.0f))));
 			}
+			else if (node.type == "Audio.RandomOneShot")
+			{
+				std::vector<AudioClipReference> clips;
+				clips.reserve(in.size());
+				for (const ParameterValue& value : in)
+				{
+					const AudioClipReference clip = AsAudioClip(value);
+					if (!clip.IsValid() ||
+						std::find(
+							clips.begin(),
+							clips.end(),
+							clip) != clips.end())
+					{
+						continue;
+					}
+					clips.push_back(clip);
+				}
+
+				if (clips.empty())
+				{
+					AddDiagnostic(
+						result.diagnostics,
+						GraphDiagnosticSeverity::Warning,
+						"Random One Shot has no valid clips.",
+						node.id);
+					write(node, 0, AudioClipReference{});
+				}
+				else
+				{
+					std::size_t selected = 0;
+					if (clips.size() > 1)
+					{
+						const auto history =
+							randomOneShotHistory_.find(node.id);
+						const AudioClipReference previous =
+							history !=
+								randomOneShotHistory_.end()
+								? history->second
+								: AudioClipReference{};
+						std::uniform_int_distribution<std::size_t>
+							distribution(0, clips.size() - 1);
+						selected = distribution(random_);
+						if (clips[selected] == previous)
+						{
+							std::uniform_int_distribution<std::size_t>
+								alternate(0, clips.size() - 2);
+							selected = alternate(random_);
+							if (clips[selected] == previous)
+								selected = clips.size() - 1;
+						}
+					}
+					randomOneShotHistory_[node.id] =
+						clips[selected];
+					write(node, 0, clips[selected]);
+				}
+			}
 			else if (node.type == "Audio.Output")
 			{
-				result.voice.filePath = in.empty()
-					? std::string()
-					: AsString(in[0]);
+				const AudioClipReference clip = in.empty()
+					? AudioClipReference{}
+					: AsAudioClip(in[0]);
+				result.voice.filePath = clip.resolvedSource;
 				result.voice.settings.volume =
 					std::max(0.0f, f(1, 1.0f));
 				result.voice.settings.pitch =
 					std::max(0.01f, f(2, 1.0f));
 				result.voice.settings.pan =
 					std::clamp(f(3), -1.0f, 1.0f);
-				result.voice.settings.looping = b(4);
+				bool forceOneShot = false;
+				if (!node.inputs.empty())
+				{
+					const auto source =
+						prototype_.inputSources.find(
+							node.inputs.front().id);
+					if (source !=
+						prototype_.inputSources.end())
+					{
+						const auto owner =
+							outputOwners.find(source->second);
+						forceOneShot =
+							owner != outputOwners.end() &&
+							owner->second->type ==
+								"Audio.RandomOneShot";
+					}
+				}
+				result.voice.settings.looping =
+					forceOneShot ? false : b(4);
 				result.voice.settings.spatial.enabled = b(5, true);
 				result.voice.settings.spatial.minDistance =
 					std::max(0.001f, f(6, 1.0f));
@@ -898,7 +1330,7 @@ namespace EGE::ReziAudio
 					AddDiagnostic(
 						result.diagnostics,
 						GraphDiagnosticSeverity::Error,
-						"Audio Output requires a clip path.",
+						"Audio Output requires a resolved Audio Clip asset.",
 						node.id);
 				}
 			}
@@ -919,7 +1351,7 @@ namespace EGE::ReziAudio
 
 	SoundGraphAsset CreateDefaultSoundGraph(
 		const NodeRegistry& registry,
-		const std::string& clipPath)
+		const AudioClipReference& clipReference)
 	{
 		SoundGraphAsset asset;
 		asset.id = 1;
@@ -942,7 +1374,7 @@ namespace EGE::ReziAudio
 			return asset.nodes.size() - 1;
 		};
 		const std::size_t clip = add("Constant.Clip", float2(30, 100));
-		asset.nodes[clip].inputs[0].defaultValue = clipPath;
+		asset.nodes[clip].inputs[0].defaultValue = clipReference;
 		const std::size_t volume =
 			add("Parameter.Float", float2(30, 260));
 		asset.nodes[volume].properties["Name"] = std::string("Volume");
@@ -974,5 +1406,383 @@ namespace EGE::ReziAudio
 		connect(loop, 0, output, 4);
 		connect(position, 0, output, 10);
 		return asset;
+	}
+
+	SoundGraphAsset CreateDefaultSoundGraph(
+		const NodeRegistry& registry,
+		const std::string& clipPath)
+	{
+		return CreateDefaultSoundGraph(
+			registry,
+			AudioClipReference{0, clipPath});
+	}
+
+	bool IsGraphPinConnected(
+		const SoundGraphAsset& graph,
+		std::uint64_t pinId)
+	{
+		return std::any_of(
+			graph.links.begin(),
+			graph.links.end(),
+			[pinId](const GraphLink& link)
+			{
+				return link.outputPin == pinId || link.inputPin == pinId;
+			});
+	}
+
+	std::size_t DisconnectGraphPin(
+		SoundGraphAsset& graph,
+		std::uint64_t pinId)
+	{
+		const std::size_t previousSize = graph.links.size();
+		std::erase_if(
+			graph.links,
+			[pinId](const GraphLink& link)
+			{
+				return link.outputPin == pinId || link.inputPin == pinId;
+			});
+		return previousSize - graph.links.size();
+	}
+
+	namespace
+	{
+		struct InputPinLocation
+		{
+			const GraphNode* node = nullptr;
+			const GraphPin* pin = nullptr;
+		};
+
+		InputPinLocation FindInputPin(
+			const SoundGraphAsset& graph,
+			std::uint64_t pinId)
+		{
+			for (const GraphNode& node : graph.nodes)
+			{
+				const auto found = std::find_if(
+					node.inputs.begin(),
+					node.inputs.end(),
+					[pinId](const GraphPin& pin)
+					{
+						return pin.id == pinId;
+					});
+				if (found != node.inputs.end())
+					return {&node, &*found};
+			}
+			return {};
+		}
+
+		const char* ParameterNodeType(GraphPinType type)
+		{
+			switch (type)
+			{
+			case GraphPinType::Bool:
+				return "Parameter.Bool";
+			case GraphPinType::Integer:
+				return "Parameter.Integer";
+			case GraphPinType::Float:
+				return "Parameter.Float";
+			case GraphPinType::Vector2:
+				return "Parameter.Vector2";
+			case GraphPinType::Vector3:
+				return "Parameter.Vector3";
+			case GraphPinType::Color:
+				return "Parameter.Color";
+			case GraphPinType::String:
+				return "Parameter.String";
+			case GraphPinType::AudioClip:
+				return "Parameter.AudioClip";
+			case GraphPinType::FloatArray:
+				return "Parameter.FloatArray";
+			case GraphPinType::IntegerArray:
+				return "Parameter.IntegerArray";
+			case GraphPinType::AudioClipArray:
+				return "Parameter.AudioClipArray";
+			default:
+				return nullptr;
+			}
+		}
+
+		std::optional<GraphPinType> ParameterType(
+			const ParameterValue& value)
+		{
+			if (std::holds_alternative<bool>(value))
+				return GraphPinType::Bool;
+			if (std::holds_alternative<int>(value))
+				return GraphPinType::Integer;
+			if (std::holds_alternative<float>(value))
+				return GraphPinType::Float;
+			if (std::holds_alternative<float2>(value))
+				return GraphPinType::Vector2;
+			if (std::holds_alternative<float3>(value))
+				return GraphPinType::Vector3;
+			if (std::holds_alternative<float4>(value))
+				return GraphPinType::Color;
+			if (std::holds_alternative<std::string>(value))
+				return GraphPinType::String;
+			if (std::holds_alternative<AudioClipReference>(value))
+				return GraphPinType::AudioClip;
+			if (std::holds_alternative<FloatArray>(value))
+				return GraphPinType::FloatArray;
+			if (std::holds_alternative<IntegerArray>(value))
+				return GraphPinType::IntegerArray;
+			if (std::holds_alternative<AudioClipArray>(value))
+				return GraphPinType::AudioClipArray;
+			return std::nullopt;
+		}
+
+		bool CompatibleParameterType(
+			GraphPinType parameter,
+			GraphPinType input)
+		{
+			if (parameter == input)
+				return true;
+			const bool parameterNumeric =
+				parameter == GraphPinType::Integer ||
+				parameter == GraphPinType::Float;
+			const bool inputNumeric =
+				input == GraphPinType::Integer ||
+				input == GraphPinType::Float;
+			return parameterNumeric && inputNumeric;
+		}
+
+		std::uint64_t CalculateNextNodeId(
+			const SoundGraphAsset& graph)
+		{
+			std::uint64_t result = 1;
+			for (const GraphNode& node : graph.nodes)
+				result = std::max(result, node.id + 1);
+			return result;
+		}
+
+		std::uint64_t CalculateNextPinId(
+			const SoundGraphAsset& graph)
+		{
+			std::uint64_t result = 1;
+			for (const GraphNode& node : graph.nodes)
+			{
+				for (const GraphPin& pin : node.inputs)
+					result = std::max(result, pin.id + 1);
+				for (const GraphPin& pin : node.outputs)
+					result = std::max(result, pin.id + 1);
+			}
+			return result;
+		}
+
+		std::uint64_t CalculateNextLinkId(
+			const SoundGraphAsset& graph)
+		{
+			std::uint64_t result = 1;
+			for (const GraphLink& link : graph.links)
+				result = std::max(result, link.id + 1);
+			return result;
+		}
+
+		std::string UniqueParameterName(
+			const SoundGraphAsset& graph,
+			std::string baseName)
+		{
+			if (baseName.empty())
+				baseName = "Parameter";
+			std::string candidate = baseName;
+			std::size_t suffix = 2;
+			const auto isUsed = [&graph](const std::string& name)
+			{
+				const AudioParameterId id = HashAudioParameter(name);
+				return std::any_of(
+					graph.parameters.begin(),
+					graph.parameters.end(),
+					[&name, id](const NamedParameter& parameter)
+					{
+						return parameter.name == name ||
+							parameter.id == id;
+					});
+			};
+			while (isUsed(candidate))
+				candidate =
+					baseName + " " + std::to_string(suffix++);
+			return candidate;
+		}
+
+		std::optional<GraphParameterNodeResult>
+			AddParameterGetterAndLink(
+				SoundGraphAsset& graph,
+				const NodeRegistry& registry,
+				std::uint64_t inputPinId,
+				const NamedParameter& parameter,
+				GraphPinType inputType,
+				const float2& nodePosition)
+		{
+			const std::optional<GraphPinType> parameterType =
+				ParameterType(parameter.defaultValue);
+			if (!parameterType ||
+				!CompatibleParameterType(*parameterType, inputType))
+			{
+				return std::nullopt;
+			}
+
+			const char* nodeType = ParameterNodeType(*parameterType);
+			if (!nodeType || !registry.Find(nodeType))
+				return std::nullopt;
+
+			const std::uint64_t nodeId =
+				CalculateNextNodeId(graph);
+			std::uint64_t nextPinId =
+				CalculateNextPinId(graph);
+			GraphNode node =
+				registry.CreateNode(nodeType, nodeId, nextPinId);
+			if (node.outputs.empty())
+				return std::nullopt;
+			node.editorPosition = nodePosition;
+			node.properties["Name"] = parameter.name;
+			if (!node.inputs.empty())
+				node.inputs.front().defaultValue =
+					parameter.defaultValue;
+
+			const std::uint64_t outputPinId =
+				node.outputs.front().id;
+			const std::uint64_t linkId =
+				CalculateNextLinkId(graph);
+			graph.nodes.push_back(std::move(node));
+			graph.links.push_back(
+				{linkId, outputPinId, inputPinId});
+			return GraphParameterNodeResult{
+				nodeId,
+				outputPinId,
+				linkId,
+				parameter.name};
+		}
+	}
+
+	std::uint64_t NextGraphNodeId(
+		const SoundGraphAsset& graph)
+	{
+		return CalculateNextNodeId(graph);
+	}
+
+	std::uint64_t NextGraphPinId(
+		const SoundGraphAsset& graph)
+	{
+		return CalculateNextPinId(graph);
+	}
+
+	std::uint64_t NextGraphLinkId(
+		const SoundGraphAsset& graph)
+	{
+		return CalculateNextLinkId(graph);
+	}
+
+	bool CanPromoteInputToParameter(
+		const SoundGraphAsset& graph,
+		std::uint64_t inputPinId)
+	{
+		const InputPinLocation location =
+			FindInputPin(graph, inputPinId);
+		return location.pin &&
+			ParameterNodeType(location.pin->type) &&
+			!IsGraphPinConnected(graph, inputPinId);
+	}
+
+	bool CanConnectParameterToInput(
+		const SoundGraphAsset& graph,
+		std::uint64_t inputPinId,
+		std::string_view parameterName)
+	{
+		const InputPinLocation location =
+			FindInputPin(graph, inputPinId);
+		if (!location.pin ||
+			IsGraphPinConnected(graph, inputPinId))
+		{
+			return false;
+		}
+		const auto parameter = std::find_if(
+			graph.parameters.begin(),
+			graph.parameters.end(),
+			[parameterName](const NamedParameter& candidate)
+			{
+				return candidate.name == parameterName;
+			});
+		if (parameter == graph.parameters.end())
+			return false;
+		const std::optional<GraphPinType> type =
+			ParameterType(parameter->defaultValue);
+		return type &&
+			CompatibleParameterType(*type, location.pin->type);
+	}
+
+	std::optional<GraphParameterNodeResult>
+		PromoteInputToParameter(
+			SoundGraphAsset& graph,
+			const NodeRegistry& registry,
+			std::uint64_t inputPinId,
+			const float2& nodePosition)
+	{
+		const InputPinLocation location =
+			FindInputPin(graph, inputPinId);
+		if (!location.node ||
+			!location.pin ||
+			!CanPromoteInputToParameter(graph, inputPinId))
+		{
+			return std::nullopt;
+		}
+
+		std::string baseName = location.pin->name;
+		if (baseName.empty() ||
+			baseName == "Value" ||
+			baseName == "Fallback" ||
+			baseName == "Input")
+		{
+			baseName =
+				location.node->displayName + " " +
+				location.pin->name;
+		}
+		NamedParameter parameter{
+			UniqueParameterName(graph, std::move(baseName)),
+			0,
+			location.pin->defaultValue};
+		parameter.id = HashAudioParameter(parameter.name);
+		graph.parameters.push_back(parameter);
+
+		const auto result = AddParameterGetterAndLink(
+			graph,
+			registry,
+			inputPinId,
+			parameter,
+			location.pin->type,
+			nodePosition);
+		if (!result)
+			graph.parameters.pop_back();
+		return result;
+	}
+
+	std::optional<GraphParameterNodeResult>
+		ConnectParameterToInput(
+			SoundGraphAsset& graph,
+			const NodeRegistry& registry,
+			std::uint64_t inputPinId,
+			std::string_view parameterName,
+			const float2& nodePosition)
+	{
+		const InputPinLocation location =
+			FindInputPin(graph, inputPinId);
+		if (!location.pin ||
+			!CanConnectParameterToInput(
+				graph, inputPinId, parameterName))
+		{
+			return std::nullopt;
+		}
+		const auto parameter = std::find_if(
+			graph.parameters.begin(),
+			graph.parameters.end(),
+			[parameterName](const NamedParameter& candidate)
+			{
+				return candidate.name == parameterName;
+			});
+		return AddParameterGetterAndLink(
+			graph,
+			registry,
+			inputPinId,
+			*parameter,
+			location.pin->type,
+			nodePosition);
 	}
 }

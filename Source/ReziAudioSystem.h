@@ -23,6 +23,20 @@ namespace EGE::ReziAudio
 		bool Play(PlaybackHandle handle);
 		bool Pause(PlaybackHandle handle);
 		bool Stop(PlaybackHandle handle);
+		bool FadeTo(
+			PlaybackHandle handle,
+			float targetVolume,
+			float durationSeconds);
+		bool StopWithFade(
+			PlaybackHandle handle,
+			float durationSeconds);
+		bool SeekSeconds(PlaybackHandle handle, float seconds);
+		[[nodiscard]] float GetPlaybackSeconds(
+			PlaybackHandle handle) const;
+		[[nodiscard]] float GetPlaybackLengthSeconds(
+			PlaybackHandle handle) const;
+		[[nodiscard]] float GetPlaybackPercentage(
+			PlaybackHandle handle) const;
 		bool SetSettings(
 			PlaybackHandle handle,
 			const VoiceSettings& settings);

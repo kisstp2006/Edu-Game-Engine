@@ -1258,6 +1258,258 @@ namespace EGE
 				: fallback;
 		}
 
+		void SetReziAudioVector2Parameter(
+			const std::string& name,
+			const ScriptVector2& value,
+			ScriptComponentReference* reference)
+		{
+			if (ComponentReziAudioEmitter* emitter =
+					ResolveReziAudioEmitter(reference))
+			{
+				emitter->SetRuntimeParameter(
+					name, float2(value.x, value.y));
+			}
+		}
+
+		ScriptVector2 GetReziAudioVector2Parameter(
+			const std::string& name,
+			const ScriptVector2& fallback,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const float2* result = value
+				? std::get_if<float2>(value)
+				: nullptr;
+			return result
+				? ScriptVector2{result->x, result->y}
+				: fallback;
+		}
+
+		template <typename Value>
+		CScriptArray* CreateReziAudioValueArray(
+			const char* declaration,
+			const std::vector<Value>* values)
+		{
+			asIScriptContext* context = asGetActiveContext();
+			asITypeInfo* arrayType =
+				context
+					? context->GetEngine()->GetTypeInfoByDecl(declaration)
+					: nullptr;
+			if (!arrayType)
+			{
+				SetScriptException(
+					"The requested ReziAudio parameter array "
+					"type could not be created.");
+				return nullptr;
+			}
+
+			CScriptArray* result = CScriptArray::Create(arrayType);
+			if (!values)
+				return result;
+
+			result->Resize(static_cast<asUINT>(values->size()));
+			for (asUINT index = 0; index < result->GetSize(); ++index)
+			{
+				*static_cast<Value*>(result->At(index)) =
+					(*values)[index];
+			}
+			return result;
+		}
+
+		void SetReziAudioFloatArrayParameter(
+			const std::string& name,
+			const CScriptArray* values,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			if (!emitter)
+				return;
+
+			EGE::ReziAudio::FloatArray converted;
+			if (values)
+			{
+				converted.reserve(values->GetSize());
+				for (asUINT index = 0; index < values->GetSize(); ++index)
+				{
+					converted.push_back(
+						*static_cast<const float*>(values->At(index)));
+				}
+			}
+			emitter->SetRuntimeParameter(name, std::move(converted));
+		}
+
+		CScriptArray* GetReziAudioFloatArrayParameter(
+			const std::string& name,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const auto* values = value
+				? std::get_if<EGE::ReziAudio::FloatArray>(value)
+				: nullptr;
+			return CreateReziAudioValueArray(
+				"array<float>", values);
+		}
+
+		void SetReziAudioIntegerArrayParameter(
+			const std::string& name,
+			const CScriptArray* values,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			if (!emitter)
+				return;
+
+			EGE::ReziAudio::IntegerArray converted;
+			if (values)
+			{
+				converted.reserve(values->GetSize());
+				for (asUINT index = 0; index < values->GetSize(); ++index)
+				{
+					converted.push_back(
+						*static_cast<const int*>(values->At(index)));
+				}
+			}
+			emitter->SetRuntimeParameter(name, std::move(converted));
+		}
+
+		CScriptArray* GetReziAudioIntegerArrayParameter(
+			const std::string& name,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const auto* values = value
+				? std::get_if<EGE::ReziAudio::IntegerArray>(value)
+				: nullptr;
+			return CreateReziAudioValueArray(
+				"array<int>", values);
+		}
+
+		void SetReziAudioClipParameter(
+			const std::string& name,
+			ScriptResourceReference* clip,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			if (!emitter)
+				return;
+			const UID id = clip
+				? ResolveScriptResourceId(clip, Resource::audio)
+				: 0;
+			if (!clip || id != 0)
+				emitter->SetRuntimeAudioClipParameter(name, id);
+		}
+
+		ScriptResourceReference* GetReziAudioClipParameter(
+			const std::string& name,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const auto* clip = value
+				? std::get_if<EGE::ReziAudio::AudioClipReference>(value)
+				: nullptr;
+			return clip && clip->assetId != 0
+				? GetScriptResourceReference(
+					static_cast<UID>(clip->assetId),
+					Resource::audio)
+				: nullptr;
+		}
+
+		void SetReziAudioClipArrayParameter(
+			const std::string& name,
+			const CScriptArray* clips,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			if (!emitter)
+				return;
+
+			EGE::ReziAudio::AudioClipArray converted;
+			if (clips)
+			{
+				converted.reserve(clips->GetSize());
+				for (asUINT index = 0; index < clips->GetSize(); ++index)
+				{
+					auto* clip =
+						*static_cast<ScriptResourceReference* const*>(
+							clips->At(index));
+					const UID id = clip
+						? ResolveScriptResourceId(
+							clip, Resource::audio)
+						: 0;
+					if (clip && id == 0)
+						return;
+					converted.push_back({
+						static_cast<std::uint64_t>(id), {}});
+				}
+			}
+			emitter->SetRuntimeParameter(name, std::move(converted));
+		}
+
+		CScriptArray* GetReziAudioClipArrayParameter(
+			const std::string& name,
+			const ScriptComponentReference* reference)
+		{
+			asIScriptContext* context = asGetActiveContext();
+			asITypeInfo* arrayType =
+				context
+					? context->GetEngine()->GetTypeInfoByDecl(
+						"array<AudioClip@>")
+					: nullptr;
+			if (!arrayType)
+			{
+				SetScriptException(
+					"The AudioClip parameter array type could "
+					"not be created.");
+				return nullptr;
+			}
+
+			CScriptArray* result = CScriptArray::Create(arrayType);
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			const auto* value = emitter
+				? emitter->GetRuntimeParameter(name)
+				: nullptr;
+			const auto* clips = value
+				? std::get_if<EGE::ReziAudio::AudioClipArray>(value)
+				: nullptr;
+			if (!clips)
+				return result;
+
+			for (const auto& clip : *clips)
+			{
+				ScriptResourceReference* resource =
+					clip.assetId != 0
+						? GetScriptResourceReference(
+							static_cast<UID>(clip.assetId),
+							Resource::audio)
+						: nullptr;
+				result->InsertLast(&resource);
+				if (resource)
+					resource->Release();
+			}
+			return result;
+		}
+
 		void ClearReziAudioParameters(
 			ScriptComponentReference* reference)
 		{
@@ -1274,6 +1526,16 @@ namespace EGE
 			ComponentReziAudioEmitter* emitter =
 				ResolveReziAudioEmitter(reference);
 			return emitter && emitter->Play();
+		}
+
+		bool PlayReziAudioEmitterWithFade(
+			float durationSeconds,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter &&
+				emitter->PlayWithFade(durationSeconds);
 		}
 
 		bool PauseReziAudioEmitter(
@@ -1302,12 +1564,86 @@ namespace EGE
 			}
 		}
 
+		bool StopReziAudioEmitterWithFade(
+			float durationSeconds,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter &&
+				emitter->StopWithFade(durationSeconds);
+		}
+
+		bool FadeReziAudioEmitterTo(
+			float targetVolume,
+			float durationSeconds,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter &&
+				emitter->FadeTo(targetVolume, durationSeconds);
+		}
+
+		bool SeekReziAudioEmitter(
+			float seconds,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->Seek(seconds);
+		}
+
+		float GetReziAudioPlaybackSeconds(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter ? emitter->GetPlaybackSeconds() : 0.0f;
+		}
+
+		float GetReziAudioPlaybackLengthSeconds(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter
+				? emitter->GetPlaybackLengthSeconds()
+				: 0.0f;
+		}
+
+		float GetReziAudioPlaybackPercentage(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter
+				? emitter->GetPlaybackPercentage()
+				: 0.0f;
+		}
+
 		bool IsReziAudioEmitterPlaying(
 			const ScriptComponentReference* reference)
 		{
 			const ComponentReziAudioEmitter* emitter =
 				ResolveReziAudioEmitter(reference);
 			return emitter && emitter->IsPlaying();
+		}
+
+		bool IsReziAudioEmitterPaused(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->IsPaused();
+		}
+
+		bool IsReziAudioEmitterFinished(
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->IsFinished();
 		}
 
 		float GetCameraFieldOfView(
@@ -2604,6 +2940,18 @@ namespace EGE
 					asCALL_CDECL_OBJLAST) >= 0 &&
 				engine.RegisterObjectMethod(
 					"ReziAudioEmitter",
+					"void SetVector2Parameter(const string &in, "
+					"const Vector2 &in)",
+					asFUNCTION(SetReziAudioVector2Parameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"Vector2 GetVector2Parameter(const string &in, "
+					"const Vector2 &in fallback) const",
+					asFUNCTION(GetReziAudioVector2Parameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
 					"void SetVector3Parameter(const string &in, "
 					"const Vector3 &in)",
 					asFUNCTION(SetReziAudioVectorParameter),
@@ -2616,6 +2964,55 @@ namespace EGE
 					asCALL_CDECL_OBJLAST) >= 0 &&
 				engine.RegisterObjectMethod(
 					"ReziAudioEmitter",
+					"void SetFloatArrayParameter(const string &in, "
+					"const array<float>@+)",
+					asFUNCTION(SetReziAudioFloatArrayParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"array<float>@ GetFloatArrayParameter("
+					"const string &in) const",
+					asFUNCTION(GetReziAudioFloatArrayParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetIntArrayParameter(const string &in, "
+					"const array<int>@+)",
+					asFUNCTION(SetReziAudioIntegerArrayParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"array<int>@ GetIntArrayParameter("
+					"const string &in) const",
+					asFUNCTION(GetReziAudioIntegerArrayParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetAudioClipParameter(const string &in, "
+					"AudioClip@+)",
+					asFUNCTION(SetReziAudioClipParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"AudioClip@ GetAudioClipParameter("
+					"const string &in) const",
+					asFUNCTION(GetReziAudioClipParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"void SetAudioClipArrayParameter("
+					"const string &in, "
+					"const array<AudioClip@>@+)",
+					asFUNCTION(SetReziAudioClipArrayParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"array<AudioClip@>@ GetAudioClipArrayParameter("
+					"const string &in) const",
+					asFUNCTION(GetReziAudioClipArrayParameter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
 					"void ClearParameters()",
 					asFUNCTION(ClearReziAudioParameters),
 					asCALL_CDECL_OBJLAST) >= 0 &&
@@ -2625,8 +3022,23 @@ namespace EGE
 					asFUNCTION(IsReziAudioEmitterPlaying),
 					asCALL_CDECL_OBJLAST) >= 0 &&
 				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool get_isPaused() const property",
+					asFUNCTION(IsReziAudioEmitterPaused),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool get_isFinished() const property",
+					asFUNCTION(IsReziAudioEmitterFinished),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
 					"ReziAudioEmitter", "bool Play()",
 					asFUNCTION(PlayReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool PlayWithFade(float durationSeconds)",
+					asFUNCTION(PlayReziAudioEmitterWithFade),
 					asCALL_CDECL_OBJLAST) >= 0 &&
 				engine.RegisterObjectMethod(
 					"ReziAudioEmitter", "bool Pause()",
@@ -2639,6 +3051,39 @@ namespace EGE
 				engine.RegisterObjectMethod(
 					"ReziAudioEmitter", "void Stop()",
 					asFUNCTION(StopReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool StopWithFade(float durationSeconds)",
+					asFUNCTION(StopReziAudioEmitterWithFade),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool FadeTo(float targetVolume, "
+					"float durationSeconds)",
+					asFUNCTION(FadeReziAudioEmitterTo),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool Seek(float seconds)",
+					asFUNCTION(SeekReziAudioEmitter),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"float get_playbackSeconds() const property",
+					asFUNCTION(GetReziAudioPlaybackSeconds),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"float get_playbackLengthSeconds() "
+					"const property",
+					asFUNCTION(GetReziAudioPlaybackLengthSeconds),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"float get_playbackPercentage() "
+					"const property",
+					asFUNCTION(GetReziAudioPlaybackPercentage),
 					asCALL_CDECL_OBJLAST) >= 0;
 			if (registered)
 				return true;
@@ -3470,10 +3915,45 @@ void ValidateTypedComponentApi(GameObject@ object)
         addedReziEmitter.volume = addedReziEmitter.volume;
         addedReziEmitter.pitch = addedReziEmitter.pitch;
         addedReziEmitter.spatial = addedReziEmitter.spatial;
+        addedReziEmitter.SetAudioClipParameter(
+            "Impact", clip);
+        AudioClip@ graphClip =
+            addedReziEmitter.GetAudioClipParameter("Impact");
+        Vector2 pan = Vector2(0.25f, 0.75f);
+        addedReziEmitter.SetVector2Parameter("Pan2D", pan);
+        pan = addedReziEmitter.GetVector2Parameter("Pan2D", pan);
+        array<float> weights = { 1.0f, 2.0f, 3.0f };
+        addedReziEmitter.SetFloatArrayParameter("Weights", weights);
+        weights =
+            addedReziEmitter.GetFloatArrayParameter("Weights");
+        array<int> sequence = { 1, 3, 2 };
+        addedReziEmitter.SetIntArrayParameter("Sequence", sequence);
+        sequence =
+            addedReziEmitter.GetIntArrayParameter("Sequence");
+        array<AudioClip@> variations = { clip };
+        addedReziEmitter.SetAudioClipArrayParameter(
+            "Variations", variations);
+        variations =
+            addedReziEmitter.GetAudioClipArrayParameter("Variations");
         bool playing = addedReziEmitter.isPlaying;
+        bool paused = addedReziEmitter.isPaused;
+        bool finished = addedReziEmitter.isFinished;
         bool playAccepted = addedReziEmitter.Play();
+        bool fadePlayAccepted =
+            addedReziEmitter.PlayWithFade(0.1f);
         bool pauseAccepted = addedReziEmitter.Pause();
         bool resumeAccepted = addedReziEmitter.Resume();
+        bool fadeAccepted =
+            addedReziEmitter.FadeTo(0.5f, 0.1f);
+        bool seekAccepted = addedReziEmitter.Seek(0.25f);
+        float playbackSeconds =
+            addedReziEmitter.playbackSeconds;
+        float playbackLength =
+            addedReziEmitter.playbackLengthSeconds;
+        float playbackPercentage =
+            addedReziEmitter.playbackPercentage;
+        bool fadeStopAccepted =
+            addedReziEmitter.StopWithFade(0.1f);
         addedReziEmitter.Stop();
     }
     if (addedReziListener !is null)

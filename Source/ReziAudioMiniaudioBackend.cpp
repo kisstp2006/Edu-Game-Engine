@@ -406,6 +406,103 @@ namespace EGE::ReziAudio
 			slot->sound.get(), 0) == MA_SUCCESS && stopped;
 	}
 
+	bool MiniaudioBackend::FadeTo(
+		PlaybackHandle handle,
+		float targetVolume,
+		float durationSeconds)
+	{
+		std::scoped_lock lock(mutex_);
+		VoiceSlot* slot = Resolve(handle);
+		if (!slot)
+			return false;
+
+		targetVolume = std::max(targetVolume, 0.0f);
+		durationSeconds = std::max(durationSeconds, 0.0f);
+		if (durationSeconds <= 0.0f)
+		{
+			ma_sound_set_volume(slot->sound.get(), targetVolume);
+			return true;
+		}
+
+		const double milliseconds =
+			static_cast<double>(durationSeconds) * 1000.0;
+		const ma_uint64 durationMilliseconds =
+			static_cast<ma_uint64>(std::min(
+				milliseconds,
+				static_cast<double>(
+					std::numeric_limits<ma_uint64>::max())));
+		ma_sound_set_fade_in_milliseconds(
+			slot->sound.get(),
+			-1.0f,
+			targetVolume,
+			durationMilliseconds);
+		return true;
+	}
+
+	bool MiniaudioBackend::StopWithFade(
+		PlaybackHandle handle,
+		float durationSeconds)
+	{
+		std::scoped_lock lock(mutex_);
+		VoiceSlot* slot = Resolve(handle);
+		if (!slot)
+			return false;
+
+		durationSeconds = std::max(durationSeconds, 0.0f);
+		if (durationSeconds <= 0.0f)
+			return Stop(handle);
+
+		const double milliseconds =
+			static_cast<double>(durationSeconds) * 1000.0;
+		const ma_uint64 durationMilliseconds =
+			static_cast<ma_uint64>(std::min(
+				milliseconds,
+				static_cast<double>(
+					std::numeric_limits<ma_uint64>::max())));
+		slot->paused = false;
+		return ma_sound_stop_with_fade_in_milliseconds(
+			slot->sound.get(),
+			durationMilliseconds) == MA_SUCCESS;
+	}
+
+	bool MiniaudioBackend::SeekSeconds(
+		PlaybackHandle handle,
+		float seconds)
+	{
+		std::scoped_lock lock(mutex_);
+		VoiceSlot* slot = Resolve(handle);
+		return slot &&
+			ma_sound_seek_to_second(
+				slot->sound.get(),
+				std::max(seconds, 0.0f)) == MA_SUCCESS;
+	}
+
+	float MiniaudioBackend::GetPlaybackSeconds(
+		PlaybackHandle handle) const
+	{
+		std::scoped_lock lock(mutex_);
+		const VoiceSlot* slot = Resolve(handle);
+		float seconds = 0.0f;
+		return slot &&
+			ma_sound_get_cursor_in_seconds(
+				slot->sound.get(), &seconds) == MA_SUCCESS
+				? seconds
+				: 0.0f;
+	}
+
+	float MiniaudioBackend::GetPlaybackLengthSeconds(
+		PlaybackHandle handle) const
+	{
+		std::scoped_lock lock(mutex_);
+		const VoiceSlot* slot = Resolve(handle);
+		float seconds = 0.0f;
+		return slot &&
+			ma_sound_get_length_in_seconds(
+				slot->sound.get(), &seconds) == MA_SUCCESS
+				? seconds
+				: 0.0f;
+	}
+
 	bool MiniaudioBackend::SetSettings(
 		PlaybackHandle handle,
 		const VoiceSettings& settings)

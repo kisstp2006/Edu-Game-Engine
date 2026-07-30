@@ -23,6 +23,7 @@ private:
     void ShowContextMenus(ResourceStateMachine* animation);
     void ShowCreateNewNodeMenu(ResourceStateMachine* animation);
     void ShowNodeMenu(ResourceStateMachine* animation);
+    void ShowPinMenu(ResourceStateMachine* animation);
     void ShowLinkMenu(ResourceStateMachine* animation);
     void AddAnimationNode(ResourceStateMachine* animation, uint index);
     void ManageCreate(ResourceStateMachine* animation);
@@ -32,6 +33,7 @@ private:
 
 private:
     uint context_node = 0;
+    uint context_pin = 0;
     uint context_link = 0;
     ImVec2 new_node_pos;
     ed::PinId new_node_pin = 0;

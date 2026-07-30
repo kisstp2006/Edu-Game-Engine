@@ -236,8 +236,8 @@ a separate integration step.
 ### Implemented graph slice
 
 `NodeRegistry` is the single catalog for editor presentation and runtime pin
-contracts. It currently contains 58 input, parameter, math, logic, vector and
-audio-control node types. `SoundGraphCompiler` validates IDs, node types, pin
+contracts. It currently contains 76 input, parameter, array, math, music,
+logic, vector and audio-control node types. `SoundGraphCompiler` validates IDs, node types, pin
 directions, compatible value types, single-input ownership, cycles and the
 single Audio Output requirement. Its output is a compiled prototype with a
 stable evaluation order and resolved input-source table.
@@ -247,9 +247,33 @@ the prototype. Two instances of the same asset therefore never share runtime
 values. Parameters can be addressed by stable FNV-1a ID or by name and can be
 updated without recompiling. The first slice evaluates playback configuration
 at trigger time and applies settings and transforms live to miniaudio voices.
-It deliberately does not pretend to be a sample-buffer DSP graph yet; that
-requires the allocation-free callback program and command queues described
-above.
+
+The second slice adds `DspGraphStream`, a real sample-buffer graph exposed to
+miniaudio as a custom `ma_data_source`. Graph compilation decodes Wave Player
+clips, validates and sorts audio routes, sizes every processing buffer, delay
+line and reverb line, and produces a playback instance before the voice starts.
+The callback then performs no allocation, file I/O, logging, reflection or
+locking.
+
+Implemented DSP processors:
+
+- predecoded Wave Player with sample-rate/channel conversion, start offset and
+  finite or infinite loop counts;
+- Sine Oscillator and deterministic white, pink and Brownian Noise generators;
+- sample-accurate Repeat Trigger, Delayed Trigger and Trigger Counter controls;
+- retriggerable AD Envelope with attack/decay curves;
+- Gain and equal-power stereo Pan;
+- one-pole Low Pass and High Pass filters;
+- feedback Delay with compile-time maximum storage;
+- stereo Schroeder-style Reverb with pre-delay, width, wet and dry controls,
+  four comb and two all-pass stages;
+- Add, Subtract, Multiply, Minimum, Maximum, Clamp and Map Range audio math;
+- up to eight-input Mixer;
+- explicit DSP Output and reusable sample-buffer fan-out.
+
+Live DSP parameters use a bounded 256-entry SPSC queue. The gameplay/editor
+thread resolves node and parameter IDs before enqueueing. The callback only
+consumes fixed-size commands and updates preallocated processor state.
 
 ## Current implementation
 
@@ -260,23 +284,33 @@ above.
 - Master/Music/SFX/Ambience/UI buses;
 - live volume, pitch, pan and loop settings; stream/decode mode is selected
   when a voice is created;
+- fade-in, fade-to, scheduled fade-out stop, seek, cursor, duration and
+  playback-percentage voice controls;
 - live position, direction, velocity, listener and full miniaudio 3D
   attenuation/cone/doppler settings;
 - serializable `ReziAudioEmitter` and `ReziAudioListener` components;
 - editor component controls for clip selection, transport and 3D tuning;
 - typed AngelScript component access and emitter transport/properties;
-- AngelScript float, int, bool and Vector3 graph parameter access;
-- data-only clip, parameter and sound-graph foundation types;
+- AngelScript float, int, bool, Vector2, Vector3, float-array, integer-array,
+  native `AudioClip@` and `array<AudioClip@>` graph parameter access;
+- UUID-backed `AudioClipReference` values whose runtime source is resolved
+  through the engine resource manager;
+- shared parameter descriptors and widgets used by both graph labs;
 - graph registry, validator/compiler and isolated runtime instances;
+- allocation-free callback DSP graph and miniaudio custom stream voices;
+- Wave/generator/envelope/trigger/audio-math/Gain/Pan/filter/delay/reverb/
+  mixer/output DSP processors;
+- bounded lock-free live DSP parameter queue and callback statistics;
 - headless backend/graph tests, the ImGui 2D/3D Audio Lab and the node-based
-  ReziAudio Graph Lab.
+  ReziAudio Graph and DSP Graph Labs.
 
 ## Test strategy
 
 `ReziAudioFoundationTests` creates a real WAV fixture, initializes miniaudio
 without a device, and verifies initialization, creation, playback, live
-settings, live 3D transforms, listener updates, buses, pause/resume, cleanup,
-slot reuse and stale-generation rejection.
+settings, live 3D transforms, listener updates, buses, pause/resume, fades,
+seek, duration/cursor/percentage queries, cleanup, slot reuse and
+stale-generation rejection.
 
 `ReziAudioLab` is a manual UI/integration executable. It uses the same backend
 as the new components, plays the engine's `ding.wav`, exposes live voice and 3D
@@ -286,9 +320,23 @@ plays the fixture and exits after six rendered frames.
 
 `ReziAudioGraphTests` verifies catalog coverage, compilation, cycle
 diagnostics, math/logic evaluation, stable parameter IDs, instance isolation
-and live parameter changes. `ReziAudioGraphLab --smoke` compiles and plays the
-default graph through a no-device miniaudio engine, renders the real node
-editor for several frames and changes a parameter while the voice exists.
+and live parameter changes, including typed audio-asset parameters.
+`ReziAudioGraphLab --smoke` compiles and plays the default graph through a
+no-device miniaudio engine, renders the real node editor for several frames
+and changes a parameter while the voice exists. Its runtime list is sourced
+from the last successfully compiled parameter set.
+
+`ReziAudioDspGraphTests` additionally counts global C++ allocations around
+`ReadFrames`, verifies a zero-allocation callback, exercises every implemented
+processor including all three trigger nodes and all three noise colors, checks
+finite output, propagated graph duration, cycle rejection, bounded queue
+overflow and drives the same graph through `ma_engine_read_pcm_frames`.
+
+`ReziAudioDspGraphLab` is the manual real-time DSP editor. Nodes and audio
+routes can be added, connected and deleted. Compiling rebuilds all callback
+storage outside the audio thread and refreshes the data-driven runtime
+parameter snapshot; Gain, Pan, Cutoff, Delay and Reverb values then update
+live without recompilation.
 
 Run:
 
@@ -297,18 +345,20 @@ cmake --build --preset debug-vs2026 --config Debug --target ReziAudioLab
 .\build\vs2026\bin\Debug\ReziAudioLab.exe
 cmake --build --preset debug-vs2026 --config Debug --target ReziAudioGraphLab
 .\build\vs2026\bin\Debug\ReziAudioGraphLab.exe
+cmake --build --preset debug-vs2026 --config Debug --target ReziAudioDspGraphLab
+.\build\vs2026\bin\Debug\ReziAudioDspGraphLab.exe
 ```
 
-An alternative WAV or OGG path can be passed as the first argument.
+An alternative WAV or OGG can be passed as the first argument. The lab imports
+it into its temporary asset catalog; graph and DSP nodes still store an
+`AudioClipReference`, not a path value.
 
 ## Next implementation phases
 
-1. Register `AudioClip`, `AudioEvent`, graph, mixer and attenuation as real EGE
-   resources with UUID-based references and import metadata.
-2. Add the lock-free command/event queues and move voice mutation off the
-   gameplay thread.
-3. Extend the compiled control graph with an immutable sample-buffer DSP
-   program and atomically swappable runtime prototype.
+1. Register `AudioEvent`, graph, mixer and attenuation as real EGE resources
+   with UUID-based references and import metadata.
+2. Add a separate lock-free event/completion queue from the audio callback.
+3. Add click-free atomic graph-instance replacement and parameter smoothing.
 4. Add AngelScript playback/event wrappers and graph/event resource handles.
 5. Add concurrency groups, priorities, voice stealing and virtualization.
 6. Add effects, sends, snapshots, meters and device-change recovery.

@@ -25,7 +25,8 @@ function(ege_configure_solution_folders)
         ReziAudioDspGraphTests)
     ege_set_target_folder("Tests/Interactive"
         ReziAudioLab
-        ReziAudioGraphLab)
+        ReziAudioGraphLab
+        ReziAudioDspGraphLab)
     ege_set_target_folder("Tests/Scripting"
         ScriptingBackendTests
         EngineAngelScriptApiTests)

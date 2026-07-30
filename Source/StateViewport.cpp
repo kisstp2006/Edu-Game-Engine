@@ -1,11 +1,14 @@
 #include "Globals.h"
 #include "StateViewport.h"
+#include "BlueprintNodeStyle.h"
 #include "ComponentAnimation.h"
 #include "ResourceStateMachine.h"
 
 #include "Leaks.h"
 
 #define DEFAULT_BLEND 300
+
+namespace blueprint = EGE::BlueprintNodeStyle;
 
 StateViewport::StateViewport()
 {
@@ -20,6 +23,7 @@ void StateViewport::Draw(ResourceStateMachine* animation, ax::NodeEditor::Editor
     if(animation != nullptr)
     {
         ed::SetCurrentEditor(context);
+        blueprint::Apply();
         ed::Begin("State Machine Editor", ImVec2(0.0, 0.0f));
 
         DrawNodes(animation);
@@ -30,6 +34,7 @@ void StateViewport::Draw(ResourceStateMachine* animation, ax::NodeEditor::Editor
 
         ed::Suspend();
         ShowNodeMenu(animation);
+        ShowPinMenu(animation);
         ShowLinkMenu(animation);
         ShowCreateNewNodeMenu(animation);
         ed::Resume();
@@ -69,79 +74,43 @@ void StateViewport::DrawNodes(ResourceStateMachine* animation)
 {
     for(uint i=0, count = animation->GetNumNodes(); i < count; ++i)
     {
-        ed::PushStyleColor(ed::StyleColor_PinRect,       ImColor( 60, 180, 255, 150));
-        ed::PushStyleColor(ed::StyleColor_PinRectBorder, ImColor( 60, 180, 255, 150));
+        const bool isDefault = i == animation->GetDefaultNode();
+        blueprint::NodeBuilder builder(
+            static_cast<std::uint64_t>(i * 3 + 1),
+            animation->GetNodeName(i).C_str(),
+            isDefault
+                ? ImVec4(0.72f, 0.42f, 0.12f, 1.0f)
+                : ImVec4(0.18f, 0.48f, 0.68f, 1.0f),
+            210.0f);
+        builder.Begin();
 
-        ed::BeginNode(i*3+1);
-        ImGui::Indent(1.0);
-        ImGui::TextColored(ImVec4(255, 255, 0, 255), animation->GetNodeName(i).C_str());
+        const std::string clip =
+            std::string("Clip  ") + animation->GetNodeClip(i).C_str();
+        builder.Text(clip.c_str(), ImVec4(0.76f, 0.78f, 0.84f, 1.0f));
+        if(isDefault)
+            builder.Text(
+                "Default state",
+                ImVec4(1.0f, 0.70f, 0.28f, 1.0f));
 
-		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f * ImGui::GetStyle().Alpha);
-
-        ImVec2 size = ed::GetNodeSize(i*3+1);
-
-        /* todo:
-		ImDrawList* drawList = ed::GetNodeBackgroundDrawList(i * 3 + 1);
-
-		drawList->AddLine(
-			ImGui::GetCursorScreenPos(),
-			ImGui::GetCursorScreenPos()+ImVec2(size.x-16.0f, 0.0),
-			IM_COL32(255, 255, 0, 255), 1.0f);
-
-            */
-
-
-		ImGui::PopStyleVar();
-
-		ImGui::Dummy(ImVec2(96.0, 8.0));
-        ImGui::BulletText("Clip: %s", animation->GetNodeClip(i).C_str());
-        if(i == animation->GetDefaultNode())
-        {
-            ImGui::BulletText("Default");
-        }
-
-		ImGui::Dummy(ImVec2(96.0, 8.0));
-
-        /* todo
-		drawList->AddLine(
-			ImGui::GetCursorScreenPos(),
-			ImGui::GetCursorScreenPos()+ImVec2(size.x-16.0f, 0.0),
-			IM_COL32(255, 255, 255, 255), 1.0f);
-            */
-
-		ImGui::Dummy(ImVec2(64.0, 8.0));
-
-        // In Pin
-        ed::PushStyleVar(ed::StyleVar_PinArrowSize, 8.0f);
-        ed::PushStyleVar(ed::StyleVar_PinArrowWidth, 8.0f);
-        ed::PushStyleVar(ed::StyleVar_PinRadius, 10.0f);
-        ed::PushStyleVar(ed::StyleVar_TargetDirection, ImVec2(0.0f, 0.0f));
-        ed::BeginPin(i*3+2, ed::PinKind::Input);
-        ImGui::Text("In");
-        ed::EndPin();
-        ed::PopStyleVar(4);
-
-        // Out Pin
-        ImGui::SameLine(size.x-40);
-        ed::PushStyleVar(ed::StyleVar_PinArrowSize, 0.0f);
-        ed::PushStyleVar(ed::StyleVar_PinArrowWidth, 0.0f);
-        ed::PushStyleVar(ed::StyleVar_TargetDirection, ImVec2(0.0f, 0.0f));
-        ed::BeginPin(i*3+3, ed::PinKind::Output);
-        ImGui::Text("Out");
-
-        ed::EndPin();
-
-		ed::EndNode();
-
-        ed::PopStyleVar(3);
-        ed::PopStyleColor(2);
-
+        const blueprint::Pin input{
+            static_cast<std::uint64_t>(i * 3 + 2),
+            "In",
+            ImVec4(0.32f, 0.72f, 1.0f, 1.0f),
+            blueprint::PinShape::Square,
+            true};
+        const blueprint::Pin output{
+            static_cast<std::uint64_t>(i * 3 + 3),
+            "Out",
+            ImVec4(0.32f, 0.72f, 1.0f, 1.0f),
+            blueprint::PinShape::Square,
+            true};
+        builder.PinRow(&input, &output);
+        builder.End();
     }
 }
 
 void StateViewport::DrawTransitions(ResourceStateMachine* animation)
 {
-    ed::PushStyleVar(ed::StyleVar_LinkStrength, 4.0f);
     uint num_nodes = animation->GetNumNodes();
     for(uint i=0, count = animation->GetNumTransitions(); i < count; ++i)
     {
@@ -150,10 +119,14 @@ void StateViewport::DrawTransitions(ResourceStateMachine* animation)
 
         if(source < num_nodes && target < num_nodes)
         {
-            ed::Link(num_nodes*3+i+1, source*3+3, target*3+2);
+            ed::Link(
+                num_nodes*3+i+1,
+                source*3+3,
+                target*3+2,
+                ImVec4(0.34f, 0.73f, 1.0f, 1.0f),
+                2.5f);
         }
     }
-    ed::PopStyleVar(1);
 }
 
 void StateViewport::AddAnimationNode(ResourceStateMachine* animation, uint index)
@@ -163,7 +136,7 @@ void StateViewport::AddAnimationNode(ResourceStateMachine* animation, uint index
 
     uint node_idx = animation->FindNode(name);
 
-    // ensure node name doesn´t exists
+    // Ensure the node name is unique.
     uint counter = 0;
     while(node_idx < animation->GetNumNodes())
     {
@@ -282,6 +255,7 @@ void StateViewport::ShowContextMenus(ResourceStateMachine* animation)
     }
     else if (ed::ShowPinContextMenu(&contextPinId))
     {
+        context_pin = uint(contextPinId.Get());
         ImGui::OpenPopup("Pin Context Menu");
     }
     else if (ed::ShowLinkContextMenu(&contextLinkId))
@@ -378,6 +352,110 @@ void StateViewport::ShowNodeMenu(ResourceStateMachine* animation)
         }
 
         ImGui::EndPopup();
+    }
+}
+
+void StateViewport::ShowPinMenu(ResourceStateMachine* animation)
+{
+    int disconnectTransition = -1;
+    bool disconnectAll = false;
+
+    if (ImGui::BeginPopup("Pin Context Menu"))
+    {
+        if (context_pin == 0)
+        {
+            ImGui::TextDisabled("The pin no longer exists.");
+            ImGui::EndPopup();
+            return;
+        }
+
+        const bool input = (context_pin - 1) % 3 == 1;
+        const uint node = (context_pin - 1) / 3;
+        if (node >= animation->GetNumNodes())
+        {
+            ImGui::TextDisabled("The state no longer exists.");
+            ImGui::EndPopup();
+            return;
+        }
+
+        ImGui::Text(
+            "%s %s",
+            animation->GetNodeName(node).C_str(),
+            input ? "Input" : "Output");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(Transition)");
+        ImGui::Separator();
+
+        std::vector<uint> transitions;
+        const HashString nodeName = animation->GetNodeName(node);
+        for (uint index = 0;
+            index < animation->GetNumTransitions();
+            ++index)
+        {
+            const bool connected =
+                input
+                    ? animation->GetTransitionTarget(index) == nodeName
+                    : animation->GetTransitionSource(index) == nodeName;
+            if (connected)
+                transitions.push_back(index);
+        }
+
+        if (transitions.size() == 1)
+        {
+            if (ImGui::MenuItem("Disconnect"))
+                disconnectTransition =
+                    static_cast<int>(transitions.front());
+        }
+        else if (transitions.size() > 1)
+        {
+            if (ImGui::BeginMenu("Disconnect transition"))
+            {
+                for (const uint index : transitions)
+                {
+                    const HashString otherState =
+                        input
+                            ? animation->GetTransitionSource(index)
+                            : animation->GetTransitionTarget(index);
+                    ImGui::PushID(static_cast<int>(index));
+                    if (ImGui::MenuItem(otherState.C_str()))
+                        disconnectTransition =
+                            static_cast<int>(index);
+                    ImGui::PopID();
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+            const std::string label =
+                "Disconnect all (" +
+                std::to_string(transitions.size()) + ")";
+            if (ImGui::MenuItem(label.c_str()))
+                disconnectAll = true;
+        }
+        else
+        {
+            ImGui::TextDisabled("Not connected.");
+        }
+
+        ImGui::TextDisabled(
+            "Transition pins cannot be promoted to variables.");
+        ImGui::EndPopup();
+
+        if (disconnectAll)
+        {
+            for (auto transition = transitions.rbegin();
+                transition != transitions.rend();
+                ++transition)
+            {
+                animation->RemoveTransition(*transition);
+            }
+            animation->Save();
+        }
+        else if (disconnectTransition >= 0)
+        {
+            animation->RemoveTransition(
+                static_cast<uint>(disconnectTransition));
+            animation->Save();
+        }
     }
 }
 

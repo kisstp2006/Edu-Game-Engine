@@ -1,5 +1,7 @@
 #include "../ReziAudioGraph.h"
 #include "../ReziAudioSystem.h"
+#include "../BlueprintNodeStyle.h"
+#include "ReziAudioParameterWidgets.h"
 
 #define SDL_MAIN_HANDLED
 #include <GL/glew.h>
@@ -11,12 +13,17 @@
 #include <miniaudio.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace ed = ax::NodeEditor;
 using namespace EGE::ReziAudio;
+namespace blueprint = EGE::BlueprintNodeStyle;
+namespace parameterUi = EGE::ReziAudio::TestUi;
 
 namespace
 {
@@ -32,35 +39,97 @@ namespace
 		case GraphPinType::Color: return ImVec4(1.0f, 0.35f, 0.8f, 1);
 		case GraphPinType::AudioClip:
 		case GraphPinType::String: return ImVec4(0.75f, 0.4f, 1.0f, 1);
+		case GraphPinType::FloatArray:
+			return ImVec4(0.30f, 0.68f, 0.95f, 1);
+		case GraphPinType::IntegerArray:
+			return ImVec4(0.28f, 0.78f, 0.52f, 1);
+		case GraphPinType::AudioClipArray:
+			return ImVec4(0.72f, 0.36f, 0.95f, 1);
+		case GraphPinType::AudioBuffer:
+			return ImVec4(0.35f, 0.9f, 0.55f, 1);
 		default: return ImVec4(0.7f, 0.7f, 0.75f, 1);
 		}
 	}
 
-	GraphPin* FindPin(
+	ImVec4 NodeColor(const GraphNode& node)
+	{
+		if (node.type.find("Output") != std::string::npos)
+			return ImVec4(0.85f, 0.24f, 0.20f, 1.0f);
+		if (node.type == "Audio.RandomOneShot")
+			return ImVec4(0.16f, 0.62f, 0.40f, 1.0f);
+		if (node.type.find("Parameter") != std::string::npos)
+			return ImVec4(0.52f, 0.32f, 0.78f, 1.0f);
+		if (node.type.find("Random") != std::string::npos)
+			return ImVec4(0.78f, 0.36f, 0.24f, 1.0f);
+		return ImVec4(0.16f, 0.48f, 0.68f, 1.0f);
+	}
+
+	blueprint::PinShape PinShape(GraphPinType type)
+	{
+		if (type == GraphPinType::Flow)
+			return blueprint::PinShape::Square;
+		if (type == GraphPinType::Bool)
+			return blueprint::PinShape::Diamond;
+		return blueprint::PinShape::Circle;
+	}
+
+	bool IsPinConnected(const SoundGraphAsset& graph, std::uint64_t pinId)
+	{
+		return std::any_of(
+			graph.links.begin(),
+			graph.links.end(),
+			[pinId](const GraphLink& link)
+			{
+				return link.outputPin == pinId || link.inputPin == pinId;
+			});
+	}
+
+	struct PinLocation
+	{
+		GraphNode* node = nullptr;
+		GraphPin* pin = nullptr;
+		bool output = false;
+	};
+
+	PinLocation FindPin(
 		SoundGraphAsset& graph,
-		std::uint64_t id,
-		bool& output)
+		std::uint64_t id)
 	{
 		for (GraphNode& node : graph.nodes)
 		{
 			for (GraphPin& pin : node.inputs)
 			{
 				if (pin.id == id)
-				{
-					output = false;
-					return &pin;
-				}
+					return {&node, &pin, false};
 			}
 			for (GraphPin& pin : node.outputs)
 			{
 				if (pin.id == id)
-				{
-					output = true;
-					return &pin;
-				}
+					return {&node, &pin, true};
 			}
 		}
-		return nullptr;
+		return {};
+	}
+
+	const char* PinTypeName(GraphPinType type)
+	{
+		switch (type)
+		{
+		case GraphPinType::Flow: return "Flow";
+		case GraphPinType::Bool: return "Bool";
+		case GraphPinType::Integer: return "Integer";
+		case GraphPinType::Float: return "Float";
+		case GraphPinType::Vector2: return "Vector2";
+		case GraphPinType::Vector3: return "Vector3";
+		case GraphPinType::Color: return "Color";
+		case GraphPinType::String: return "String";
+		case GraphPinType::AudioBuffer: return "Audio Buffer";
+		case GraphPinType::AudioClip: return "Audio Clip";
+		case GraphPinType::FloatArray: return "Float Array";
+		case GraphPinType::IntegerArray: return "Integer Array";
+		case GraphPinType::AudioClipArray: return "Audio Clip Array";
+		}
+		return "Unknown";
 	}
 
 	bool Compatible(GraphPinType from, GraphPinType to)
@@ -69,48 +138,50 @@ namespace
 			((from == GraphPinType::Integer ||
 			  from == GraphPinType::Float) &&
 			 (to == GraphPinType::Integer ||
-			  to == GraphPinType::Float)) ||
-			((from == GraphPinType::AudioClip ||
-			  from == GraphPinType::String) &&
-			 (to == GraphPinType::AudioClip ||
-			  to == GraphPinType::String));
+			  to == GraphPinType::Float));
 	}
 
-	void DrawPin(const GraphPin& pin, bool output)
+	bool DrawNode(
+		GraphNode& node,
+		SoundGraphAsset& graph,
+		std::span<const AudioClipReference> availableClips)
 	{
-		ed::BeginPin(
-			ed::PinId(pin.id),
-			output ? ed::PinKind::Output : ed::PinKind::Input);
-		const ImVec4 color = PinColor(pin.type);
-		ImGui::TextColored(
-			color,
-			output ? "%s  >" : "<  %s",
-			pin.name.c_str());
-		ed::EndPin();
-	}
-
-	void DrawNode(GraphNode& node)
-	{
-		ed::BeginNode(ed::NodeId(node.id));
-		ImGui::PushID(static_cast<int>(node.id));
-		ImGui::TextColored(
-			ImVec4(0.35f, 0.8f, 1.0f, 1.0f),
-			"%s",
-			node.displayName.c_str());
-		ImGui::Separator();
+		bool changed = false;
+		blueprint::NodeBuilder builder(
+			node.id,
+			node.displayName,
+			NodeColor(node),
+			220.0f);
+		builder.Begin();
 		const std::size_t rows =
 			std::max(node.inputs.size(), node.outputs.size());
 		for (std::size_t row = 0; row < rows; ++row)
 		{
+			std::optional<blueprint::Pin> input;
+			std::optional<blueprint::Pin> output;
 			if (row < node.inputs.size())
-				DrawPin(node.inputs[row], false);
-			else
-				ImGui::Dummy(ImVec2(20, ImGui::GetTextLineHeight()));
+			{
+				const GraphPin& pin = node.inputs[row];
+				input = blueprint::Pin{
+					pin.id,
+					pin.name,
+					PinColor(pin.type),
+					PinShape(pin.type),
+					IsPinConnected(graph, pin.id)};
+			}
 			if (row < node.outputs.size())
 			{
-				ImGui::SameLine(150.0f);
-				DrawPin(node.outputs[row], true);
+				const GraphPin& pin = node.outputs[row];
+				output = blueprint::Pin{
+					pin.id,
+					pin.name,
+					PinColor(pin.type),
+					PinShape(pin.type),
+					IsPinConnected(graph, pin.id)};
 			}
+			builder.PinRow(
+				input ? &*input : nullptr,
+				output ? &*output : nullptr);
 		}
 		if (auto found = node.properties.find("Name");
 			found != node.properties.end())
@@ -120,55 +191,66 @@ namespace
 			{
 				char buffer[96]{};
 				strncpy_s(buffer, name->c_str(), _TRUNCATE);
-				ImGui::SetNextItemWidth(180.0f);
-				if (ImGui::InputText("Parameter", buffer, sizeof(buffer)))
+				ImGui::SetNextItemWidth(builder.ContentWidth());
+				if (ImGui::InputText("##Parameter", buffer, sizeof(buffer)))
+				{
 					*name = buffer;
+					changed = true;
+				}
 			}
 		}
-		ImGui::PopID();
-		ed::EndNode();
+		if (node.type == "Constant.Clip" &&
+			!node.inputs.empty())
+		{
+			if (AudioClipReference* clip =
+					std::get_if<AudioClipReference>(
+						&node.inputs.front().defaultValue))
+			{
+				ImGui::SetNextItemWidth(builder.ContentWidth());
+				changed |= parameterUi::DrawAudioClip(
+					"##AudioAsset",
+					*clip,
+					availableClips);
+			}
+		}
+		if (node.type == "Audio.RandomOneShot")
+		{
+			builder.Text(
+				"Random each play - no immediate repeat",
+				ImVec4(0.58f, 0.72f, 0.64f, 1.0f));
+			if (node.inputs.size() < 32 &&
+				ImGui::SmallButton("+ Add Clip Input"))
+			{
+				const std::size_t number =
+					node.inputs.size() + 1;
+				node.inputs.push_back(
+					{
+						NextGraphPinId(graph),
+						"Clip " + std::to_string(number),
+						GraphPinType::AudioClip,
+						AudioClipReference{}
+					});
+				changed = true;
+			}
+		}
+		builder.End();
+		return changed;
 	}
 
 	bool DrawParameterEditor(
-		NamedParameter& definition,
-		SoundGraphInstance& instance)
+		const NamedParameter& definition,
+		SoundGraphInstance& instance,
+		std::span<const AudioClipReference> availableClips)
 	{
 		ParameterValue value = definition.defaultValue;
 		if (const ParameterValue* current =
 				instance.GetParameter(definition.name))
 			value = *current;
-		bool changed = false;
 		ImGui::PushID(static_cast<int>(definition.id));
-		if (float* number = std::get_if<float>(&value))
-			changed = ImGui::DragFloat(
-				definition.name.c_str(), number, 0.01f);
-		else if (int* number = std::get_if<int>(&value))
-			changed = ImGui::DragInt(definition.name.c_str(), number);
-		else if (bool* enabled = std::get_if<bool>(&value))
-			changed = ImGui::Checkbox(definition.name.c_str(), enabled);
-		else if (float3* vector = std::get_if<float3>(&value))
-		{
-			float data[3] = {vector->x, vector->y, vector->z};
-			changed = ImGui::DragFloat3(
-				definition.name.c_str(), data, 0.05f);
-			if (changed)
-				*vector = float3(data[0], data[1], data[2]);
-		}
-		else if (float2* vector = std::get_if<float2>(&value))
-		{
-			float data[2] = {vector->x, vector->y};
-			changed = ImGui::DragFloat2(
-				definition.name.c_str(), data, 0.05f);
-			if (changed)
-				*vector = float2(data[0], data[1]);
-		}
-		else if (float4* color = std::get_if<float4>(&value))
-		{
-			float data[4] = {color->x, color->y, color->z, color->w};
-			changed = ImGui::ColorEdit4(definition.name.c_str(), data);
-			if (changed)
-				*color = float4(data[0], data[1], data[2], data[3]);
-		}
+		const bool changed = parameterUi::DrawParameterValue(
+			definition.name.c_str(),
+			value,
+			availableClips);
 		if (changed)
 			instance.SetParameter(definition.id, value);
 		ImGui::PopID();
@@ -206,6 +288,357 @@ namespace
 				}),
 			graph.links.end());
 		graph.nodes.erase(found);
+	}
+
+	bool OverlapsExistingNode(
+		const SoundGraphAsset& graph,
+		const ImVec2& position,
+		const ImVec2& size)
+	{
+		constexpr float margin = 10.0f;
+		for (const GraphNode& node : graph.nodes)
+		{
+			const ImVec2 existingPosition =
+				ed::GetNodePosition(ed::NodeId(node.id));
+			const ImVec2 existingSize =
+				ed::GetNodeSize(ed::NodeId(node.id));
+			if (existingPosition.x == FLT_MAX ||
+				existingPosition.y == FLT_MAX)
+				continue;
+			const bool separated =
+				position.x + size.x + margin <
+					existingPosition.x ||
+				existingPosition.x + existingSize.x + margin <
+					position.x ||
+				position.y + size.y + margin <
+					existingPosition.y ||
+				existingPosition.y + existingSize.y + margin <
+					position.y;
+			if (!separated)
+				return true;
+		}
+		return false;
+	}
+
+	ImVec2 FindParameterNodePosition(
+		const SoundGraphAsset& graph,
+		const ImVec2& ownerPosition,
+		float rowOffset)
+	{
+		constexpr float nodeWidth = 220.0f;
+		constexpr float estimatedHeight = 78.0f;
+		constexpr float columnSpacing = 270.0f;
+		constexpr float rowSpacing = 110.0f;
+		const ImVec2 size(nodeWidth, estimatedHeight);
+
+		for (int column = 1; column <= 4; ++column)
+		{
+			const float x =
+				ownerPosition.x - columnSpacing * column;
+			for (int distance = 0; distance <= 7; ++distance)
+			{
+				const int directions =
+					distance == 0 ? 1 : 2;
+				for (int direction = 0;
+					direction < directions;
+					++direction)
+				{
+					const float sign =
+						direction == 0 ? -1.0f : 1.0f;
+					const float offset =
+						distance == 0
+							? 0.0f
+							: sign * rowSpacing * distance;
+					const ImVec2 candidate(
+						x,
+						std::max(
+							8.0f,
+							ownerPosition.y +
+								rowOffset +
+								offset));
+					if (!OverlapsExistingNode(
+							graph, candidate, size))
+						return candidate;
+				}
+			}
+		}
+		return ImVec2(
+			ownerPosition.x - columnSpacing,
+			std::max(8.0f, ownerPosition.y + rowOffset));
+	}
+
+	void MarkGraphDirty(
+		bool& compiled,
+		bool& compileFailed)
+	{
+		compiled = false;
+		compileFailed = false;
+	}
+
+	void DrawPinContextMenu(
+		SoundGraphAsset& graph,
+		const NodeRegistry& registry,
+		std::uint64_t contextPinId,
+		bool& compiled,
+		bool& compileFailed)
+	{
+		std::optional<std::uint64_t> disconnectLink;
+		bool disconnectAll = false;
+		bool promote = false;
+		bool removeClipInput = false;
+		std::optional<std::string> connectParameter;
+		std::optional<ImVec2> parameterNodePosition;
+
+		if (ImGui::BeginPopup("Graph Pin Context Menu"))
+		{
+			const PinLocation location =
+				FindPin(graph, contextPinId);
+			if (!location.pin || !location.node)
+			{
+				ImGui::TextDisabled("The pin no longer exists.");
+				ImGui::EndPopup();
+				return;
+			}
+
+			ImGui::TextUnformatted(location.pin->name.c_str());
+			ImGui::SameLine();
+			ImGui::TextDisabled(
+				"(%s %s)",
+				location.output ? "Output" : "Input",
+				PinTypeName(location.pin->type));
+			ImGui::Separator();
+
+			std::vector<const GraphLink*> connections;
+			for (const GraphLink& link : graph.links)
+			{
+				if (link.outputPin == contextPinId ||
+					link.inputPin == contextPinId)
+				{
+					connections.push_back(&link);
+				}
+			}
+
+			if (!connections.empty())
+			{
+				if (connections.size() == 1)
+				{
+					if (ImGui::MenuItem("Disconnect"))
+						disconnectLink = connections.front()->id;
+				}
+				else if (ImGui::BeginMenu("Disconnect connection"))
+				{
+					for (const GraphLink* link : connections)
+					{
+						const std::uint64_t otherPinId =
+							link->inputPin == contextPinId
+								? link->outputPin
+								: link->inputPin;
+						const PinLocation other =
+							FindPin(graph, otherPinId);
+						const std::string label =
+							other.node && other.pin
+								? other.node->displayName + "." +
+									other.pin->name
+								: "Unknown connection";
+						ImGui::PushID(
+							static_cast<int>(link->id));
+						if (ImGui::MenuItem(label.c_str()))
+							disconnectLink = link->id;
+						ImGui::PopID();
+					}
+					ImGui::EndMenu();
+				}
+
+				if (connections.size() > 1)
+				{
+					ImGui::Separator();
+					const std::string label =
+						"Disconnect all (" +
+						std::to_string(connections.size()) + ")";
+					if (ImGui::MenuItem(label.c_str()))
+						disconnectAll = true;
+				}
+			}
+			else if (!location.output)
+			{
+				const ImVec2 ownerPosition =
+					ed::GetNodePosition(
+						ed::NodeId(location.node->id));
+				const auto pinIndex = std::find_if(
+					location.node->inputs.begin(),
+					location.node->inputs.end(),
+					[contextPinId](const GraphPin& pin)
+					{
+						return pin.id == contextPinId;
+					});
+				const float rowOffset =
+					pinIndex == location.node->inputs.end()
+						? 0.0f
+						: static_cast<float>(
+							std::distance(
+								location.node->inputs.begin(),
+								pinIndex)) *
+							24.0f;
+				parameterNodePosition =
+					FindParameterNodePosition(
+						graph,
+						ownerPosition,
+						rowOffset);
+
+				if (CanPromoteInputToParameter(
+						graph, contextPinId))
+				{
+					if (ImGui::MenuItem("Promote to Variable"))
+						promote = true;
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::SetTooltip(
+							"Creates a typed graph parameter, "
+							"a getter node and this connection.");
+					}
+
+					bool hasCompatibleParameter = false;
+					for (const NamedParameter& parameter :
+						graph.parameters)
+					{
+						hasCompatibleParameter |=
+							CanConnectParameterToInput(
+								graph,
+								contextPinId,
+								parameter.name);
+					}
+					if (ImGui::BeginMenu(
+							"Connect Existing Variable",
+							hasCompatibleParameter))
+					{
+						for (const NamedParameter& parameter :
+							graph.parameters)
+						{
+							if (!CanConnectParameterToInput(
+									graph,
+									contextPinId,
+									parameter.name))
+								continue;
+							if (ImGui::MenuItem(
+									parameter.name.c_str()))
+								connectParameter =
+									parameter.name;
+						}
+						ImGui::EndMenu();
+					}
+				}
+				else
+				{
+					ImGui::TextDisabled(
+						"This pin type cannot be stored "
+						"as a graph variable.");
+				}
+			}
+			else
+			{
+				ImGui::TextDisabled(
+					"Connect this output to an input.");
+			}
+
+			if (!location.output &&
+				location.node->type == "Audio.RandomOneShot")
+			{
+				ImGui::Separator();
+				if (location.node->inputs.size() > 2)
+				{
+					const char* label =
+						connections.empty()
+							? "Remove Clip Input"
+							: "Disconnect and Remove Clip Input";
+					if (ImGui::MenuItem(label))
+						removeClipInput = true;
+				}
+				else
+				{
+					ImGui::TextDisabled(
+						"At least two clip inputs are required.");
+				}
+			}
+			ImGui::EndPopup();
+		}
+
+		if (removeClipInput)
+		{
+			const PinLocation location =
+				FindPin(graph, contextPinId);
+			if (location.node &&
+				location.node->type == "Audio.RandomOneShot")
+			{
+				DisconnectGraphPin(graph, contextPinId);
+				std::erase_if(
+					location.node->inputs,
+					[contextPinId](const GraphPin& pin)
+					{
+						return pin.id == contextPinId;
+					});
+				for (std::size_t index = 0;
+					index < location.node->inputs.size();
+					++index)
+				{
+					location.node->inputs[index].name =
+						"Clip " + std::to_string(index + 1);
+				}
+				MarkGraphDirty(compiled, compileFailed);
+			}
+			return;
+		}
+
+		if (disconnectAll)
+		{
+			if (DisconnectGraphPin(graph, contextPinId) > 0)
+				MarkGraphDirty(compiled, compileFailed);
+		}
+		else if (disconnectLink)
+		{
+			const std::size_t previousSize = graph.links.size();
+			std::erase_if(
+				graph.links,
+				[disconnectLink](const GraphLink& link)
+				{
+					return link.id == *disconnectLink;
+				});
+			if (graph.links.size() != previousSize)
+				MarkGraphDirty(compiled, compileFailed);
+		}
+
+		if (!parameterNodePosition)
+			return;
+		const float2 position(
+			parameterNodePosition->x,
+			parameterNodePosition->y);
+		std::optional<GraphParameterNodeResult> result;
+		if (promote)
+		{
+			result = PromoteInputToParameter(
+				graph,
+				registry,
+				contextPinId,
+				position);
+		}
+		else if (connectParameter)
+		{
+			result = ConnectParameterToInput(
+				graph,
+				registry,
+				contextPinId,
+				*connectParameter,
+				position);
+		}
+		if (result)
+		{
+			ed::SetNodePosition(
+				ed::NodeId(result->nodeId),
+				*parameterNodePosition);
+			ed::SelectNode(
+				ed::NodeId(result->nodeId),
+				false);
+			MarkGraphDirty(compiled, compileFailed);
+		}
 	}
 }
 
@@ -247,6 +680,7 @@ int main(int argc, char** argv)
 	editorConfig.SettingsFile = nullptr;
 	ed::EditorContext* nodeEditor = ed::CreateEditor(&editorConfig);
 	ed::SetCurrentEditor(nodeEditor);
+	blueprint::Apply();
 
 	ma_engine engine{};
 	ma_engine_config engineConfig = ma_engine_config_init();
@@ -267,14 +701,17 @@ int main(int argc, char** argv)
 		? std::filesystem::path(argv[1])
 		: std::filesystem::path(EGE_SOURCE_ROOT) /
 			"Game/Assets/Audio/Effects/ding.wav";
+	const AudioClipReference defaultClip =
+		parameterUi::MakeAudioClipReference(clipPath);
+	const std::vector<AudioClipReference> availableClips =
+		parameterUi::BuildAudioClipCatalog(clipPath);
 	NodeRegistry registry;
 	SoundGraphAsset graph =
-		CreateDefaultSoundGraph(registry, clipPath.string());
+		CreateDefaultSoundGraph(registry, defaultClip);
 	SoundGraphInstance instance;
 	bool compiled = instance.Load(graph, registry);
-	std::uint64_t nextNodeId = 100;
-	std::uint64_t nextPinId = 10000;
-	std::uint64_t nextLinkId = 20000;
+	bool compileFailed = !compiled;
+	std::uint64_t contextPinId = 0;
 	PlaybackHandle voice;
 	AudioTransform listener;
 	bool firstLayout = true;
@@ -298,7 +735,10 @@ int main(int argc, char** argv)
 		ImGui::SetNextWindowSize(ImVec2(1264, 744), ImGuiCond_Once);
 		ImGui::Begin("ReziAudio Graph Prototype + Runtime Instance");
 		if (ImGui::Button("Compile"))
+		{
 			compiled = instance.Load(graph, registry);
+			compileFailed = !compiled;
+		}
 		ImGui::SameLine();
 		if (ImGui::Button("Play Graph") && compiled)
 		{
@@ -317,8 +757,14 @@ int main(int argc, char** argv)
 		ImGui::TextColored(
 			compiled
 				? ImVec4(0.3f, 0.9f, 0.55f, 1)
-				: ImVec4(1.0f, 0.35f, 0.3f, 1),
-			compiled ? "Compiled" : "Compile failed");
+				: compileFailed
+					? ImVec4(1.0f, 0.35f, 0.3f, 1)
+					: ImVec4(1.0f, 0.72f, 0.25f, 1),
+			compiled
+				? "Compiled"
+				: compileFailed
+					? "Compile failed"
+					: "Graph changed - compile required");
 
 		ImGui::BeginChild("Palette", ImVec2(225, 0), true);
 		ImGui::TextUnformatted("NODE PALETTE");
@@ -339,11 +785,21 @@ int main(int argc, char** argv)
 			ImGui::PushID(descriptor.type.c_str());
 			if (ImGui::SmallButton(descriptor.displayName.c_str()))
 			{
+				std::uint64_t nextPinId =
+					NextGraphPinId(graph);
 				GraphNode node = registry.CreateNode(
-					descriptor.type, nextNodeId++, nextPinId);
+					descriptor.type,
+					NextGraphNodeId(graph),
+					nextPinId);
+				if (node.type == "Constant.Clip" &&
+					!node.inputs.empty())
+				{
+					node.inputs.front().defaultValue =
+						defaultClip;
+				}
 				node.editorPosition = float2(250, 200);
 				graph.nodes.push_back(std::move(node));
-				compiled = false;
+				MarkGraphDirty(compiled, compileFailed);
 			}
 			ImGui::PopID();
 		}
@@ -353,15 +809,18 @@ int main(int argc, char** argv)
 		ImGui::BeginGroup();
 		ImGui::BeginChild("GraphArea", ImVec2(-300, 0), true);
 		ed::Begin("ReziAudioNodeEditor");
+		bool nodeEdited = false;
 		for (GraphNode& node : graph.nodes)
-			DrawNode(node);
+			nodeEdited |= DrawNode(node, graph, availableClips);
+		if (nodeEdited)
+			MarkGraphDirty(compiled, compileFailed);
 		for (const GraphLink& link : graph.links)
 			ed::Link(
 				ed::LinkId(link.id),
 				ed::PinId(link.outputPin),
 				ed::PinId(link.inputPin),
 				ImVec4(0.35f, 0.75f, 1.0f, 1),
-				2.0f);
+				2.5f);
 
 		if (firstLayout)
 		{
@@ -382,23 +841,25 @@ int main(int argc, char** argv)
 			ed::PinId end;
 			if (ed::QueryNewLink(&start, &end))
 			{
-				bool startOutput = false;
-				bool endOutput = false;
-				GraphPin* startPin =
-					FindPin(graph, start.Get(), startOutput);
-				GraphPin* endPin =
-					FindPin(graph, end.Get(), endOutput);
-				if (startPin && endPin && startOutput != endOutput)
+				PinLocation startPin =
+					FindPin(graph, start.Get());
+				PinLocation endPin =
+					FindPin(graph, end.Get());
+				if (startPin.pin && endPin.pin &&
+					startPin.output != endPin.output)
 				{
-					if (!startOutput)
+					if (!startPin.output)
 					{
 						std::swap(startPin, endPin);
 						std::swap(start, end);
 					}
-					if (Compatible(startPin->type, endPin->type))
+					if (Compatible(
+							startPin.pin->type,
+							endPin.pin->type))
 					{
 						if (ed::AcceptNewItem(
-								PinColor(startPin->type), 2.0f))
+								PinColor(startPin.pin->type),
+								2.0f))
 						{
 							graph.links.erase(
 								std::remove_if(
@@ -410,8 +871,12 @@ int main(int argc, char** argv)
 									}),
 								graph.links.end());
 							graph.links.push_back({
-								nextLinkId++, start.Get(), end.Get()});
-							compiled = false;
+								NextGraphLinkId(graph),
+								start.Get(),
+								end.Get()});
+							MarkGraphDirty(
+								compiled,
+								compileFailed);
 						}
 					}
 					else
@@ -430,8 +895,9 @@ int main(int argc, char** argv)
 			while (ed::QueryDeletedLink(&linkId))
 			{
 				if (ed::AcceptDeletedItem())
-				graph.links.erase(
-					std::remove_if(
+				{
+					graph.links.erase(
+						std::remove_if(
 						graph.links.begin(),
 						graph.links.end(),
 						[linkId](const GraphLink& link)
@@ -439,7 +905,10 @@ int main(int argc, char** argv)
 							return link.id == linkId.Get();
 						}),
 					graph.links.end());
-				compiled = false;
+					MarkGraphDirty(
+						compiled,
+						compileFailed);
+				}
 			}
 			ed::NodeId nodeId;
 			while (ed::QueryDeletedNode(&nodeId))
@@ -447,11 +916,29 @@ int main(int argc, char** argv)
 				if (ed::AcceptDeletedItem())
 				{
 					RemoveNode(graph, nodeId.Get());
-					compiled = false;
+					MarkGraphDirty(
+						compiled,
+						compileFailed);
 				}
 			}
 		}
 		ed::EndDelete();
+
+		ed::Suspend();
+		ed::PinId contextPin;
+		if (ed::ShowPinContextMenu(&contextPin))
+		{
+			contextPinId = contextPin.Get();
+			ImGui::OpenPopup("Graph Pin Context Menu");
+		}
+		DrawPinContextMenu(
+			graph,
+			registry,
+			contextPinId,
+			compiled,
+			compileFailed);
+		ed::Resume();
+
 		ed::End();
 		ImGui::EndChild();
 		ImGui::EndGroup();
@@ -465,14 +952,14 @@ int main(int argc, char** argv)
 		ImGui::PopTextWrapPos();
 		ImGui::Separator();
 		const auto addParameter = [&](
-			const char* prefix,
-			ParameterValue value)
+			const ParameterTypeDescriptor& descriptor)
 		{
 			std::size_t suffix = graph.parameters.size() + 1;
 			std::string name;
 			do
 			{
-				name = std::string(prefix) + std::to_string(suffix++);
+				name = std::string(descriptor.defaultName) +
+					std::to_string(suffix++);
 			}
 			while (std::any_of(
 				graph.parameters.begin(),
@@ -482,39 +969,40 @@ int main(int argc, char** argv)
 					return parameter.name == name;
 				}));
 			graph.parameters.push_back(
-				{name, HashAudioParameter(name), std::move(value)});
-			compiled = false;
+				{name, HashAudioParameter(name), descriptor.defaultValue});
+			MarkGraphDirty(compiled, compileFailed);
 		};
-		if (ImGui::SmallButton("+ Float"))
-			addParameter("Float", 0.0f);
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+ Int"))
-			addParameter("Int", 0);
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+ Bool"))
-			addParameter("Bool", false);
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+ Vector"))
-			addParameter("Vector", float3::zero);
-		if (ImGui::SmallButton("+ Vector2"))
-			addParameter("Vector2", float2::zero);
-		ImGui::SameLine();
-		if (ImGui::SmallButton("+ Color"))
-			addParameter(
-				"Color", float4(1.0f, 1.0f, 1.0f, 1.0f));
+		if (ImGui::Button("+ Add Variable"))
+			ImGui::OpenPopup("Add Graph Variable");
+		if (ImGui::BeginPopup("Add Graph Variable"))
+		{
+			for (const ParameterTypeDescriptor& descriptor :
+				GetParameterTypeDescriptors())
+			{
+				if (!descriptor.availableInAudioGraph)
+					continue;
+				if (ImGui::MenuItem(
+						std::string(descriptor.displayName).c_str()))
+				{
+					addParameter(descriptor);
+				}
+			}
+			ImGui::EndPopup();
+		}
 		ImGui::TextDisabled(
 			"New variables become active after Compile.");
-		bool runtimeChanged = false;
+		ImGui::Separator();
+		ImGui::TextUnformatted("GRAPH VARIABLES");
 		std::optional<std::size_t> removeParameter;
 		for (std::size_t index = 0;
 			index < graph.parameters.size();
 			++index)
 		{
-			NamedParameter& parameter = graph.parameters[index];
-			runtimeChanged |= DrawParameterEditor(parameter, instance);
-			ImGui::SameLine();
+			const NamedParameter& parameter = graph.parameters[index];
 			ImGui::PushID(static_cast<int>(index + 100000));
-			if (ImGui::SmallButton("x"))
+			ImGui::TextUnformatted(parameter.name.c_str());
+			ImGui::SameLine();
+			if (ImGui::SmallButton("x##RemoveGraphVariable"))
 				removeParameter = index;
 			ImGui::PopID();
 		}
@@ -522,7 +1010,21 @@ int main(int argc, char** argv)
 		{
 			graph.parameters.erase(
 				graph.parameters.begin() + *removeParameter);
-			compiled = false;
+			MarkGraphDirty(compiled, compileFailed);
+		}
+		ImGui::Separator();
+		ImGui::TextUnformatted("COMPILED RUNTIME PARAMETERS");
+		if (!compiled)
+			ImGui::TextDisabled(
+				"Showing the last compiled parameter set.");
+		bool runtimeChanged = false;
+		for (const NamedParameter& parameter :
+			instance.Parameters().Definitions())
+		{
+			runtimeChanged |= DrawParameterEditor(
+				parameter,
+				instance,
+				availableClips);
 		}
 		if (runtimeChanged && compiled && voice.IsValid())
 		{

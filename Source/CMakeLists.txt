@@ -264,6 +264,40 @@ if(EGE_BUILD_TESTS)
 		NAME ReziAudioGraphLabSmoke
 		COMMAND ReziAudioGraphLab --smoke)
 
+	add_executable(ReziAudioDspGraphLab
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioDspGraph.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioDspGraph.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioMiniaudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioSystem.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioBackend.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/ReziAudioTypes.h"
+		"${CMAKE_CURRENT_SOURCE_DIR}/miniaudio_impl.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Tests/ReziAudioDspGraphLab.cpp")
+	target_compile_features(ReziAudioDspGraphLab PRIVATE cxx_std_20)
+	target_compile_definitions(
+		ReziAudioDspGraphLab
+		PRIVATE
+			NOMINMAX
+			EGE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+	target_link_libraries(
+		ReziAudioDspGraphLab
+		PRIVATE
+			SDL2-static
+			EGE::GLEW
+			EGE::ImGui
+			EGE::NodeEditor
+			EGE::miniaudio
+			EGE::MathGeoLib
+			opengl32)
+	set_target_properties(ReziAudioDspGraphLab PROPERTIES
+		FOLDER "Tests/Interactive"
+		RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin")
+	add_test(
+		NAME ReziAudioDspGraphLabSmoke
+		COMMAND ReziAudioDspGraphLab --smoke)
+
     add_executable(ScriptingBackendTests
         "${CMAKE_CURRENT_SOURCE_DIR}/Config.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Config.h"

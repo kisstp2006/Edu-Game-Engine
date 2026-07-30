@@ -46,6 +46,31 @@ namespace EGE::ReziAudio
 		virtual bool Play(PlaybackHandle handle) = 0;
 		virtual bool Pause(PlaybackHandle handle) = 0;
 		virtual bool Stop(PlaybackHandle handle) = 0;
+		virtual bool FadeTo(
+			PlaybackHandle,
+			float,
+			float)
+		{
+			return false;
+		}
+		virtual bool StopWithFade(PlaybackHandle, float)
+		{
+			return false;
+		}
+		virtual bool SeekSeconds(PlaybackHandle, float)
+		{
+			return false;
+		}
+		[[nodiscard]] virtual float GetPlaybackSeconds(
+			PlaybackHandle) const
+		{
+			return 0.0f;
+		}
+		[[nodiscard]] virtual float GetPlaybackLengthSeconds(
+			PlaybackHandle) const
+		{
+			return 0.0f;
+		}
 		virtual bool SetSettings(
 			PlaybackHandle handle,
 			const VoiceSettings& settings) = 0;

@@ -44,12 +44,16 @@ namespace EGE::ReziAudio
 
 		std::size_t RequiredInputs(DspNodeType type)
 		{
-			switch (type)
-			{
-			case DspNodeType::WavePlayer: return 0;
-			case DspNodeType::Mixer: return 1;
-			default: return 1;
-			}
+			const DspNodeDescriptor* descriptor =
+				FindDspNodeDescriptor(type);
+			return descriptor ? descriptor->minimumInputs : 1;
+		}
+
+		std::size_t MaximumInputs(DspNodeType type)
+		{
+			const DspNodeDescriptor* descriptor =
+				FindDspNodeDescriptor(type);
+			return descriptor ? descriptor->maximumInputs : 1;
 		}
 
 		bool DecodeClip(
@@ -115,12 +119,32 @@ namespace EGE::ReziAudio
 			std::vector<float> clipSamples;
 			std::uint64_t clipFrames = 0;
 			std::uint64_t clipCursor = 0;
+			std::uint64_t clipStartFrame = 0;
+			std::uint32_t completedLoops = 0;
 			std::vector<float> delayBuffer;
 			std::size_t delayCursor = 0;
 			std::array<DelayLine, 12> reverbLines;
 			std::array<float, 2> lowPassState{};
 			std::array<float, 2> highPassInput{};
 			std::array<float, 2> highPassOutput{};
+			float oscillatorPhase = 0.0f;
+			bool resetPhaseWasActive = false;
+			std::uint32_t noiseState = 1;
+			int noiseSeed = std::numeric_limits<int>::min();
+			int noiseType = -1;
+			std::array<float, 16> pinkBins{};
+			float pinkSum = 0.0f;
+			std::uint32_t pinkCounter = 1;
+			float brownValue = 0.0f;
+			float envelopeValue = 0.0f;
+			std::uint8_t envelopeState = 0;
+			bool envelopeTriggerWasActive = false;
+			double triggerElapsed = 0.0;
+			bool triggerRunning = false;
+			bool controlTriggerWasActive = false;
+			bool controlResetWasActive = false;
+			int triggerCount = 0;
+			float triggerValue = 0.0f;
 
 			void AddParameter(const char* name, float value)
 			{
@@ -253,7 +277,9 @@ namespace EGE::ReziAudio
 					nodes[command.nodeIndex].SetParameter(
 						command.parameter, command.value);
 					loopChanged |=
-						command.parameter == ParameterHash("Loop");
+						command.parameter == ParameterHash("Loop") ||
+						command.parameter == ParameterHash("LoopCount") ||
+						command.parameter == ParameterHash("Running");
 				}
 			}
 			if (loopChanged)
@@ -261,9 +287,18 @@ namespace EGE::ReziAudio
 				bool anyLooping = false;
 				for (const RuntimeNode& node : nodes)
 				{
-					anyLooping |=
+					const bool infiniteWave =
 						node.type == DspNodeType::WavePlayer &&
-						node.GetParameter("Loop", 0.0f) >= 0.5f;
+						node.GetParameter("Loop", 0.0f) >= 0.5f &&
+						node.GetParameter("LoopCount", -1.0f) < 0.0f;
+					const bool infiniteGenerator =
+						node.type == DspNodeType::SineOscillator ||
+						node.type == DspNodeType::NoiseGenerator ||
+						(node.type == DspNodeType::RepeatTrigger &&
+						 node.GetParameter("Running", 1.0f) >= 0.5f) ||
+						(node.type == DspNodeType::ADEnvelope &&
+						 node.GetParameter("Loop", 0.0f) >= 0.5f);
+					anyLooping |= infiniteWave || infiniteGenerator;
 				}
 				looping.store(anyLooping, std::memory_order_release);
 			}
@@ -286,7 +321,10 @@ namespace EGE::ReziAudio
 				{
 					node.clipCursor = node.clipFrames == 0
 						? 0
-						: std::min(requested, node.clipFrames);
+						: std::min(
+							node.clipStartFrame + requested,
+							node.clipFrames);
+					node.completedLoops = 0;
 				}
 				std::fill(
 					node.delayBuffer.begin(),
@@ -296,6 +334,27 @@ namespace EGE::ReziAudio
 				node.lowPassState = {};
 				node.highPassInput = {};
 				node.highPassOutput = {};
+				node.oscillatorPhase =
+					node.GetParameter("PhaseOffset", 0.0f);
+				node.resetPhaseWasActive = false;
+				node.noiseSeed = std::numeric_limits<int>::min();
+				node.envelopeValue = 0.0f;
+				const bool envelopeStartsTriggered =
+					node.inputCount == 0 &&
+					node.GetParameter("Trigger", 0.0f) >= 0.5f;
+				node.envelopeState =
+					envelopeStartsTriggered
+						? 1
+						: 0;
+				node.envelopeTriggerWasActive =
+					envelopeStartsTriggered;
+				node.triggerElapsed = 0.0;
+				node.triggerRunning = false;
+				node.controlTriggerWasActive = false;
+				node.controlResetWasActive = false;
+				node.triggerCount = 0;
+				node.triggerValue =
+					node.GetParameter("StartValue", 0.0f);
 				for (DelayLine& line : node.reverbLines)
 				{
 					std::fill(
@@ -315,12 +374,23 @@ namespace EGE::ReziAudio
 		{
 			const bool looping =
 				node.GetParameter("Loop", 0.0f) >= 0.5f;
+			const int loopCount = static_cast<int>(
+				std::round(node.GetParameter("LoopCount", -1.0f)));
 			for (std::uint32_t frame = 0; frame < frames; ++frame)
 			{
 				if (node.clipCursor >= node.clipFrames)
 				{
-					if (looping && node.clipFrames != 0)
-						node.clipCursor = 0;
+					const bool canLoop =
+						looping &&
+						node.clipFrames != 0 &&
+						(loopCount < 0 ||
+						 node.completedLoops <
+							static_cast<std::uint32_t>(loopCount));
+					if (canLoop)
+					{
+						node.clipCursor = node.clipStartFrame;
+						++node.completedLoops;
+					}
 					else
 					{
 						for (std::uint32_t channel = 0;
@@ -346,6 +416,419 @@ namespace EGE::ReziAudio
 						node.clipSamples[source + channel];
 				}
 				++node.clipCursor;
+			}
+		}
+
+		void ProcessSine(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			const float frequency = std::clamp(
+				node.GetParameter("Frequency", 440.0f),
+				0.0f,
+				sampleRate * 0.45f);
+			const float phaseOffset =
+				node.GetParameter("PhaseOffset", 0.0f);
+			const bool reset =
+				node.GetParameter("ResetPhase", 0.0f) >= 0.5f;
+			if (reset && !node.resetPhaseWasActive)
+				node.oscillatorPhase = phaseOffset;
+			node.resetPhaseWasActive = reset;
+			const float increment =
+				2.0f * Pi * frequency / sampleRate;
+			for (std::uint32_t frame = 0; frame < frames; ++frame)
+			{
+				const float sample = std::sin(node.oscillatorPhase);
+				for (std::uint32_t channel = 0;
+					channel < channels;
+					++channel)
+				{
+					output[
+						static_cast<std::size_t>(frame) *
+							channels + channel] = sample;
+				}
+				node.oscillatorPhase =
+					std::fmod(node.oscillatorPhase + increment, 2.0f * Pi);
+			}
+		}
+
+		static float NextWhiteNoise(RuntimeNode& node) noexcept
+		{
+			std::uint32_t value = node.noiseState;
+			value ^= value << 13;
+			value ^= value >> 17;
+			value ^= value << 5;
+			node.noiseState = value == 0 ? 1 : value;
+			return static_cast<float>(
+				static_cast<std::int32_t>(node.noiseState)) /
+				2147483648.0f;
+		}
+
+		void ResetNoise(RuntimeNode& node, int seed, int type) noexcept
+		{
+			node.noiseSeed = seed;
+			node.noiseType = type;
+			node.noiseState = seed < 0
+				? static_cast<std::uint32_t>(
+					node.id ^ 0x9E3779B9u)
+				: static_cast<std::uint32_t>(seed);
+			if (node.noiseState == 0)
+				node.noiseState = 1;
+			node.pinkBins = {};
+			node.pinkSum = 0.0f;
+			node.pinkCounter = 1;
+			node.brownValue = 0.0f;
+		}
+
+		float NextNoise(RuntimeNode& node) noexcept
+		{
+			if (node.noiseType == 1)
+			{
+				std::uint32_t counter = node.pinkCounter++;
+				std::uint32_t bin = 0;
+				while ((counter & 1u) == 0u && bin < 15)
+				{
+					counter >>= 1;
+					++bin;
+				}
+				const float next = NextWhiteNoise(node);
+				node.pinkSum += next - node.pinkBins[bin];
+				node.pinkBins[bin] = next;
+				return std::clamp(
+					(node.pinkSum + NextWhiteNoise(node)) / 5.0f,
+					-1.0f,
+					1.0f);
+			}
+			if (node.noiseType == 2)
+			{
+				node.brownValue = std::clamp(
+					node.brownValue * 0.98f +
+						NextWhiteNoise(node) * 0.02f,
+					-1.0f,
+					1.0f);
+				return node.brownValue * 3.5f;
+			}
+			return NextWhiteNoise(node);
+		}
+
+		void ProcessNoise(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			const int seed = static_cast<int>(
+				std::round(node.GetParameter("Seed", -1.0f)));
+			const int type = std::clamp(
+				static_cast<int>(
+					std::round(node.GetParameter("Type", 0.0f))),
+				0,
+				2);
+			if (seed != node.noiseSeed || type != node.noiseType)
+				ResetNoise(node, seed, type);
+			for (std::uint32_t frame = 0; frame < frames; ++frame)
+			{
+				const float sample = NextNoise(node);
+				for (std::uint32_t channel = 0;
+					channel < channels;
+					++channel)
+				{
+					output[
+						static_cast<std::size_t>(frame) *
+							channels + channel] = sample;
+				}
+			}
+		}
+
+		void ProcessRepeatTrigger(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			std::fill(
+				output,
+				output + static_cast<std::size_t>(frames) * channels,
+				0.0f);
+			const bool running =
+				node.GetParameter("Running", 1.0f) >= 0.5f;
+			if (!running)
+			{
+				node.triggerRunning = false;
+				node.triggerElapsed = 0.0;
+				return;
+			}
+			const double period = std::max(
+				static_cast<double>(
+					node.GetParameter("Period", 0.5f)),
+				1.0 / sampleRate);
+			for (std::uint32_t frame = 0; frame < frames; ++frame)
+			{
+				const bool fire =
+					!node.triggerRunning ||
+					node.triggerElapsed >= period;
+				if (fire)
+				{
+					node.triggerRunning = true;
+					node.triggerElapsed = 0.0;
+					for (std::uint32_t channel = 0;
+						channel < channels;
+						++channel)
+					{
+						output[
+							static_cast<std::size_t>(frame) *
+								channels + channel] = 1.0f;
+					}
+				}
+				node.triggerElapsed += 1.0 / sampleRate;
+			}
+		}
+
+		void ProcessDelayedTrigger(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			std::fill(
+				output,
+				output + static_cast<std::size_t>(frames) * channels,
+				0.0f);
+			const bool trigger =
+				node.GetParameter("Trigger", 1.0f) >= 0.5f;
+			const bool reset =
+				node.GetParameter("Reset", 0.0f) >= 0.5f;
+			if (reset && !node.controlResetWasActive)
+			{
+				node.triggerRunning = false;
+				node.triggerElapsed = 0.0;
+			}
+			if (trigger && !node.controlTriggerWasActive)
+			{
+				node.triggerRunning = true;
+				node.triggerElapsed = 0.0;
+			}
+			node.controlTriggerWasActive = trigger;
+			node.controlResetWasActive = reset;
+
+			const double delay = std::max(
+				static_cast<double>(
+					node.GetParameter("Delay", 0.25f)),
+				0.0);
+			for (std::uint32_t frame = 0; frame < frames; ++frame)
+			{
+				if (!node.triggerRunning)
+					break;
+				if (node.triggerElapsed >= delay)
+				{
+					for (std::uint32_t channel = 0;
+						channel < channels;
+						++channel)
+					{
+						output[
+							static_cast<std::size_t>(frame) *
+								channels + channel] = 1.0f;
+					}
+					node.triggerRunning = false;
+					node.triggerElapsed = 0.0;
+					break;
+				}
+				node.triggerElapsed += 1.0 / sampleRate;
+			}
+		}
+
+		void ProcessTriggerCounter(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			const float* input = node.inputCount > 0
+				? Buffer(node.inputs[0])
+				: nullptr;
+			for (std::uint32_t frame = 0; frame < frames; ++frame)
+			{
+				const bool parameterTrigger =
+					node.GetParameter("Trigger", 0.0f) >= 0.5f;
+				const bool inputTrigger =
+					input &&
+					input[
+						static_cast<std::size_t>(frame) *
+							channels] >= 0.5f;
+				const bool trigger = parameterTrigger || inputTrigger;
+				const bool reset =
+					node.GetParameter("Reset", 0.0f) >= 0.5f;
+				if (reset && !node.controlResetWasActive)
+				{
+					node.triggerCount = 0;
+					node.triggerValue =
+						node.GetParameter("StartValue", 0.0f);
+				}
+				if (trigger && !node.controlTriggerWasActive)
+				{
+					++node.triggerCount;
+					node.triggerValue =
+						node.GetParameter("StartValue", 0.0f) +
+						node.GetParameter("StepSize", 1.0f) *
+							node.triggerCount;
+					const int resetCount = static_cast<int>(std::round(
+						node.GetParameter("ResetCount", 0.0f)));
+					if (resetCount > 0 &&
+						node.triggerCount >= resetCount)
+					{
+						node.triggerCount = 0;
+						node.triggerValue =
+							node.GetParameter("StartValue", 0.0f);
+					}
+				}
+				node.controlTriggerWasActive = trigger;
+				node.controlResetWasActive = reset;
+				for (std::uint32_t channel = 0;
+					channel < channels;
+					++channel)
+				{
+					output[
+						static_cast<std::size_t>(frame) *
+							channels + channel] = node.triggerValue;
+				}
+			}
+		}
+
+		void ProcessADEnvelope(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			const float* triggerInput = node.inputCount > 0
+				? Buffer(node.inputs[0])
+				: nullptr;
+			const float attack = std::max(
+				node.GetParameter("Attack", 0.01f), 0.0f);
+			const float decay = std::max(
+				node.GetParameter("Decay", 0.25f), 0.0f);
+			const float attackStep = attack <= 0.0f
+				? 1.0f
+				: 1.0f / (attack * sampleRate);
+			const float decayStep = decay <= 0.0f
+				? 1.0f
+				: 1.0f / (decay * sampleRate);
+			const float attackCurve = std::max(
+				node.GetParameter("AttackCurve", 1.0f), 0.01f);
+			const float decayCurve = std::max(
+				node.GetParameter("DecayCurve", 1.0f), 0.01f);
+			const bool looping =
+				node.GetParameter("Loop", 0.0f) >= 0.5f;
+
+			for (std::uint32_t frame = 0; frame < frames; ++frame)
+			{
+				const bool trigger = triggerInput
+					? triggerInput[
+						static_cast<std::size_t>(frame) *
+							channels] >= 0.5f
+					: node.GetParameter("Trigger", 0.0f) >= 0.5f;
+				if (trigger && !node.envelopeTriggerWasActive)
+					node.envelopeState = 1;
+				node.envelopeTriggerWasActive = trigger;
+				float shaped = 0.0f;
+				if (node.envelopeState == 1)
+				{
+					node.envelopeValue = std::min(
+						1.0f, node.envelopeValue + attackStep);
+					shaped = std::pow(
+						node.envelopeValue, attackCurve);
+					if (node.envelopeValue >= 1.0f)
+						node.envelopeState = 2;
+				}
+				else if (node.envelopeState == 2)
+				{
+					node.envelopeValue = std::max(
+						0.0f, node.envelopeValue - decayStep);
+					shaped = 1.0f - std::pow(
+						1.0f - node.envelopeValue,
+						decayCurve);
+					if (node.envelopeValue <= 0.0f)
+						node.envelopeState = looping ? 1 : 0;
+				}
+				for (std::uint32_t channel = 0;
+					channel < channels;
+					++channel)
+				{
+					output[
+						static_cast<std::size_t>(frame) *
+							channels + channel] = shaped;
+				}
+			}
+		}
+
+		void ProcessAudioMath(
+			const RuntimeNode& node,
+			float* output,
+			std::uint32_t sampleCount) noexcept
+		{
+			const float* first = Buffer(node.inputs[0]);
+			const float* second = node.inputCount > 1
+				? Buffer(node.inputs[1])
+				: nullptr;
+			const float minimum = std::min(
+				node.GetParameter("Minimum", -1.0f),
+				node.GetParameter("Maximum", 1.0f));
+			const float maximum = std::max(
+				node.GetParameter("Minimum", -1.0f),
+				node.GetParameter("Maximum", 1.0f));
+			for (std::uint32_t sample = 0;
+				sample < sampleCount;
+				++sample)
+			{
+				switch (node.type)
+				{
+				case DspNodeType::AudioAdd:
+					output[sample] = first[sample] + second[sample];
+					break;
+				case DspNodeType::AudioSubtract:
+					output[sample] = first[sample] - second[sample];
+					break;
+				case DspNodeType::AudioMultiply:
+					output[sample] = first[sample] * second[sample];
+					break;
+				case DspNodeType::AudioMinimum:
+					output[sample] =
+						std::min(first[sample], second[sample]);
+					break;
+				case DspNodeType::AudioMaximum:
+					output[sample] =
+						std::max(first[sample], second[sample]);
+					break;
+				case DspNodeType::AudioClamp:
+					output[sample] = std::clamp(
+						first[sample], minimum, maximum);
+					break;
+				case DspNodeType::AudioMapRange:
+				{
+					const float inputMinimum =
+						node.GetParameter("InputMinimum", -1.0f);
+					const float inputMaximum =
+						node.GetParameter("InputMaximum", 1.0f);
+					const float outputMinimum =
+						node.GetParameter("OutputMinimum", -1.0f);
+					const float outputMaximum =
+						node.GetParameter("OutputMaximum", 1.0f);
+					const float range = inputMaximum - inputMinimum;
+					float alpha = std::abs(range) > 0.000001f
+						? (first[sample] - inputMinimum) / range
+						: 0.0f;
+					if (node.GetParameter("Clamped", 1.0f) >= 0.5f)
+						alpha = std::clamp(alpha, 0.0f, 1.0f);
+					output[sample] =
+						outputMinimum +
+						(outputMaximum - outputMinimum) * alpha;
+					break;
+				}
+				case DspNodeType::AudioOffset:
+					output[sample] =
+						first[sample] +
+						node.GetParameter("Value", 0.0f);
+					break;
+				default:
+					output[sample] = first[sample];
+					break;
+				}
 			}
 		}
 
@@ -536,16 +1019,33 @@ namespace EGE::ReziAudio
 			float* output,
 			std::uint32_t frames) noexcept
 		{
+			const std::size_t capacityFrames =
+				node.delayBuffer.empty()
+					? 0
+					: node.delayBuffer.size() / channels;
+			const std::size_t preDelayFrames = capacityFrames == 0
+				? 0
+				: std::min<std::size_t>(
+					static_cast<std::size_t>(
+						std::max(
+							0.0f,
+							node.GetParameter("PreDelay", 25.0f)) *
+						0.001f * sampleRate),
+					capacityFrames - 1);
 			const float room = std::clamp(
 				node.GetParameter("RoomSize", 0.65f), 0.0f, 0.98f);
 			const float damping = std::clamp(
 				node.GetParameter("Damping", 0.35f), 0.0f, 0.98f);
+			const float width = std::clamp(
+				node.GetParameter("Width", 1.0f), 0.0f, 1.0f);
 			const float wet = std::clamp(
 				node.GetParameter("Wet", 0.3f), 0.0f, 1.0f);
 			const float dry = std::clamp(
 				node.GetParameter("Dry", 0.8f), 0.0f, 1.0f);
 			for (std::uint32_t frame = 0; frame < frames; ++frame)
 			{
+				std::array<float, 2> reverberated{};
+				std::array<float, 2> dryInput{};
 				for (std::uint32_t channel = 0;
 					channel < channels;
 					++channel)
@@ -553,25 +1053,59 @@ namespace EGE::ReziAudio
 					const std::size_t index =
 						static_cast<std::size_t>(frame) *
 							channels + channel;
+					dryInput[channel] = input[index];
+					float reverbInput = input[index];
+					if (capacityFrames != 0 && preDelayFrames != 0)
+					{
+						const std::size_t readFrame =
+							(node.delayCursor +
+							 capacityFrames -
+							 preDelayFrames) %
+							capacityFrames;
+						const std::size_t read =
+							readFrame * channels + channel;
+						const std::size_t write =
+							node.delayCursor * channels + channel;
+						reverbInput = node.delayBuffer[read];
+						node.delayBuffer[write] = input[index];
+					}
 					const std::size_t base = channel * 6;
-					float reverberated = 0.0f;
 					for (std::size_t comb = 0; comb < 4; ++comb)
 					{
-						reverberated += ProcessComb(
+						reverberated[channel] += ProcessComb(
 							node.reverbLines[base + comb],
-							input[index],
+							reverbInput,
 							room,
 							damping);
 					}
-					reverberated *= 0.25f;
-					reverberated = ProcessAllPass(
+					reverberated[channel] *= 0.25f;
+					reverberated[channel] = ProcessAllPass(
 						node.reverbLines[base + 4],
-						reverberated);
-					reverberated = ProcessAllPass(
+						reverberated[channel]);
+					reverberated[channel] = ProcessAllPass(
 						node.reverbLines[base + 5],
-						reverberated);
-					output[index] =
-						input[index] * dry + reverberated * wet;
+						reverberated[channel]);
+				}
+				if (capacityFrames != 0 && preDelayFrames != 0)
+				node.delayCursor =
+					(node.delayCursor + 1) % capacityFrames;
+				if (channels == 2)
+				{
+					const float same = wet * (0.5f + width * 0.5f);
+					const float cross = wet * (0.5f - width * 0.5f);
+					output[frame * 2] =
+						dryInput[0] * dry +
+						reverberated[0] * same +
+						reverberated[1] * cross;
+					output[frame * 2 + 1] =
+						dryInput[1] * dry +
+						reverberated[1] * same +
+						reverberated[0] * cross;
+				}
+				else
+				{
+					output[frame] =
+						dryInput[0] * dry + reverberated[0] * wet;
 				}
 			}
 		}
@@ -621,6 +1155,24 @@ namespace EGE::ReziAudio
 				case DspNodeType::WavePlayer:
 					ProcessWave(node, output, frames);
 					break;
+				case DspNodeType::SineOscillator:
+					ProcessSine(node, output, frames);
+					break;
+				case DspNodeType::NoiseGenerator:
+					ProcessNoise(node, output, frames);
+					break;
+				case DspNodeType::ADEnvelope:
+					ProcessADEnvelope(node, output, frames);
+					break;
+				case DspNodeType::RepeatTrigger:
+					ProcessRepeatTrigger(node, output, frames);
+					break;
+				case DspNodeType::DelayedTrigger:
+					ProcessDelayedTrigger(node, output, frames);
+					break;
+				case DspNodeType::TriggerCounter:
+					ProcessTriggerCounter(node, output, frames);
+					break;
 				case DspNodeType::Gain:
 					ProcessGain(node, input, output, sampleCount);
 					break;
@@ -641,6 +1193,16 @@ namespace EGE::ReziAudio
 					break;
 				case DspNodeType::Mixer:
 					ProcessMixer(node, output, sampleCount);
+					break;
+				case DspNodeType::AudioAdd:
+				case DspNodeType::AudioSubtract:
+				case DspNodeType::AudioMultiply:
+				case DspNodeType::AudioMinimum:
+				case DspNodeType::AudioMaximum:
+				case DspNodeType::AudioClamp:
+				case DspNodeType::AudioMapRange:
+				case DspNodeType::AudioOffset:
+					ProcessAudioMath(node, output, sampleCount);
 					break;
 				case DspNodeType::Output:
 					std::memcpy(
@@ -709,10 +1271,11 @@ namespace EGE::ReziAudio
 			indegree[node.id] = 0;
 			if (node.inputs.size() < RequiredInputs(node.type))
 				error(node.id, "The DSP node has too few audio inputs.");
-			if (node.type != DspNodeType::Mixer &&
-				node.inputs.size() > RequiredInputs(node.type))
+			if (node.inputs.size() > MaximumInputs(node.type))
 			{
-				error(node.id, "This DSP node accepts only one audio input.");
+				error(
+					node.id,
+					"The DSP node has too many audio inputs.");
 			}
 			if (node.inputs.size() > MaxNodeInputs)
 				error(node.id, "A DSP node supports at most eight inputs.");
@@ -779,6 +1342,7 @@ namespace EGE::ReziAudio
 		implementation->blockFrames = asset.blockFrames;
 		implementation->nodes.reserve(order.size());
 		std::unordered_map<std::uint64_t, std::uint32_t> runtimeIndices;
+		std::unordered_map<std::uint64_t, std::uint64_t> pathLengths;
 		std::uint64_t maximumClipFrames = 0;
 		std::uint64_t maximumTailFrames = 0;
 
@@ -790,16 +1354,31 @@ namespace EGE::ReziAudio
 			runtime.type = source.type;
 			for (const std::uint64_t input : source.inputs)
 				runtime.inputs[runtime.inputCount++] = runtimeIndices[input];
+			std::uint64_t inputLength = 0;
+			for (const std::uint64_t input : source.inputs)
+			{
+				inputLength = std::max(
+					inputLength, pathLengths[input]);
+			}
+			std::uint64_t nodeLength = inputLength;
+			for (const DspParameterDescriptor& descriptor :
+				GetDspParameterDescriptors(source.type))
+			{
+				runtime.AddParameter(
+					descriptor.name.data(),
+					Parameter(
+						source,
+						descriptor.name.data(),
+						descriptor.defaultValue));
+			}
 
 			switch (source.type)
 			{
 			case DspNodeType::WavePlayer:
 			{
-				runtime.AddParameter(
-					"Loop", Parameter(source, "Loop", 0.0f));
-				if (source.clipPath.empty() ||
+				if (source.clip.resolvedSource.empty() ||
 					!DecodeClip(
-						source.clipPath,
+						source.clip.resolvedSource,
 						asset.channels,
 						asset.sampleRate,
 						runtime.clipSamples,
@@ -810,36 +1389,93 @@ namespace EGE::ReziAudio
 				}
 				maximumClipFrames =
 					std::max(maximumClipFrames, runtime.clipFrames);
+				runtime.clipStartFrame = std::min<std::uint64_t>(
+					static_cast<std::uint64_t>(
+						std::max(
+							0.0f,
+							runtime.GetParameter("StartTime", 0.0f)) *
+						asset.sampleRate),
+					runtime.clipFrames);
+				runtime.clipCursor = runtime.clipStartFrame;
+				const int loopCount = static_cast<int>(std::round(
+					runtime.GetParameter("LoopCount", -1.0f)));
+				const std::uint64_t playableFrames =
+					runtime.clipFrames - runtime.clipStartFrame;
+				nodeLength = playableFrames;
+				if (runtime.GetParameter("Loop", 0.0f) >= 0.5f &&
+					loopCount >= 0)
+				{
+					nodeLength = playableFrames *
+						static_cast<std::uint64_t>(loopCount + 1);
+					maximumClipFrames = std::max(
+						maximumClipFrames,
+						playableFrames *
+							static_cast<std::uint64_t>(loopCount + 1));
+				}
 				break;
 			}
 			case DspNodeType::Gain:
-				runtime.AddParameter(
-					"Gain", Parameter(source, "Gain", 1.0f));
-				break;
 			case DspNodeType::Pan:
-				runtime.AddParameter(
-					"Pan", Parameter(source, "Pan", 0.0f));
-				break;
 			case DspNodeType::LowPass:
-				runtime.AddParameter(
-					"Cutoff", Parameter(source, "Cutoff", 12000.0f));
-				break;
 			case DspNodeType::HighPass:
-				runtime.AddParameter(
-					"Cutoff", Parameter(source, "Cutoff", 80.0f));
+			case DspNodeType::AudioAdd:
+			case DspNodeType::AudioSubtract:
+			case DspNodeType::AudioMultiply:
+			case DspNodeType::AudioMinimum:
+			case DspNodeType::AudioMaximum:
+			case DspNodeType::AudioClamp:
+			case DspNodeType::AudioMapRange:
+			case DspNodeType::AudioOffset:
 				break;
+			case DspNodeType::SineOscillator:
+				runtime.oscillatorPhase =
+					runtime.GetParameter("PhaseOffset", 0.0f);
+				break;
+			case DspNodeType::NoiseGenerator:
+				break;
+			case DspNodeType::RepeatTrigger:
+				break;
+			case DspNodeType::DelayedTrigger:
+				nodeLength =
+					static_cast<std::uint64_t>(
+						std::max(
+							0.0f,
+							runtime.GetParameter("Delay", 0.25f)) *
+						asset.sampleRate) + 1;
+				maximumClipFrames = std::max(
+					maximumClipFrames, nodeLength);
+				break;
+			case DspNodeType::TriggerCounter:
+				nodeLength = std::max<std::uint64_t>(
+					nodeLength, asset.blockFrames);
+				maximumClipFrames = std::max(
+					maximumClipFrames, nodeLength);
+				break;
+			case DspNodeType::ADEnvelope:
+			{
+				const float duration =
+					std::max(
+						0.0f,
+						runtime.GetParameter("Attack", 0.01f)) +
+					std::max(
+						0.0f,
+						runtime.GetParameter("Decay", 0.25f));
+				maximumClipFrames = std::max<std::uint64_t>(
+					maximumClipFrames,
+					static_cast<std::uint64_t>(
+						std::max(duration, 1.0f / asset.sampleRate) *
+						asset.sampleRate));
+				nodeLength += static_cast<std::uint64_t>(
+					std::max(duration, 1.0f / asset.sampleRate) *
+					asset.sampleRate);
+				break;
+			}
 			case DspNodeType::Delay:
 			{
 				const float maximumDelay = std::clamp(
 					Parameter(source, "MaxDelay", 2.0f),
 					0.05f,
 					10.0f);
-				runtime.AddParameter(
-					"Time", Parameter(source, "Time", 0.25f));
-				runtime.AddParameter(
-					"Feedback", Parameter(source, "Feedback", 0.35f));
-				runtime.AddParameter(
-					"Mix", Parameter(source, "Mix", 0.3f));
 				const std::size_t delayFrames =
 					static_cast<std::size_t>(
 						maximumDelay * asset.sampleRate) + 1;
@@ -849,18 +1485,17 @@ namespace EGE::ReziAudio
 					maximumTailFrames,
 					static_cast<std::uint64_t>(
 						maximumDelay * asset.sampleRate));
+				nodeLength += static_cast<std::uint64_t>(
+					maximumDelay * asset.sampleRate);
 				break;
 			}
 			case DspNodeType::Reverb:
 			{
-				runtime.AddParameter(
-					"RoomSize", Parameter(source, "RoomSize", 0.65f));
-				runtime.AddParameter(
-					"Damping", Parameter(source, "Damping", 0.35f));
-				runtime.AddParameter(
-					"Wet", Parameter(source, "Wet", 0.3f));
-				runtime.AddParameter(
-					"Dry", Parameter(source, "Dry", 0.8f));
+				const std::size_t preDelayFrames =
+					static_cast<std::size_t>(
+						0.5f * asset.sampleRate) + 1;
+				runtime.delayBuffer.resize(
+					preDelayFrames * asset.channels, 0.0f);
 				const std::array<int, 6> lengths{
 					1557, 1617, 1491, 1422, 225, 556};
 				for (std::uint32_t channel = 0;
@@ -885,12 +1520,12 @@ namespace EGE::ReziAudio
 				maximumTailFrames = std::max<std::uint64_t>(
 					maximumTailFrames,
 					static_cast<std::uint64_t>(asset.sampleRate) * 3);
+				nodeLength +=
+					static_cast<std::uint64_t>(asset.sampleRate) * 3 +
+					static_cast<std::uint64_t>(asset.sampleRate / 2);
 				break;
 			}
 			case DspNodeType::Mixer:
-				runtime.AddParameter(
-					"Gain", Parameter(source, "Gain", 1.0f));
-				break;
 			case DspNodeType::Output:
 				break;
 			}
@@ -898,6 +1533,7 @@ namespace EGE::ReziAudio
 			const std::uint32_t runtimeIndex =
 				static_cast<std::uint32_t>(implementation->nodes.size());
 			runtimeIndices[id] = runtimeIndex;
+			pathLengths[id] = nodeLength;
 			implementation->nodes.push_back(std::move(runtime));
 		}
 
@@ -905,21 +1541,37 @@ namespace EGE::ReziAudio
 			runtimeIndices[asset.outputNode];
 		for (const RuntimeNode& node : implementation->nodes)
 		{
-			if (node.type == DspNodeType::WavePlayer &&
-				node.GetParameter("Loop", 0.0f) >= 0.5f)
+			const bool infiniteWave =
+				node.type == DspNodeType::WavePlayer &&
+				node.GetParameter("Loop", 0.0f) >= 0.5f &&
+				node.GetParameter("LoopCount", -1.0f) < 0.0f;
+			const bool infiniteGenerator =
+				node.type == DspNodeType::SineOscillator ||
+				node.type == DspNodeType::NoiseGenerator ||
+				(node.type == DspNodeType::RepeatTrigger &&
+				 node.GetParameter("Running", 1.0f) >= 0.5f) ||
+				(node.type == DspNodeType::ADEnvelope &&
+				 node.GetParameter("Loop", 0.0f) >= 0.5f);
+			if (infiniteWave || infiniteGenerator)
 			{
 				implementation->looping.store(
 					true, std::memory_order_release);
 				break;
 			}
 		}
+		const auto outputLength =
+			pathLengths.find(asset.outputNode);
 		implementation->lengthFrames =
-			maximumClipFrames + maximumTailFrames;
+			outputLength != pathLengths.end()
+				? outputLength->second
+				: maximumClipFrames + maximumTailFrames;
 		implementation->buffers.resize(
 			implementation->nodes.size() *
 			asset.blockFrames *
 			asset.channels,
 			0.0f);
+		implementation->pendingSeek.store(
+			0, std::memory_order_release);
 		return std::shared_ptr<DspGraphStream>(
 			new DspGraphStream(std::move(implementation)));
 	}
@@ -1064,28 +1716,39 @@ namespace EGE::ReziAudio
 		return implementation_->asset;
 	}
 
-	DspGraphAsset CreateDefaultDspGraph(const std::string& clipPath)
+	DspGraphAsset CreateDefaultDspGraph(
+		const AudioClipReference& clip)
 	{
 		DspGraphAsset graph;
 		graph.name = "ReziAudio DSP Demo";
 		graph.nodes = {
-			{1, DspNodeType::WavePlayer, "Wave Player", clipPath, {},
-			 {{"Loop", 1.0f}}},
+			{1, DspNodeType::WavePlayer, "Wave Player", clip, {},
+			 CreateDspParameterDefaults(DspNodeType::WavePlayer)},
 			{2, DspNodeType::Gain, "Gain", {}, {1},
-			 {{"Gain", 0.8f}}},
+			 CreateDspParameterDefaults(DspNodeType::Gain)},
 			{3, DspNodeType::LowPass, "Low Pass", {}, {2},
-			 {{"Cutoff", 9000.0f}}},
+			 CreateDspParameterDefaults(DspNodeType::LowPass)},
 			{4, DspNodeType::Delay, "Delay", {}, {3},
-			 {{"Time", 0.22f}, {"Feedback", 0.3f},
-			  {"Mix", 0.22f}, {"MaxDelay", 2.0f}}},
+			 CreateDspParameterDefaults(DspNodeType::Delay)},
 			{5, DspNodeType::Reverb, "Reverb", {}, {4},
-			 {{"RoomSize", 0.65f}, {"Damping", 0.35f},
-			  {"Wet", 0.25f}, {"Dry", 0.85f}}},
+			 CreateDspParameterDefaults(DspNodeType::Reverb)},
 			{6, DspNodeType::Pan, "Pan", {}, {5},
-			 {{"Pan", 0.0f}}},
+			 CreateDspParameterDefaults(DspNodeType::Pan)},
 			{7, DspNodeType::Output, "Output", {}, {6}, {}}
 		};
+		for (std::size_t index = 0; index < graph.nodes.size(); ++index)
+		{
+			graph.nodes[index].editorPosition = float2(
+				80.0f + static_cast<float>(index % 4) * 260.0f,
+				100.0f + static_cast<float>(index / 4) * 240.0f);
+		}
 		graph.outputNode = 7;
 		return graph;
+	}
+
+	DspGraphAsset CreateDefaultDspGraph(const std::string& clipPath)
+	{
+		return CreateDefaultDspGraph(
+			AudioClipReference{0, clipPath});
 	}
 }

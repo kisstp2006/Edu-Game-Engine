@@ -119,6 +119,21 @@ int main()
 		audio.GetState(first) ==
 			EGE::ReziAudio::PlaybackState::Playing,
 		"playing state");
+	success &= Check(
+		audio.GetPlaybackLengthSeconds(first) > 0.09f,
+		"playback length query");
+	success &= Check(
+		audio.SeekSeconds(first, 0.05f),
+		"seek in seconds");
+	success &= Check(
+		std::abs(audio.GetPlaybackSeconds(first) - 0.05f) < 0.002f,
+		"playback cursor query");
+	success &= Check(
+		std::abs(audio.GetPlaybackPercentage(first) - 0.5f) < 0.03f,
+		"playback percentage query");
+	success &= Check(
+		audio.FadeTo(first, 0.6f, 0.01f),
+		"sample-accurate volume fade");
 
 	createInfo.settings.volume = 0.35f;
 	createInfo.settings.pitch = 1.25f;
@@ -156,6 +171,9 @@ int main()
 			EGE::ReziAudio::PlaybackState::Paused,
 		"paused state");
 	success &= Check(audio.Play(first), "resume");
+	success &= Check(
+		audio.StopWithFade(first, 0.01f),
+		"scheduled fade-out stop");
 
 	const EGE::ReziAudio::PlaybackHandle stale = first;
 	success &= Check(audio.DestroyVoice(first), "voice destruction");

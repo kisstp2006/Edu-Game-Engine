@@ -37,6 +37,20 @@ namespace EGE::ReziAudio
 		bool Play(PlaybackHandle handle) override;
 		bool Pause(PlaybackHandle handle) override;
 		bool Stop(PlaybackHandle handle) override;
+		bool FadeTo(
+			PlaybackHandle handle,
+			float targetVolume,
+			float durationSeconds) override;
+		bool StopWithFade(
+			PlaybackHandle handle,
+			float durationSeconds) override;
+		bool SeekSeconds(
+			PlaybackHandle handle,
+			float seconds) override;
+		[[nodiscard]] float GetPlaybackSeconds(
+			PlaybackHandle handle) const override;
+		[[nodiscard]] float GetPlaybackLengthSeconds(
+			PlaybackHandle handle) const override;
 		bool SetSettings(
 			PlaybackHandle handle,
 			const VoiceSettings& settings) override;
