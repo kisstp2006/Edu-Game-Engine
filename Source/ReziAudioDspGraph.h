@@ -38,7 +38,8 @@ namespace EGE::ReziAudio
 		RepeatTrigger,
 		DelayedTrigger,
 		TriggerCounter,
-		AudioOffset
+		AudioOffset,
+		EventInput
 	};
 
 	struct DspNodeDescriptor
@@ -53,7 +54,8 @@ namespace EGE::ReziAudio
 	[[nodiscard]] inline std::span<const DspNodeDescriptor>
 	GetDspNodeDescriptors()
 	{
-		static constexpr std::array<DspNodeDescriptor, 23> descriptors = {{
+		static constexpr std::array<DspNodeDescriptor, 24> descriptors = {{
+			{DspNodeType::EventInput, "Event Input", "Events", 0, 0},
 			{DspNodeType::WavePlayer, "Wave Player", "Sources", 0, 0},
 			{DspNodeType::SineOscillator, "Sine Oscillator", "Sources", 0, 0},
 			{DspNodeType::NoiseGenerator, "Noise Generator", "Sources", 0, 0},
@@ -232,6 +234,7 @@ namespace EGE::ReziAudio
 		case DspNodeType::RepeatTrigger: return repeatTrigger;
 		case DspNodeType::DelayedTrigger: return delayedTrigger;
 		case DspNodeType::TriggerCounter: return triggerCounter;
+		case DspNodeType::EventInput: return none;
 		case DspNodeType::AudioClamp: return clamp;
 		case DspNodeType::AudioMapRange: return mapRange;
 		case DspNodeType::AudioOffset: return offset;
@@ -268,6 +271,7 @@ namespace EGE::ReziAudio
 		std::vector<std::uint64_t> inputs;
 		std::map<std::string, float> parameters;
 		float2 editorPosition = float2::zero;
+		std::string eventName;
 	};
 
 	struct DspGraphAsset
@@ -327,6 +331,9 @@ namespace EGE::ReziAudio
 			std::uint64_t nodeId,
 			std::string_view parameter,
 			float value) noexcept;
+		bool TriggerEvent(std::string_view eventName) noexcept;
+		[[nodiscard]] bool HasEvent(
+			std::string_view eventName) const noexcept;
 		[[nodiscard]] DspRealtimeStats GetStats() const noexcept;
 		[[nodiscard]] const DspGraphAsset& GetAsset() const;
 

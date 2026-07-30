@@ -1528,6 +1528,24 @@ namespace EGE
 			return emitter && emitter->Play();
 		}
 
+		bool HasReziAudioEvent(
+			const std::string& eventName,
+			const ScriptComponentReference* reference)
+		{
+			const ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->HasEvent(eventName);
+		}
+
+		bool PostReziAudioEvent(
+			const std::string& eventName,
+			ScriptComponentReference* reference)
+		{
+			ComponentReziAudioEmitter* emitter =
+				ResolveReziAudioEmitter(reference);
+			return emitter && emitter->PostEvent(eventName);
+		}
+
 		bool PlayReziAudioEmitterWithFade(
 			float durationSeconds,
 			ScriptComponentReference* reference)
@@ -3032,6 +3050,16 @@ namespace EGE
 					asFUNCTION(IsReziAudioEmitterFinished),
 					asCALL_CDECL_OBJLAST) >= 0 &&
 				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool HasEvent(const string &in eventName) const",
+					asFUNCTION(HasReziAudioEvent),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
+					"ReziAudioEmitter",
+					"bool PostEvent(const string &in eventName)",
+					asFUNCTION(PostReziAudioEvent),
+					asCALL_CDECL_OBJLAST) >= 0 &&
+				engine.RegisterObjectMethod(
 					"ReziAudioEmitter", "bool Play()",
 					asFUNCTION(PlayReziAudioEmitter),
 					asCALL_CDECL_OBJLAST) >= 0 &&
@@ -3938,6 +3966,10 @@ void ValidateTypedComponentApi(GameObject@ object)
         bool playing = addedReziEmitter.isPlaying;
         bool paused = addedReziEmitter.isPaused;
         bool finished = addedReziEmitter.isFinished;
+        bool hasImpactEvent =
+            addedReziEmitter.HasEvent("Impact");
+        bool eventPosted =
+            addedReziEmitter.PostEvent("Impact");
         bool playAccepted = addedReziEmitter.Play();
         bool fadePlayAccepted =
             addedReziEmitter.PlayWithFade(0.1f);

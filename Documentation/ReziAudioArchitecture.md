@@ -106,7 +106,7 @@ The graph-facing asset model is intentionally separate from existing
 | Asset | Proposed extension | Responsibility |
 |---|---|---|
 | Audio Clip | `.reziclip.json` | Source UUID/path, import settings, stream/preload, channel/sample metadata. |
-| Sound Event | `.rezievent.json` | Public gameplay name, graph reference, defaults, concurrency and cooldown policy. |
+| Sound Event | `.rezievent.json` | Optional future alias for a graph reference plus a registered event name, defaults, concurrency and cooldown policy. |
 | Sound Graph | `.rezigraph.json` | Nodes, typed pins, links, parameters and editor positions. |
 | Mixer | `.rezimixer.json` | User buses, sends, effects, snapshots and exposed controls. |
 | Attenuation | `.reziattenuation.json` | Reusable distance/cone/doppler/air-absorption settings. |
@@ -275,6 +275,14 @@ Live DSP parameters use a bounded 256-entry SPSC queue. The gameplay/editor
 thread resolves node and parameter IDs before enqueueing. The callback only
 consumes fixed-size commands and updates preallocated processor state.
 
+Named events use the same bounded realtime queue. `Event Input` nodes register
+their event name during graph compilation. Calling `PostEvent("Impact")` on a
+`ReziAudioEmitter` enqueues the event without allocation; every matching node
+emits a one-sample trigger pulse that can drive envelopes, counters and other
+trigger inputs. Event names belong to the graph, so gameplay does not need a
+separate event asset. A future event asset can remain a lightweight graph plus
+event-name reference without changing the runtime contract.
+
 ## Current implementation
 
 - backend abstraction and miniaudio implementation;
@@ -293,6 +301,7 @@ consumes fixed-size commands and updates preallocated processor state.
 - typed AngelScript component access and emitter transport/properties;
 - AngelScript float, int, bool, Vector2, Vector3, float-array, integer-array,
   native `AudioClip@` and `array<AudioClip@>` graph parameter access;
+- named graph events through `HasEvent()` and `PostEvent()`;
 - UUID-backed `AudioClipReference` values whose runtime source is resolved
   through the engine resource manager;
 - shared parameter descriptors and widgets used by both graph labs;
@@ -355,8 +364,9 @@ it into its temporary asset catalog; graph and DSP nodes still store an
 
 ## Next implementation phases
 
-1. Register `AudioEvent`, graph, mixer and attenuation as real EGE resources
-   with UUID-based references and import metadata.
+1. Register graph, mixer and attenuation as real EGE resources with UUID-based
+   references and import metadata; add optional AudioEvent aliases only when
+   concurrency/cooldown authoring needs reusable gameplay-facing definitions.
 2. Add a separate lock-free event/completion queue from the audio callback.
 3. Add click-free atomic graph-instance replacement and parameter smoothing.
 4. Add AngelScript playback/event wrappers and graph/event resource handles.

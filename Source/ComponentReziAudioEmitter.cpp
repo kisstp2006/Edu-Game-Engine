@@ -370,6 +370,38 @@ bool ComponentReziAudioEmitter::HasDspGraph() const
 	return dspStream_ != nullptr;
 }
 
+bool ComponentReziAudioEmitter::HasEvent(
+	std::string_view eventName) const
+{
+	return dspStream_ && dspStream_->HasEvent(eventName);
+}
+
+bool ComponentReziAudioEmitter::PostEvent(
+	std::string_view eventName)
+{
+	if (!dspStream_ || !dspStream_->HasEvent(eventName))
+		return false;
+
+	const EGE::ReziAudio::PlaybackState state = GetPlaybackState();
+	if (state == EGE::ReziAudio::PlaybackState::Invalid)
+	{
+		if (!Play())
+			return false;
+	}
+	else if (
+		state == EGE::ReziAudio::PlaybackState::Stopped ||
+		state == EGE::ReziAudio::PlaybackState::Finished)
+	{
+		dspStream_->SeekFrame(0);
+		if (!App || !App->audio ||
+			!App->audio->GetReziAudio().Play(voice_))
+		{
+			return false;
+		}
+	}
+	return dspStream_->TriggerEvent(eventName);
+}
+
 void ComponentReziAudioEmitter::SetRuntimeParameter(
 	std::string_view name,
 	const EGE::ReziAudio::ParameterValue& value)

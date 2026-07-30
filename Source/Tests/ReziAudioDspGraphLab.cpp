@@ -43,6 +43,8 @@ namespace
 	{
 		switch (type)
 		{
+		case DspNodeType::EventInput:
+			return ImVec4(0.95f, 0.28f, 0.36f, 1);
 		case DspNodeType::WavePlayer:
 		case DspNodeType::SineOscillator:
 		case DspNodeType::NoiseGenerator:
@@ -163,10 +165,15 @@ namespace
 			std::optional<blueprint::Pin> output;
 			if (row < inputCount)
 			{
+				const bool triggerInput =
+					node.type == DspNodeType::ADEnvelope ||
+					node.type == DspNodeType::TriggerCounter;
 				input = blueprint::Pin{
 					InputPin(node.id, row),
 					node.type == DspNodeType::Mixer
 						? "Input " + std::to_string(row + 1)
+						: triggerInput
+							? "Trigger"
 						: inputCount == 2
 							? (row == 0 ? "A" : "B")
 							: "Audio",
@@ -176,9 +183,13 @@ namespace
 			}
 			if (node.type != DspNodeType::Output && row == 0)
 			{
+				const bool triggerOutput =
+					node.type == DspNodeType::EventInput ||
+					node.type == DspNodeType::RepeatTrigger ||
+					node.type == DspNodeType::DelayedTrigger;
 				output = blueprint::Pin{
 					OutputPin(node.id),
-					"Audio",
+					triggerOutput ? "Trigger" : "Audio",
 					ImVec4(0.35f, 0.82f, 0.62f, 1.0f),
 					blueprint::PinShape::Circle,
 					HasOutputLink(graph, node.id)};
@@ -194,6 +205,12 @@ namespace
 			builder.Text(
 				filename.c_str(),
 				ImVec4(0.62f, 0.65f, 0.72f, 1.0f));
+		}
+		else if (node.type == DspNodeType::EventInput)
+		{
+			builder.Text(
+				node.eventName.c_str(),
+				ImVec4(1.0f, 0.62f, 0.68f, 1.0f));
 		}
 		builder.End();
 	}
@@ -335,6 +352,8 @@ namespace
 		node.name = NodeName(type);
 		if (type == DspNodeType::WavePlayer)
 			node.clip = defaultClip;
+		if (type == DspNodeType::EventInput)
+			node.eventName = "Play";
 		node.parameters = CreateDspParameterDefaults(type);
 		return node;
 	}
@@ -760,7 +779,8 @@ int main(int argc, char** argv)
 		for (DspNodeAsset& node : runtimeNodes)
 		{
 			if (node.parameters.empty() &&
-				node.type != DspNodeType::WavePlayer)
+				node.type != DspNodeType::WavePlayer &&
+				node.type != DspNodeType::EventInput)
 				continue;
 			ImGui::PushID(static_cast<int>(node.id));
 			if (ImGui::CollapsingHeader(
@@ -784,6 +804,38 @@ int main(int argc, char** argv)
 							authoring->clip = node.clip;
 						dirty = true;
 					}
+				}
+				if (node.type == DspNodeType::EventInput)
+				{
+					std::array<char, 128> eventName{};
+					const std::size_t length = std::min(
+						node.eventName.size(),
+						eventName.size() - 1);
+					std::memcpy(
+						eventName.data(),
+						node.eventName.data(),
+						length);
+					if (ImGui::InputText(
+							"Event Name",
+							eventName.data(),
+							eventName.size()))
+					{
+						node.eventName = eventName.data();
+						const auto authoring = std::find_if(
+							graph.nodes.begin(),
+							graph.nodes.end(),
+							[&node](const DspNodeAsset& candidate)
+							{
+								return candidate.id == node.id;
+							});
+						if (authoring != graph.nodes.end())
+							authoring->eventName = node.eventName;
+						dirty = true;
+					}
+					if (runtime && ImGui::Button("Post Event"))
+						runtime->TriggerEvent(node.eventName);
+					ImGui::SameLine();
+					ImGui::TextDisabled("compile-time name");
 				}
 				for (const DspParameterDescriptor& parameter :
 					GetDspParameterDescriptors(node.type))

@@ -20,6 +20,12 @@ namespace EGE::ReziAudio
 		constexpr std::size_t CommandCapacity = 256;
 		constexpr float Pi = 3.14159265358979323846f;
 
+		enum class RealtimeCommandType : std::uint8_t
+		{
+			Parameter,
+			Event
+		};
+
 		std::uint32_t ParameterHash(std::string_view name)
 		{
 			std::uint32_t hash = 2166136261u;
@@ -139,6 +145,8 @@ namespace EGE::ReziAudio
 			float envelopeValue = 0.0f;
 			std::uint8_t envelopeState = 0;
 			bool envelopeTriggerWasActive = false;
+			std::string eventName;
+			std::uint32_t pendingEventCount = 0;
 			double triggerElapsed = 0.0;
 			bool triggerRunning = false;
 			bool controlTriggerWasActive = false;
@@ -186,6 +194,8 @@ namespace EGE::ReziAudio
 
 		struct ParameterCommand
 		{
+			RealtimeCommandType type =
+				RealtimeCommandType::Parameter;
 			std::uint32_t nodeIndex = 0;
 			std::uint32_t parameter = 0;
 			float value = 0.0f;
@@ -218,6 +228,20 @@ namespace EGE::ReziAudio
 					(read + 1) % CommandCapacity,
 					std::memory_order_release);
 				return true;
+			}
+
+			[[nodiscard]] bool CanPush(
+				std::size_t commandCount) const noexcept
+			{
+				const std::uint32_t write =
+					write_.load(std::memory_order_relaxed);
+				const std::uint32_t read =
+					read_.load(std::memory_order_acquire);
+				const std::size_t used = write >= read
+					? write - read
+					: CommandCapacity - (read - write);
+				return commandCount <=
+					CommandCapacity - used - 1;
 			}
 
 		private:
@@ -274,7 +298,17 @@ namespace EGE::ReziAudio
 			{
 				if (command.nodeIndex < nodes.size())
 				{
-					nodes[command.nodeIndex].SetParameter(
+					RuntimeNode& node = nodes[command.nodeIndex];
+					if (command.type == RealtimeCommandType::Event)
+					{
+						node.pendingEventCount =
+							node.pendingEventCount ==
+								std::numeric_limits<std::uint32_t>::max()
+								? node.pendingEventCount
+								: node.pendingEventCount + 1;
+						continue;
+					}
+					node.SetParameter(
 						command.parameter, command.value);
 					loopChanged |=
 						command.parameter == ParameterHash("Loop") ||
@@ -292,6 +326,7 @@ namespace EGE::ReziAudio
 						node.GetParameter("Loop", 0.0f) >= 0.5f &&
 						node.GetParameter("LoopCount", -1.0f) < 0.0f;
 					const bool infiniteGenerator =
+						node.type == DspNodeType::EventInput ||
 						node.type == DspNodeType::SineOscillator ||
 						node.type == DspNodeType::NoiseGenerator ||
 						(node.type == DspNodeType::RepeatTrigger &&
@@ -348,6 +383,7 @@ namespace EGE::ReziAudio
 						: 0;
 				node.envelopeTriggerWasActive =
 					envelopeStartsTriggered;
+				node.pendingEventCount = 0;
 				node.triggerElapsed = 0.0;
 				node.triggerRunning = false;
 				node.controlTriggerWasActive = false;
@@ -581,6 +617,31 @@ namespace EGE::ReziAudio
 				}
 				node.triggerElapsed += 1.0 / sampleRate;
 			}
+		}
+
+		void ProcessEventInput(
+			RuntimeNode& node,
+			float* output,
+			std::uint32_t frames) noexcept
+		{
+			std::fill(
+				output,
+				output + static_cast<std::size_t>(frames) * channels,
+				0.0f);
+			const std::uint32_t events = std::min(
+				node.pendingEventCount, frames);
+			for (std::uint32_t frame = 0; frame < events; ++frame)
+			{
+				for (std::uint32_t channel = 0;
+					channel < channels;
+					++channel)
+				{
+					output[
+						static_cast<std::size_t>(frame) *
+							channels + channel] = 1.0f;
+				}
+			}
+			node.pendingEventCount -= events;
 		}
 
 		void ProcessDelayedTrigger(
@@ -1155,6 +1216,9 @@ namespace EGE::ReziAudio
 				case DspNodeType::WavePlayer:
 					ProcessWave(node, output, frames);
 					break;
+				case DspNodeType::EventInput:
+					ProcessEventInput(node, output, frames);
+					break;
 				case DspNodeType::SineOscillator:
 					ProcessSine(node, output, frames);
 					break;
@@ -1352,6 +1416,7 @@ namespace EGE::ReziAudio
 			RuntimeNode runtime;
 			runtime.id = source.id;
 			runtime.type = source.type;
+			runtime.eventName = source.eventName;
 			for (const std::uint64_t input : source.inputs)
 				runtime.inputs[runtime.inputCount++] = runtimeIndices[input];
 			std::uint64_t inputLength = 0;
@@ -1374,6 +1439,15 @@ namespace EGE::ReziAudio
 
 			switch (source.type)
 			{
+			case DspNodeType::EventInput:
+				if (source.eventName.empty())
+				{
+					error(
+						source.id,
+						"Event Input requires a non-empty event name.");
+					return {};
+				}
+				break;
 			case DspNodeType::WavePlayer:
 			{
 				if (source.clip.resolvedSource.empty() ||
@@ -1546,6 +1620,7 @@ namespace EGE::ReziAudio
 				node.GetParameter("Loop", 0.0f) >= 0.5f &&
 				node.GetParameter("LoopCount", -1.0f) < 0.0f;
 			const bool infiniteGenerator =
+				node.type == DspNodeType::EventInput ||
 				node.type == DspNodeType::SineOscillator ||
 				node.type == DspNodeType::NoiseGenerator ||
 				(node.type == DspNodeType::RepeatTrigger &&
@@ -1606,8 +1681,8 @@ namespace EGE::ReziAudio
 		if (!output || frameCount == 0)
 			return 0;
 		Impl& impl = *implementation_;
-		impl.ApplyCommands();
 		impl.ApplySeek();
+		impl.ApplyCommands();
 		std::uint64_t written = 0;
 		while (written < frameCount)
 		{
@@ -1652,6 +1727,7 @@ namespace EGE::ReziAudio
 				DspNodeType::WavePlayer)
 			{
 				const ParameterCommand command{
+					RealtimeCommandType::Parameter,
 					index,
 					ParameterHash("Loop"),
 					looping ? 1.0f : 0.0f};
@@ -1687,7 +1763,8 @@ namespace EGE::ReziAudio
 			if (!found)
 				return false;
 			if (!implementation_->commands.Push(
-					{index, parameterId, value}))
+					{RealtimeCommandType::Parameter,
+					 index, parameterId, value}))
 			{
 				implementation_->droppedCommands.fetch_add(
 					1, std::memory_order_relaxed);
@@ -1696,6 +1773,58 @@ namespace EGE::ReziAudio
 			return true;
 		}
 		return false;
+	}
+
+	bool DspGraphStream::TriggerEvent(
+		std::string_view eventName) noexcept
+	{
+		if (eventName.empty())
+			return false;
+		std::size_t matchCount = 0;
+		for (const RuntimeNode& node : implementation_->nodes)
+		{
+			matchCount +=
+				node.type == DspNodeType::EventInput &&
+				node.eventName == eventName;
+		}
+		if (matchCount == 0)
+			return false;
+		if (!implementation_->commands.CanPush(matchCount))
+		{
+			implementation_->droppedCommands.fetch_add(
+				matchCount, std::memory_order_relaxed);
+			return false;
+		}
+
+		for (std::uint32_t index = 0;
+			index < implementation_->nodes.size();
+			++index)
+		{
+			const RuntimeNode& node = implementation_->nodes[index];
+			if (node.type != DspNodeType::EventInput ||
+				node.eventName != eventName)
+			{
+				continue;
+			}
+			implementation_->commands.Push(
+				{RealtimeCommandType::Event, index, 0, 0.0f});
+		}
+		return true;
+	}
+
+	bool DspGraphStream::HasEvent(
+		std::string_view eventName) const noexcept
+	{
+		if (eventName.empty())
+			return false;
+		return std::any_of(
+			implementation_->nodes.begin(),
+			implementation_->nodes.end(),
+			[eventName](const RuntimeNode& node)
+			{
+				return node.type == DspNodeType::EventInput &&
+					node.eventName == eventName;
+			});
 	}
 
 	DspRealtimeStats DspGraphStream::GetStats() const noexcept

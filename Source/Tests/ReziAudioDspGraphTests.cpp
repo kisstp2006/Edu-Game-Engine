@@ -105,7 +105,7 @@ namespace
 	bool TestHazelNodeDescriptors()
 	{
 		const auto descriptors = GetDspNodeDescriptors();
-		if (!Check(descriptors.size() == 23, "all DSP node descriptors"))
+		if (!Check(descriptors.size() == 24, "all DSP node descriptors"))
 			return false;
 		for (const DspNodeDescriptor& descriptor : descriptors)
 		{
@@ -267,6 +267,72 @@ namespace
 		return Check(maximum >= 8.0f, "trigger counter follows repeat events");
 	}
 
+	bool TestNamedEventInput()
+	{
+		DspGraphAsset asset;
+		asset.name = "Named event input";
+		asset.nodes = {
+			MakeNode(1, DspNodeType::EventInput),
+			MakeNode(2, DspNodeType::ADEnvelope, {1}),
+			MakeNode(3, DspNodeType::Output, {2})};
+		asset.nodes[0].eventName = "Impact";
+		asset.nodes[1].parameters["Attack"] = 0.001f;
+		asset.nodes[1].parameters["Decay"] = 0.01f;
+		asset.outputNode = 3;
+
+		std::vector<DspDiagnostic> diagnostics;
+		auto graph = DspGraphStream::Compile(asset, diagnostics);
+		if (!Check(graph != nullptr, "event graph compilation") ||
+			!Check(graph->HasEvent("Impact"), "registered event lookup") ||
+			!Check(!graph->HasEvent("Missing"), "missing event lookup"))
+		{
+			return false;
+		}
+
+		std::vector<float> samples(512 * 2);
+		graph->ReadFrames(samples.data(), 256);
+		float silentPeak = 0.0f;
+		for (std::size_t sample = 0; sample < 256 * 2; ++sample)
+			silentPeak = std::max(silentPeak, std::abs(samples[sample]));
+		if (!Check(
+				silentPeak < 0.00001f,
+				"event graph waits without polling output"))
+		{
+			return false;
+		}
+
+		graph->SeekFrame(0);
+		if (!Check(graph->TriggerEvent("Impact"), "event enqueue") ||
+			!Check(!graph->TriggerEvent("Missing"), "unknown event rejection"))
+		{
+			return false;
+		}
+		std::fill(samples.begin(), samples.end(), 0.0f);
+		AllocationCount.store(0);
+		TrackAllocations.store(true);
+		const std::uint64_t read =
+			graph->ReadFrames(samples.data(), 512);
+		TrackAllocations.store(false);
+		if (!Check(read == 512, "event graph callback read") ||
+			!Check(
+				AllocationCount.load() == 0,
+				"event dispatch callback is allocation-free") ||
+			!Check(
+				IsFiniteAndAudible(samples),
+				"named event triggers the connected envelope"))
+		{
+			return false;
+		}
+
+		DspGraphAsset invalid = asset;
+		invalid.nodes[0].eventName.clear();
+		diagnostics.clear();
+		return Check(
+			!DspGraphStream::Compile(invalid, diagnostics) &&
+				!diagnostics.empty(),
+			"empty event names are rejected");
+	}
+
 	bool TestEveryAudioMathNodeCompiles()
 	{
 		const std::array mathTypes{
@@ -352,6 +418,7 @@ int main()
 	success &= TestHazelNodeDescriptors();
 	success &= TestGeneratorsEnvelopeAndAudioMath();
 	success &= TestDelayedTriggerAndCounter();
+	success &= TestNamedEventInput();
 	success &= TestEveryAudioMathNodeCompiles();
 	std::vector<DspDiagnostic> diagnostics;
 	DspGraphAsset asset = CreateDefaultDspGraph(wave.string());

@@ -56,6 +56,8 @@ public:
 	void ClearDspGraph();
 	[[nodiscard]] bool HasSoundGraph() const;
 	[[nodiscard]] bool HasDspGraph() const;
+	[[nodiscard]] bool HasEvent(std::string_view eventName) const;
+	bool PostEvent(std::string_view eventName);
 	void SetRuntimeParameter(
 		std::string_view name,
 		const EGE::ReziAudio::ParameterValue& value);
